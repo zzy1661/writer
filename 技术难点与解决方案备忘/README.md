@@ -99,3 +99,5 @@ def repl(project: Path = Path.cwd()) -> None:
 - [13-核心Tool设计](./13-核心Tool设计.md)
 - [14-LLM用户交互与REPL中断协议](./14-LLM用户交互与REPL中断协议.md)
 - [15-LangChain前台调度Agent设计](./15-LangChain前台调度Agent设计.md)
+- [16-Agent架构模式与本项目选型](./16-Agent架构模式与本项目选型.md)
+- [17-七种系统编排方式与本项目落地映射](./17-七种系统编排方式与本项目落地映射.md)
