@@ -171,3 +171,93 @@ def run_tool_call() -> dict:
 - 伏笔状态必须通过 `foreshadow_update`。
 - `read_file("../x")` 必须被拒绝。
 - Tool 调用历史能写入 state,用于调试和恢复。
+
+## 跨边界实现要点（落地 Bridge 时的坑）
+
+把上面的 `Tool` 接到 LangGraph `ToolNode` 时,有几个写备忘 13 时没遇到、但落地后必须记录的点:
+
+### 1. Tool 签名必须是命名 keyword,不能用 `**kwargs`
+
+`writer.tools` 已经踩过这个坑:
+
+```python
+# ❌ 失败: LangChain StructuredTool 会把整个 input 当成单字段
+def run(self, runtime: "ToolRuntime", **kwargs: Any) -> ToolResult:
+    path = kwargs.get("path")
+
+# ✅ 正确: 显式命名参数,让 introspect 能识别每个字段
+def run(self, runtime: "ToolRuntime", *, path: str) -> ToolResult:
+    target = runtime.safe_path(path)
+```
+
+原因: `StructuredTool.from_function()` 用 `inspect.signature()` 推导 `args_schema`; 遇到 `**kwargs` 时它认为"这是一个 dict 参数",而不是"展开字段",导致 `tool.invoke({"path": "x"})` 被解析成一个 dict 字段而不是 `{path: "x"}`。
+
+### 2. PEP-563 注解需要 `typing.get_type_hints` 解回真实类型
+
+`from __future__ import annotations` 把所有注解变成字符串。`inspect.signature` 看到的是 `path: "'str'"` 而不是 `path: str`,直接拿去 `pydantic.create_model` 会失败。
+
+```python
+import inspect
+from typing import get_type_hints
+
+sig = inspect.signature(tool.run)
+resolved = get_type_hints(tool.run)  # 把字符串注解解回类型对象
+
+fields = {}
+for name, param in sig.parameters.items():
+    if name in {"self", "runtime"}:
+        continue
+    fields[name] = (resolved.get(name, Any), Field(default=...))
+ArgsModel = create_model(f"{tool.name}_args", **fields)
+```
+
+### 3. `ToolRuntime` 必须按参数注入,不能 module-level 全局
+
+备忘 13 用的 `PROJECT_ROOT = Path.cwd().resolve()` 是简化示例,落地时要换成:
+
+```python
+class ToolRuntime:
+    def __init__(self, project_root: Path, *, shell_enabled: bool = False,
+                 max_file_size: int = 50_000) -> None:
+        self.project_root = project_root.resolve()  # resolve 一次,后续 safe_path 比较用 canonical 形式
+        self.shell_enabled = shell_enabled
+        self.max_file_size = max_file_size
+
+    def safe_path(self, raw: str | Path) -> Path:
+        candidate = (self.project_root / raw).resolve()
+        if self.project_root not in (candidate, *candidate.parents):
+            raise ToolDeniedError(f"路径越界: {candidate}")
+        return candidate
+```
+
+每个 session 构造一个 `ToolRuntime`,Tools 通过 `run(runtime, **kwargs)` 接收。Module-level 全局会切断多 session、多 project 的能力,而且测试时要 monkey-patch 很麻烦。
+
+### 4. `ToolRegistry` 注册名必须唯一,重复注册立即报错
+
+```python
+def register(self, tool: Tool) -> "ToolRegistry":
+    if tool.name in self._tools:
+        raise ValueError(f"工具重复注册: {tool.name!r}")
+    self._tools[tool.name] = tool
+    return self
+```
+
+重复名启动时拒绝,不要等到第一次 `invoke()` 才返回 `ToolNotFoundError`,那样定位成本高。
+
+### 5. Tool 包装为 LangChain `BaseTool` 的标准做法
+
+`writer.tools.langchain_bridge.to_langchain_tools(registry, runtime)` 提供了现成实现。关键点:
+
+- 现场 `inspect.signature + get_type_hints + pydantic.create_model` 构造 `args_schema`(上述 1+2)
+- 每个 `BaseTool` 闭包 capture `runtime`,所以同一个 registry 可以为不同 session 产出多组 base tools
+- `ToolResult.output` 透传给 LangChain;`truncated` / `metadata` 在本层丢弃,由 LangGraph state 单独记录
+
+## 更新后的验收标准
+
+除上面四条外,补充:
+
+- Tool 的 `run()` 必须是 `(self, runtime, *, named: type, ...)` 形态,不能 `**kwargs`
+- 每个 Tool 接受 `ToolRuntime` 作为显式参数,不读 module 全局
+- `ToolRegistry.register()` 在名字重复时抛 `ValueError`
+- `to_langchain_tools(registry, runtime)` 产出的 `BaseTool` 必须能用 `tool.invoke({...})` 直接执行(用 `args_schema` 验证)
+

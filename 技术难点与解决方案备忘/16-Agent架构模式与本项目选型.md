@@ -326,6 +326,89 @@ def build_context_pack(chapter_id: str) -> dict:
 - 把每种范式的特征(思考轨迹、计划、反思)落盘:计划写到 `大纲/`,反思历史写到 `修订/`,便于后续训练或调试。
 - MVP 阶段保留规则版 `decide()` 作为 fallback,避免 LLM 把 `/写` 误识别为说明性问题。
 
+## 已落地的 Engine 层结构（v0.1）
+
+备忘 16 给出的是 4 层概念模型。本节把"前台调度层 + 后台工作流层"具体落到 `writer.engine` 包的代码形态,后续接 LangGraph 时按这个边界对齐。
+
+### 5 文件布局
+
+```
+writer/engine/
+├── __init__.py    # 公共门面: 只 re-export, 不放逻辑
+├── events.py      # Event 数据类层级(frozen=True, 单一基类)
+├── context.py     # EngineContext(frozen) + EngineState(mutable)
+├── deps.py        # EngineDeps Protocol + production_deps()
+├── config.py      # EngineConfig(frozen, "环境冰封")
+└── loop.py        # run_engine() + _engine_loop() AsyncGenerator
+```
+
+每个文件的职责:
+
+| 文件 | 输入 | 输出 | 是否可变 | 谁拥有 |
+|---|---|---|---|---|
+| `events.py` | — | Event 子类层级 | 不可变 (frozen dataclass) | 全局共享 |
+| `context.py` | 用户调用 | `EngineContext` 实例 | 不可变 (frozen) | 当次 turn |
+| `context.py` | engine 内部 | `EngineState` 实例 | 可变 (普通 dataclass) | 当次 turn 循环内 |
+| `deps.py` | DI 边界 | `EngineDeps` 协议 + 默认实现 | 不可变 (Protocol + dataclass) | 长生命周期 / session 级 |
+| `config.py` | ctx + 运行时 | `EngineConfig` 实例 | 不可变 (frozen) | 当次 turn |
+| `loop.py` | ctx + deps + config | AsyncIterator[Event] | — | 当次 turn |
+
+### 三种"状态对象"的切分原则
+
+不把 EngineContext / EngineState / EngineConfig 揉成一坨,是因为它们在生命周期和写入权限上不一样:
+
+- **EngineContext (frozen)**: 当次 turn 的全部输入,函数参数。LLM / LangGraph 任何外部输入都只能写进这个,不能写 loop 内的可变状态。
+- **EngineState (mutable)**: engine 内部跨迭代状态,比如"`retry_count` 计数"、"上一轮 transition"。目前 MVP 还没填字段,留类不填实例,等 continue 站点接入(per 03 + 06)时直接长出来。
+- **EngineConfig (frozen)**: 一次 turn 内不变的运行时配置(session_id、fast_mode 等)。Mirrors Claude Code §八"环境冰封"——消费者在 AsyncGenerator 流式消费事件时,config 不会突变,可放心依赖。
+
+### Engine 是无状态 AsyncGenerator
+
+`run_engine(ctx, deps, *, config)` 返回 `AsyncIterator[Event]`,本身不持有任何会话状态。原因:
+
+1. **流式消费友好**: REPL `async for event` 逐事件渲染,token-level 流式输出可直接接。
+2. **取消成本低**: REPL Ctrl+C 可以中断 async iteration,engine 不持有需要清理的资源。
+3. **session 可任意 restart**: 重连 session 不需要重置 engine 内存,只需重新调用 `run_engine`。
+4. **易测**: 单个 turn = 单次 AsyncGenerator 消费,test 直接 `async for` 就行。
+
+会话级状态(对话历史、checkpoint、session 内存)属于 `EngineSession`(per 17 预留),不在 engine 内部。
+
+### EngineDeps Protocol 的扩展点
+
+`EngineDeps` 协议 MVP 只声明 `dispatcher`,但留好了扩展位置:
+
+```python
+@runtime_checkable
+class EngineDeps(Protocol):
+    dispatcher: WriterCommandAgent     # MVP 注入点
+
+    # 后续按需扩展:
+    # tool_registry: ToolRegistry       # per 13
+    # workflow_starter: WorkflowStarter # per 04
+    # interrupt_handler: InterruptHandler  # per 14
+    # stop_hooks: StopHookRegistry      # Claude Code §十二 12.3
+    def decide(self, user_input: str, project_state: str) -> AgentAction: ...
+```
+
+`production_deps()` 默认用规则版 dispatcher 实例化 `_DefaultEngineDeps`。三处扩展点是 LangGraph 接 / Tool 接 / 中断 resume 接的入口,等相应轮次时再加进来,现在不预先堆。
+
+### 与 Layer 表的对应
+
+回头看 4 层模型,Engine 实际上跨越前台 + 后台两层:
+
+- **前台调度层** → `engine.loop` 调 `deps.dispatcher.decide()`,发 `ActionEvent` 后再分派
+- **后台工作流层** → engine 内 `start_workflow` 分支现在占位 `Done(reason="workflow_pending")`,等 LangGraph 落地时把这个分支换成 `WorkflowStarter.start(workflow, ctx)`
+- **业务工具层** → 同样的占位分支 `call_tool`,等 `engine.deps.tool_registry` 注入后换成真实调用
+- **记忆层** → 现在还不在 engine, 由 `EngineSession`(per 17)管 checkpoint
+
+## 更新后的验收标准
+
+在原本六条之外,补充:
+
+- Engine 包严格 5 文件布局,新增能力(workflow / tool / interrupt)只通过 `EngineDeps` 扩展,不直接改 `loop.py`
+- `EngineContext / EngineConfig` 全程 frozen,`EngineState` 是唯一可变对象
+- `run_engine` 是 `AsyncIterator[Event]`,不持有会话状态
+- `EngineDeps` 必须 `@runtime_checkable`,便于测试时 mock
+
 ## 验收标准
 
 - 前台 Agent 输出一律是 `AgentAction`,不允许自由文本。

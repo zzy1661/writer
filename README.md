@@ -4,12 +4,17 @@
 
 ## 快速开始
 
+环境要求：[uv](https://docs.astral.sh/uv/)（自带 Python 3.12 管理，无需手动安装 Python）。
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+# 同步依赖（自动创建 .venv 并安装项目本体 + 所有 extras）
+uv sync --all-extras
+
+# 复制环境变量模板
 cp .env.example .env
-writer --help
+
+# 运行 CLI（uv run 会自动激活 .venv）
+uv run writer --help
 ```
 
 ## 当前能力

@@ -1,0 +1,52 @@
+"""Tool layer: registry, runtime, built-in tools, and LangChain bridge.
+
+Public entry points:
+
+* ``ToolRuntime`` / ``ToolRegistry`` / ``Tool`` / ``ToolResult`` — core
+  data types consumed by the engine and (later) LangGraph.
+* Built-in tool classes (``SafeReadFile`` etc.) — exposed for direct
+  construction and testing.
+* ``built_tool_registry()`` — registers every built-in tool; this is the
+  default wiring used by tests and (eventually) the engine session.
+* ``to_langchain_tools`` — adapter that exposes the same tools to the
+  LangGraph ``ToolNode``.
+"""
+
+from writer.tools import builtin
+from writer.tools.builtin import (
+    ChapterLocate,
+    ForeshadowQuery,
+    SafeListDir,
+    SafeReadFile,
+    Wordcount,
+    built_tool_registry,
+)
+from writer.tools.errors import (
+    ToolDeniedError,
+    ToolError,
+    ToolNotFoundError,
+    ToolOutputTooLargeError,
+)
+from writer.tools.langchain_bridge import to_langchain_tools
+from writer.tools.protocol import Tool, ToolResult
+from writer.tools.registry import ToolRegistry
+from writer.tools.runtime import ToolRuntime
+
+__all__ = [
+    "ChapterLocate",
+    "ForeshadowQuery",
+    "SafeListDir",
+    "SafeReadFile",
+    "Tool",
+    "ToolDeniedError",
+    "ToolError",
+    "ToolNotFoundError",
+    "ToolOutputTooLargeError",
+    "ToolRegistry",
+    "ToolResult",
+    "ToolRuntime",
+    "Wordcount",
+    "builtin",
+    "built_tool_registry",
+    "to_langchain_tools",
+]
