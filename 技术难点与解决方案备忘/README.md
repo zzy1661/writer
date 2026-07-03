@@ -17,7 +17,7 @@
 
 ```python
 def handle_user_input(project_root, user_input: str) -> None:
-    action = command_agent.decide(user_input, detect_state(project_root))
+    action = intent_router.route(user_input, detect_state(project_root))
 
     validate_command(project_root, action.command)
 
@@ -69,7 +69,7 @@ def repl(project: Path = Path.cwd()) -> None:
         if user_input in {"/退出", "/quit", "/q"}:
             break
 
-        action = command_agent.decide(user_input, detect_state(project))
+        action = intent_router.route(user_input, detect_state(project))
         if action.action_type == "start_workflow":
             result = writer_graph.invoke(
                 {

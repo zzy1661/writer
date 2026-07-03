@@ -1,3 +1,18 @@
+"""Story Consultant role — the screenwriting specialist.
+
+This is one *role* in the agent system (per 备忘 04 / 16 / 17), alongside
+others that will land later (``proofreader``, ``historian``, ``reviewer``).
+A role exposes a small capability surface — currently
+:meth:`StoryConsultant.draft_outline` — that the engine, CLI, and workflow
+stubs call explicitly. Roles do not invoke each other directly; cross-role
+composition happens at the workflow graph layer.
+
+The MVP implementation is deterministic and intentionally network-free so
+the CLI can be exercised end-to-end without an LLM. The same facade will
+back the future LangChain / LangGraph-backed implementation without
+changing CLI commands.
+"""
+
 from dataclasses import dataclass
 
 from writer.config import Settings
@@ -12,13 +27,8 @@ class OutlineResult:
     chapters: list[str]
 
 
-class NovelAgent:
-    """High-level facade for novel writing capabilities.
-
-    The initial implementation is intentionally deterministic so the CLI can be
-    tested without network access. LLM and LangGraph workflows can later live
-    behind this facade without changing CLI commands.
-    """
+class StoryConsultant:
+    """Screenwriting consultant — drafts four-act outlines from a premise."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -43,3 +53,6 @@ class NovelAgent:
             return "未命名长篇小说"
         compact = idea.replace("\n", " ").strip()
         return f"{compact[:18]}..."
+
+
+__all__ = ["OutlineResult", "StoryConsultant"]

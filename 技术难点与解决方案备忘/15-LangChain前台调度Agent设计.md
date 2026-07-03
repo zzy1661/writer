@@ -14,7 +14,7 @@
 
 ## 解决方案
 
-提供 `WriterCommandAgent` 作为前台调度 Agent。它只负责把用户输入转成结构化 `AgentAction`:
+提供 `IntentRouter` 作为前台路由层。它只负责把用户输入转成结构化 `AgentAction`,协议由 `writer.routing.IntentRouter` 给出,当前 MVP 实现是 `RuleBasedIntentRouter`(无网络),未来由 `LlmIntentRouter`(LangChain structured output)接在同协议后面:
 
 - `run_command`:执行明确命令。
 - `call_tool`:调用轻量工具。
@@ -27,7 +27,7 @@
 ## 最小化代码
 
 ```python
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -47,8 +47,13 @@ class AgentAction(BaseModel):
     user_prompt: str | None = None
 
 
-class WriterCommandAgent:
-    def decide(self, user_input: str, project_state: str) -> AgentAction:
+@runtime_checkable
+class IntentRouter(Protocol):
+    def route(self, user_input: str, project_state: str) -> AgentAction: ...
+
+
+class RuleBasedIntentRouter:
+    def route(self, user_input: str, project_state: str) -> AgentAction:
         text = user_input.strip()
 
         if text.startswith("/写"):
@@ -85,7 +90,7 @@ class WriterCommandAgent:
 
 ## 核心依赖版 LangChain Agent 代码
 
-第一阶段可以用规则版 `decide()` 保证稳定。第二阶段再接 LangChain 的结构化输出:
+第一阶段可以用规则版 `route()`(`RuleBasedIntentRouter`)保证稳定。第二阶段再接 LangChain 的结构化输出,作为 `LlmIntentRouter(IntentRouter)` 实现 `route()`:
 
 ```python
 from langchain_core.prompts import ChatPromptTemplate
@@ -120,7 +125,8 @@ COMMAND_AGENT_PROMPT = ChatPromptTemplate.from_messages(
 )
 
 
-def build_command_agent() -> object:
+def build_intent_router() -> object:
+    """Factory for the future ``LlmIntentRouter`` (LangChain structured output)."""
     llm = ChatOpenAI(
         model="deepseek-v3",
         temperature=0,
@@ -131,8 +137,9 @@ def build_command_agent() -> object:
     return COMMAND_AGENT_PROMPT | structured_llm
 
 
-def decide_with_langchain(user_input: str, project_state: str) -> AgentAction:
-    chain = build_command_agent()
+def route_with_langchain(user_input: str, project_state: str) -> AgentAction:
+    """Future-stage helper: thin wrapper over the LangChain structured-output chain."""
+    chain = build_intent_router()
     return chain.invoke(
         {
             "user_input": user_input,
@@ -154,7 +161,7 @@ Prompt 要强调边界:
 ```text
 用户输入
   ↓
-WriterCommandAgent 输出 AgentAction
+IntentRouter.route() 输出 AgentAction
   ↓
 会话控制层校验项目状态
   ↓
