@@ -56,7 +56,7 @@ def _build_args_schema(writer_tool: "Tool") -> type[BaseModel] | None:
 
     if not fields:
         return None
-    return create_model(f"{writer_tool.name}_args", **fields)  # type: ignore[return-value]
+    return create_model(f"{writer_tool.name}_args", **fields)
 
 
 def to_langchain_tools(

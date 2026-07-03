@@ -161,7 +161,7 @@ def build_prompt_session(
     tests). Passing ``None`` (the default) uses the user-level history file.
     """
     if history_file is NO_HISTORY:
-        history: FileHistory[str] | None = None
+        history: FileHistory | None = None
     else:
         history_path = (
             history_file if isinstance(history_file, Path) else HISTORY_FILE

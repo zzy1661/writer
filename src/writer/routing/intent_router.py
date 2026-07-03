@@ -21,7 +21,7 @@ it from :mod:`writer.routing`.
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -51,7 +51,7 @@ class AgentAction(BaseModel):
     role: Role | None = None
     workflow: str | None = None
     tool_name: str | None = None
-    arguments: dict = Field(default_factory=dict)
+    arguments: dict[str, Any] = Field(default_factory=dict)
     answer: str | None = None
     user_prompt: str | None = None
 

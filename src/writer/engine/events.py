@@ -8,7 +8,7 @@ freely ``match`` on them without defensive copies.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from writer.routing import AgentAction
@@ -48,7 +48,7 @@ class ToolCall(Event):
     """A tool invocation request, ready for execution."""
 
     name: str
-    arguments: dict
+    arguments: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ class Done(Event):
     """The engine finished the current turn for the given reason."""
 
     reason: DoneReason
-    payload: dict | None = None
+    payload: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

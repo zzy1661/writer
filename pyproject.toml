@@ -61,9 +61,8 @@ select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM"]
 ignore = ["E501"]
 
 [tool.mypy]
-python_version = "3.12"
-strict = true
-src = ["src/writer"]
+files = ["src/writer"]
+mypy_path = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
