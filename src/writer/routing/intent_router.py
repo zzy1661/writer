@@ -74,6 +74,11 @@ class IntentRouter(Protocol):
 class RuleBasedIntentRouter:
     """Network-free rule dispatcher (MVP fallback)."""
 
+    # Framework-level command keywords handled by REPL itself, not by the
+    # router. Listed here so :meth:`looks_like_command` can short-circuit
+    # them before any LLM call.
+    _FRAMEWORK_KEYWORDS: frozenset[str] = frozenset({"init", "状态", "退出", "帮助"})
+
     def route(self, user_input: str, project_state: str) -> AgentAction:
         # ``project_state`` is intentionally unused here; the parameter
         # exists so the Protocol stays stable when we add
@@ -120,6 +125,24 @@ class RuleBasedIntentRouter:
                 f"你刚才说的是：{text}"
             ),
         )
+
+    @classmethod
+    def looks_like_command(cls, text: str) -> bool:
+        """Return True iff ``text`` should be handled without consulting an LLM.
+
+        Used by :class:`writer.routing.CompositeRouter` to decide whether
+        the LLM fallback is necessary. Conservative on purpose: false
+        positives cost one LLM call, false negatives break the rule-first
+        contract.
+        """
+
+        stripped = text.strip()
+        if not stripped:
+            return False
+        if stripped.startswith("/"):
+            return True
+        # Bare framework keyword (e.g. "退出", "状态")
+        return stripped in cls._FRAMEWORK_KEYWORDS
 
 
 __all__ = [

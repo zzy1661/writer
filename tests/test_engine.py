@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterator
-
-import pytest
+from collections.abc import AsyncIterator
+from pathlib import Path
 
 from writer.engine import (
     ActionEvent,
@@ -20,7 +19,6 @@ from writer.routing import (
     IntentRouter,
     RuleBasedIntentRouter,
 )
-
 
 # ---------------------------------------------------------------------------
 # Router classification
@@ -125,8 +123,12 @@ def test_engine_yields_done_for_tool() -> None:
 
     events = _consume(run_engine(_ctx("查一下 F003"), deps))
 
+    from writer.engine import ToolCall, ToolResult
+
     assert any(isinstance(e, ActionEvent) and e.action.tool_name == "foreshadow_query" for e in events)
-    assert any(isinstance(e, Done) and e.reason == "tool_pending" for e in events)
+    assert any(isinstance(e, ToolCall) and e.name == "foreshadow_query" for e in events)
+    assert any(isinstance(e, ToolResult) and e.name == "foreshadow_query" for e in events)
+    assert any(isinstance(e, Done) and e.reason == "tool_completed" for e in events)
 
 
 def test_engine_yields_done_for_command() -> None:
@@ -142,7 +144,12 @@ def test_production_deps_has_router() -> None:
     deps = production_deps()
 
     assert isinstance(deps, EngineDeps)
-    assert isinstance(deps.router, RuleBasedIntentRouter)
+    # When the local .env has no API key, router is the bare rule router.
+    # When it does (e.g. the user's .env in this repo), router is wrapped
+    # in a CompositeRouter. Both satisfy IntentRouter.
+    from writer.routing import IntentRouter
+
+    assert isinstance(deps.router, IntentRouter)
     from writer.roles import StoryConsultant
 
     assert isinstance(deps.story_consultant, StoryConsultant)
@@ -195,15 +202,19 @@ def test_engine_streams_workflow_stub_chunks() -> None:
 
 def test_engine_workflow_unknown_name_yields_explanatory_chunk() -> None:
     """Unknown workflow names should produce a visible explanatory chunk, not silently fail."""
-    from dataclasses import replace
-    from writer.engine.deps import _DefaultEngineDeps
-    from writer.routing import RuleBasedIntentRouter
-    from writer.roles import StoryConsultant
+    from pathlib import Path
+
     from writer.config import get_settings
+    from writer.engine.deps import _DefaultEngineDeps
+    from writer.roles import StoryConsultant
+    from writer.routing import RuleBasedIntentRouter
+    from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
         router=RuleBasedIntentRouter(),
         story_consultant=StoryConsultant(get_settings()),
+        tool_registry=built_tool_registry(),
+        tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         _workflows={},
     )
 
@@ -223,3 +234,153 @@ def test_production_deps_includes_all_registered_workflows() -> None:
     for name in WORKFLOWS:
         chunks = list(deps.run_workflow(name, _ctx("ignored")))
         assert chunks, f"workflow {name!r} produced no chunks"
+
+
+# ---------------------------------------------------------------------------
+# Phase 3: Engine Loop branch wiring (add-llm-and-complete-engine-loop)
+# ---------------------------------------------------------------------------
+
+
+class _FailingRouter:
+    """Stand-in router that raises on every call."""
+
+    def route(self, user_input: str, project_state: str):  # type: ignore[no-untyped-def]
+        raise RuntimeError("router kaboom")
+
+
+class _AskUserRouter:
+    """Stand-in router that always returns an ask_user action."""
+
+    def __init__(self, prompt: str = "你想修改哪一段？") -> None:
+        self._prompt = prompt
+
+    def route(self, user_input: str, project_state: str) -> AgentAction:
+        return AgentAction(action_type="ask_user", user_prompt=self._prompt)
+
+
+def test_engine_emits_error_event_on_router_failure() -> None:
+    from writer.config import get_settings
+    from writer.engine import ErrorEvent
+    from writer.engine.deps import _DefaultEngineDeps
+    from writer.roles import StoryConsultant
+    from writer.tools import ToolRuntime, built_tool_registry
+
+    deps = _DefaultEngineDeps(
+        router=_FailingRouter(),  # type: ignore[arg-type]
+        story_consultant=StoryConsultant(get_settings()),
+        tool_registry=built_tool_registry(),
+        tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+    )
+
+    events = _consume(run_engine(_ctx("anything"), deps))
+
+    assert any(isinstance(e, ErrorEvent) and "kaboom" in e.message for e in events)
+    assert any(isinstance(e, Done) and e.reason == "aborted" for e in events)
+
+
+def test_engine_emits_interrupt_for_ask_user_action() -> None:
+    from writer.config import get_settings
+    from writer.engine import Interrupt
+    from writer.engine.deps import _DefaultEngineDeps
+    from writer.roles import StoryConsultant
+    from writer.tools import ToolRuntime, built_tool_registry
+
+    deps = _DefaultEngineDeps(
+        router=_AskUserRouter("你想修改哪一段？"),  # type: ignore[arg-type]
+        story_consultant=StoryConsultant(get_settings()),
+        tool_registry=built_tool_registry(),
+        tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+    )
+
+    events = _consume(run_engine(_ctx("模糊输入"), deps))
+
+    interrupts = [e for e in events if isinstance(e, Interrupt)]
+    assert interrupts, "expected an Interrupt event"
+    assert interrupts[0].type == "text"
+    assert "哪一段" in interrupts[0].prompt
+    assert any(isinstance(e, Done) and e.reason == "ask_user" for e in events)
+
+
+def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
+    from writer.config import get_settings
+    from writer.engine import TextChunk
+    from writer.engine.config import EngineConfig
+    from writer.engine.deps import _DefaultEngineDeps
+    from writer.roles import StoryConsultant
+    from writer.tools import ToolRuntime, built_tool_registry
+
+    deps = _DefaultEngineDeps(
+        router=RuleBasedIntentRouter(),
+        story_consultant=StoryConsultant(get_settings()),
+        tool_registry=built_tool_registry(),
+        tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+    )
+
+    cfg = EngineConfig(session_id="x", fast_mode=True)
+    events = _consume(run_engine(_ctx("帮我润色下这段"), deps, config=cfg))
+
+    # No diagnostic TextChunks starting with [engine]
+    engine_logs = [
+        e
+        for e in events
+        if isinstance(e, TextChunk) and e.text.startswith("[engine]")
+    ]
+    assert engine_logs == []
+
+    # Business events still present
+    assert any(isinstance(e, ActionEvent) for e in events)
+    assert any(isinstance(e, Done) and e.reason == "answered" for e in events)
+
+
+def test_engine_calls_tool_registry_on_call_tool_action() -> None:
+    """Real call_tool path: registry invoked, ToolCall + ToolResult + tool_completed emitted."""
+    from writer.config import get_settings
+    from writer.engine import ToolCall, ToolResult
+    from writer.engine.deps import _DefaultEngineDeps
+    from writer.roles import StoryConsultant
+    from writer.tools import ToolRuntime, built_tool_registry
+
+    deps = _DefaultEngineDeps(
+        router=RuleBasedIntentRouter(),
+        story_consultant=StoryConsultant(get_settings()),
+        tool_registry=built_tool_registry(),
+        tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+    )
+
+    events = _consume(run_engine(_ctx("查一下 F003"), deps))
+
+    assert any(isinstance(e, ToolCall) and e.name == "foreshadow_query" for e in events)
+    tool_results = [e for e in events if isinstance(e, ToolResult)]
+    assert tool_results, "expected ToolResult event"
+    assert tool_results[0].name == "foreshadow_query"
+    assert tool_results[0].output  # non-empty result
+    assert any(isinstance(e, Done) and e.reason == "tool_completed" for e in events)
+
+
+def test_engine_handles_tool_not_found_error() -> None:
+    """A tool name that the registry doesn't know must yield ErrorEvent + Done(aborted)."""
+    from writer.config import get_settings
+    from writer.engine import ErrorEvent
+    from writer.engine.deps import _DefaultEngineDeps
+    from writer.roles import StoryConsultant
+    from writer.routing import AgentAction
+    from writer.tools import ToolRuntime, built_tool_registry
+
+    class _CallUnknownTool:
+        def route(self, user_input: str, project_state: str) -> AgentAction:
+            return AgentAction(
+                action_type="call_tool",
+                tool_name="definitely_not_a_tool",
+            )
+
+    deps = _DefaultEngineDeps(
+        router=_CallUnknownTool(),  # type: ignore[arg-type]
+        story_consultant=StoryConsultant(get_settings()),
+        tool_registry=built_tool_registry(),
+        tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+    )
+
+    events = _consume(run_engine(_ctx("anything"), deps))
+
+    assert any(isinstance(e, ErrorEvent) and "definitely_not_a_tool" in e.message for e in events)
+    assert any(isinstance(e, Done) and e.reason == "aborted" for e in events)

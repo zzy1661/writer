@@ -5,6 +5,7 @@ shallow re-exports it so callers can simply ``from writer.routing import
 IntentRouter``.
 """
 
+from writer.routing.composite_router import CompositeRouter
 from writer.routing.intent_router import (
     ActionType,
     AgentAction,
@@ -12,11 +13,14 @@ from writer.routing.intent_router import (
     Role,
     RuleBasedIntentRouter,
 )
+from writer.routing.llm_router import LlmIntentRouter
 
 __all__ = [
     "ActionType",
     "AgentAction",
+    "CompositeRouter",
     "IntentRouter",
+    "LlmIntentRouter",
     "Role",
     "RuleBasedIntentRouter",
 ]

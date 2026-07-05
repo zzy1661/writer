@@ -24,7 +24,7 @@ class ForeshadowQuery:
         "未来由 RAG 索引 (per 备忘 10 + 12) 提供真实结果。"
     )
 
-    def run(self, runtime: "ToolRuntime", *, query: str) -> ToolResult:
+    def run(self, runtime: ToolRuntime, *, query: str) -> ToolResult:
         # Deterministic mock — keep the same shape the real pipeline
         # will produce, so downstream parsers stay stable.
         return ToolResult(

@@ -26,7 +26,7 @@ class SafeReadFile:
     name = "safe_read_file"
     description = "读取项目目录内的 UTF-8 文本文件;路径越界会被拒绝,超长内容自动截断。"
 
-    def run(self, runtime: "ToolRuntime", *, path: str) -> ToolResult:
+    def run(self, runtime: ToolRuntime, *, path: str) -> ToolResult:
         target = runtime.safe_path(path)
         content = target.read_text(encoding="utf-8")
         budget = runtime.max_file_size
@@ -53,7 +53,7 @@ class SafeListDir:
     name = "safe_list_dir"
     description = "列出项目目录内的文件和子目录;路径越界会被拒绝;隐藏文件被忽略。"
 
-    def run(self, runtime: "ToolRuntime", *, path: str = ".") -> ToolResult:
+    def run(self, runtime: ToolRuntime, *, path: str = ".") -> ToolResult:
         target = runtime.safe_path(path)
         if not target.is_dir():
             raise NotADirectoryError(f"不是目录: {target}")

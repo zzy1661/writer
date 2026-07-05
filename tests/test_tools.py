@@ -26,7 +26,6 @@ from writer.tools import (
 )
 from writer.tools.runtime import ToolRuntime
 
-
 # ---------------------------------------------------------------------------
 # Runtime / path safety (per 备忘 07)
 # ---------------------------------------------------------------------------

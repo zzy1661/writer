@@ -7,7 +7,7 @@ raises ``ToolNotFoundError`` on lookup miss.
 
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 from writer.tools.errors import ToolNotFoundError
 from writer.tools.protocol import Tool, ToolResult
@@ -27,7 +27,7 @@ class ToolRegistry:
         for tool in tools:
             self.register(tool)
 
-    def register(self, tool: Tool) -> "ToolRegistry":
+    def register(self, tool: Tool) -> ToolRegistry:
         """Add ``tool`` under its declared name. Chainable."""
         if tool.name in self._tools:
             msg = f"工具重复注册: {tool.name!r}"

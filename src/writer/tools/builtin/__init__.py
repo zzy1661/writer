@@ -13,9 +13,9 @@ from writer.tools.builtin.analysis_tools import Wordcount
 from writer.tools.builtin.file_tools import SafeListDir, SafeReadFile
 from writer.tools.builtin.foreshadow_tools import ForeshadowQuery
 from writer.tools.builtin.locate_tools import ChapterLocate
+from writer.tools.protocol import Tool
 
 if TYPE_CHECKING:
-    from writer.tools.protocol import Tool
     from writer.tools.registry import ToolRegistry
 
 __all__ = [

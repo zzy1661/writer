@@ -22,7 +22,7 @@ class Wordcount:
     name = "wordcount"
     description = "统计文本的粗略字数(剔除空白);适合中文小说草稿。"
 
-    def run(self, runtime: "ToolRuntime", *, text: str) -> ToolResult:
+    def run(self, runtime: ToolRuntime, *, text: str) -> ToolResult:
         stripped = text.replace("\n", "").replace(" ", "").replace("\t", "")
         chars = len(stripped)
         return ToolResult(

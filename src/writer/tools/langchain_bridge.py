@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from writer.tools.registry import ToolRegistry
 
 
-def _build_args_schema(writer_tool: "Tool") -> type[BaseModel] | None:
+def _build_args_schema(writer_tool: Tool) -> type[BaseModel] | None:
     """Derive a Pydantic v2 model from a writer tool's ``run`` signature.
 
     Skips ``self`` and ``runtime`` (the latter is captured in the closure
@@ -60,7 +60,7 @@ def _build_args_schema(writer_tool: "Tool") -> type[BaseModel] | None:
 
 
 def to_langchain_tools(
-    registry: "ToolRegistry", runtime: ToolRuntime
+    registry: ToolRegistry, runtime: ToolRuntime
 ) -> list[BaseTool]:
     """Wrap every registered writer tool as a LangChain ``BaseTool``.
 
@@ -70,7 +70,7 @@ def to_langchain_tools(
     recorded by LangGraph state separately (per 04).
     """
 
-    def _make(writer_tool: "Tool") -> BaseTool:
+    def _make(writer_tool: Tool) -> BaseTool:
         def _invoke(**kwargs: object) -> str:
             return writer_tool.run(runtime, **kwargs).output
 

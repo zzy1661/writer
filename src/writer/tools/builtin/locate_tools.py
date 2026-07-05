@@ -26,7 +26,7 @@ class ChapterLocate:
     )
 
     def run(
-        self, runtime: "ToolRuntime", *, chapter: str | None = None
+        self, runtime: ToolRuntime, *, chapter: str | None = None
     ) -> ToolResult:
         if chapter is None:
             chapter = "1.1"

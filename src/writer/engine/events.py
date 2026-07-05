@@ -21,6 +21,7 @@ DoneReason = Literal[
     "workflow_pending",
     "ask_user",
     "aborted",
+    "tool_completed",
 ]
 
 
@@ -40,7 +41,7 @@ class TextChunk(Event):
 class ActionEvent(Event):
     """The dispatcher produced an ``AgentAction`` for the current input."""
 
-    action: "AgentAction"
+    action: AgentAction
 
 
 @dataclass(frozen=True)

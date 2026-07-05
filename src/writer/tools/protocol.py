@@ -7,8 +7,9 @@ That keeps ``ToolRegistry`` cheap to construct and trivially thread-safe.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from writer.tools.runtime import ToolRuntime
@@ -40,7 +41,7 @@ class Tool(Protocol):
     name: str
     description: str
 
-    def run(self, runtime: "ToolRuntime", **kwargs: Any) -> ToolResult:
+    def run(self, runtime: ToolRuntime, **kwargs: Any) -> ToolResult:
         ...
 
 
