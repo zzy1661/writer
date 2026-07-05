@@ -24,8 +24,10 @@ from writer.tools.builtin import (
 from writer.tools.errors import (
     ToolDeniedError,
     ToolError,
+    ToolNotADirectoryError,
     ToolNotFoundError,
     ToolOutputTooLargeError,
+    WorkflowNotFoundError,
 )
 from writer.tools.langchain_bridge import to_langchain_tools
 from writer.tools.protocol import Tool, ToolResult
@@ -40,12 +42,14 @@ __all__ = [
     "Tool",
     "ToolDeniedError",
     "ToolError",
+    "ToolNotADirectoryError",
     "ToolNotFoundError",
     "ToolOutputTooLargeError",
     "ToolRegistry",
     "ToolResult",
     "ToolRuntime",
     "Wordcount",
+    "WorkflowNotFoundError",
     "builtin",
     "built_tool_registry",
     "to_langchain_tools",

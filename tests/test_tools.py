@@ -18,6 +18,7 @@ from writer.tools import (
     SafeListDir,
     SafeReadFile,
     ToolDeniedError,
+    ToolNotADirectoryError,
     ToolNotFoundError,
     ToolRegistry,
     Wordcount,
@@ -94,6 +95,25 @@ def test_safe_list_dir_skips_hidden(tmp_path: Path) -> None:
     assert "readme.md" in result.output
     assert ".git" not in result.output
     assert result.metadata["count"] == 2
+
+
+def test_safe_list_dir_raises_tool_not_a_directory_on_file_path(tmp_path: Path) -> None:
+    """When the target path resolves to a file, SafeListDir must raise ToolNotADirectoryError.
+
+    Per arch-optimizer N2 (2026-07-05): before M7, ``SafeListDir`` raised
+    stdlib ``NotADirectoryError``, which the engine's ``except ToolError``
+    branch in ``_engine_loop`` could not catch — the error was
+    misclassified as "engine boundary" rather than "tool error". This
+    test pins the new contract: builtin tools raise the project's
+    ``ToolError`` hierarchy so the engine can route them through a
+    single funnel.
+    """
+    runtime = ToolRuntime(project_root=tmp_path)
+    target = tmp_path / "not_a_dir.md"
+    target.write_text("hi", encoding="utf-8")
+
+    with pytest.raises(ToolNotADirectoryError):
+        SafeListDir().run(runtime, path="not_a_dir.md")
 
 
 # ---------------------------------------------------------------------------

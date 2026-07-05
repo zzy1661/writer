@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from writer.tools.errors import ToolNotADirectoryError
 from writer.tools.protocol import ToolResult
 
 if TYPE_CHECKING:
@@ -56,7 +57,7 @@ class SafeListDir:
     def run(self, runtime: ToolRuntime, *, path: str = ".") -> ToolResult:
         target = runtime.safe_path(path)
         if not target.is_dir():
-            raise NotADirectoryError(f"不是目录: {target}")
+            raise ToolNotADirectoryError(f"不是目录: {target}")
 
         lines: list[str] = []
         for entry in sorted(target.iterdir()):
