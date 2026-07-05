@@ -1,17 +1,26 @@
+import asyncio
 from pathlib import Path
+from unittest.mock import MagicMock
 
+import pytest
+from rich.console import Console
 from typer.testing import CliRunner
 
+from writer.cli import main as cli_main
 from writer.cli.main import (
     EXIT_COMMANDS,
     HELP_COMMANDS,
     NO_HISTORY,
     REPL_COMMANDS,
     REPL_PROMPT,
+    _read_line,
+    _run_engine,
     app,
     build_prompt_session,
     handle_repl_input,
 )
+from writer.engine.events import Done, ErrorEvent, Interrupt, ToolCall, ToolResult
+from writer.session import EngineSession
 
 runner = CliRunner()
 
@@ -152,3 +161,160 @@ def test_repl_pending_interrupt_visible_in_next_turn() -> None:
     session.record_turn("修第2段", "answered")  # type: ignore[arg-type]
     session.clear_pending_interrupt()
     assert session.pending_interrupt is None
+
+
+# ---------------------------------------------------------------------------
+# doctor / new_project subcommands + _run_engine event rendering + REPL EOF
+# ---------------------------------------------------------------------------
+
+
+def test_doctor_command_renders_settings_table() -> None:
+    """``writer doctor`` prints a table with model, base_url, api-key, temperature."""
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "writer-agent doctor" in result.stdout
+    assert "模型" in result.stdout
+    assert "Base URL" in result.stdout
+    assert "API Key" in result.stdout
+    assert "Temperature" in result.stdout
+    # The default temperature is 0.7 (Settings default).
+    assert "0.7" in result.stdout
+    # API Key column is either 已配置 or 未配置 depending on env.
+    assert ("已配置" in result.stdout) or ("未配置" in result.stdout)
+
+
+def test_new_project_creates_workspace_and_lists_files(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["new", "我的项目", "--dir", str(tmp_path)])
+
+    assert result.exit_code == 0
+    assert "已创建小说项目" in result.stdout
+    assert "README.md" in result.stdout
+    assert "manuscript" in result.stdout or "outline" in result.stdout
+
+
+def test_new_project_respects_force_flag(tmp_path: Path) -> None:
+    # Pre-create the workspace
+    pre = runner.invoke(app, ["new", "force-test", "--dir", str(tmp_path)])
+    assert pre.exit_code == 0
+
+    # Re-run with --force should succeed (exit 0)
+    result = runner.invoke(app, ["new", "force-test", "--dir", str(tmp_path), "--force"])
+
+    assert result.exit_code == 0
+    assert "已创建小说项目" in result.stdout
+
+
+def test_new_project_exits_1_when_dir_exists(tmp_path: Path) -> None:
+    pre = runner.invoke(app, ["new", "dup-test", "--dir", str(tmp_path)])
+    assert pre.exit_code == 0
+
+    result = runner.invoke(app, ["new", "dup-test", "--dir", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "错误" in result.stdout
+
+
+def test_new_project_exits_1_on_invalid_name(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["new", "   ", "--dir", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "错误" in result.stdout
+
+
+def test_run_engine_renders_tool_call_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ``ToolCall`` event is rendered with the yellow ⚙ marker."""
+
+    async def fake_run_engine(ctx: object, deps: object) -> object:  # async iterator
+        yield ToolCall(name="safe_read_file", arguments={"path": "x"})
+        yield Done(reason="tool_completed")
+
+    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+
+    session = EngineSession()
+    buf = Console(record=True, force_terminal=False)
+
+    asyncio.run(_run_engine("anything", session, buf))
+
+    text = buf.export_text()
+    assert "⚙" in text
+    assert "safe_read_file" in text
+
+
+def test_run_engine_renders_tool_result_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ``ToolResult`` event is rendered with the green ✓ marker."""
+
+    async def fake_run_engine(ctx: object, deps: object) -> object:
+        yield ToolResult(name="safe_read_file", output="file contents")
+        yield Done(reason="tool_completed")
+
+    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+
+    session = EngineSession()
+    buf = Console(record=True, force_terminal=False)
+
+    asyncio.run(_run_engine("anything", session, buf))
+
+    text = buf.export_text()
+    assert "✓" in text
+    assert "safe_read_file" in text
+    assert "file contents" in text
+
+
+def test_run_engine_renders_interrupt_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``Interrupt`` event stashes a prompt on the session and renders ? + prompt."""
+
+    async def fake_run_engine(ctx: object, deps: object) -> object:
+        yield Interrupt(type="text", prompt="你想修改哪一段？")
+        yield Done(reason="answered")
+
+    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+
+    session = EngineSession()
+    buf = Console(record=True, force_terminal=False)
+
+    asyncio.run(_run_engine("anything", session, buf))
+
+    text = buf.export_text()
+    assert "?" in text
+    assert "你想修改哪一段？" in text
+    # Interrupt cleared because Done came after it
+    assert session.pending_interrupt is None
+
+
+def test_run_engine_renders_error_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ``ErrorEvent`` is rendered with the red ✗ marker."""
+
+    async def fake_run_engine(ctx: object, deps: object) -> object:
+        yield ErrorEvent(message="boom")
+        yield Done(reason="aborted")
+
+    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+
+    session = EngineSession()
+    buf = Console(record=True, force_terminal=False)
+
+    asyncio.run(_run_engine("anything", session, buf))
+
+    text = buf.export_text()
+    assert "✗" in text
+    assert "boom" in text
+
+
+def test_read_line_uses_prompt_session_when_provided() -> None:
+    """When a prompt_session is passed, _read_line delegates to session.prompt()."""
+    mock_session = MagicMock()
+    mock_session.prompt.return_value = "user typed this"
+
+    result = _read_line(mock_session, "foo>")
+
+    assert result == "user typed this"
+    mock_session.prompt.assert_called_once_with("foo>")
+
+
+def test_run_repl_handles_eof() -> None:
+    """Empty stdin (EOF) exits the REPL cleanly with the green farewell."""
+    result = runner.invoke(app, input="")
+
+    assert result.exit_code == 0
+    assert "已退出 writer" in result.stdout

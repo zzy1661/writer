@@ -61,7 +61,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 
 | 包                 | 职责                                                                                                                            | 关键文件                                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全；构造一个 `EngineSession` 跨 turn 复用                                | `cli/main.py`                                                              |
+| `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全；构造一个 `EngineSession` 跨 turn 复用                     | `cli/main.py`                                                              |
 | `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `pending_interrupt` / `turns` + 一次性构造的 `deps`               | `session/engine_session.py`                                                |
 | `writer.routing`   | L2 前台意图路由：**`IntentRouter` Protocol** + **`RuleBasedIntentRouter` MVP**；`AgentAction` 是路由的输出而非业务 agent 的属性 | `routing/intent_router.py`                                                 |
 | `writer.engine`    | L2 状态机 + AsyncGenerator（events / context / deps / config / loop 五个模块）                                                  | `engine/{loop,deps,events,context,config}.py`                              |
