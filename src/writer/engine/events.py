@@ -79,9 +79,17 @@ class Done(Event):
 
 @dataclass(frozen=True)
 class ErrorEvent(Event):
-    """An unrecoverable error occurred inside the engine."""
+    """An unrecoverable error occurred inside the engine.
+
+    ``message`` is the human-readable summary that ``cli/main.py`` shows
+    inline. ``traceback`` (added 2026-07-05 per arch-optimizer M4) carries
+    the formatted stack trace when available; ``None`` for programmatic
+    errors raised without going through the engine boundary (e.g. a
+    pre-existing TestError fixture).
+    """
 
     message: str
+    traceback: str | None = None
 
 
 __all__ = [

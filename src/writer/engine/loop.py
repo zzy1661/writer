@@ -26,12 +26,20 @@ Phase 3 wiring (this module, per change
 * ``ask_user`` emits ``Interrupt`` so the REPL can prompt the user, then
   ``Done('ask_user')`` to mark the turn complete.
 * All exceptions (router, tool, workflow) are caught and surfaced as
-  ``ErrorEvent`` followed by ``Done('aborted')``.
+  ``ErrorEvent`` followed by ``Done('aborted')``. ``ErrorEvent.traceback``
+  carries the formatted stack trace so post-mortem debugging doesn't
+  require attaching a debugger.
 * ``EngineConfig.fast_mode`` suppresses diagnostic ``[engine]`` log chunks.
+* 2026-07-05 (arch-optimizer M4 / Q7): engine boundary logs via stdlib
+  ``logging`` and the ``/大纲`` argument extraction uses
+  :meth:`str.removeprefix` (defensive against multi-space / repeated
+  prefix edge cases).
 """
 
 from __future__ import annotations
 
+import logging
+import traceback
 from collections.abc import AsyncIterator
 
 from writer.engine.config import EngineConfig, build_engine_config
@@ -48,6 +56,8 @@ from writer.engine.events import (
 )
 from writer.routing import AgentAction
 from writer.tools.errors import ToolError
+
+log = logging.getLogger(__name__)
 
 
 def _log(text: str, cfg: EngineConfig) -> TextChunk:
@@ -80,6 +90,9 @@ async def _engine_loop(
     The whole body is wrapped in ``try/except`` so an unexpected failure
     in the router, tool, or workflow produces an ``ErrorEvent`` followed
     by ``Done(aborted)`` instead of bubbling out of the async generator.
+    Both catch arms capture the traceback into ``ErrorEvent.traceback``
+    (per arch-optimizer M4) so REPL output can be pasted into bug
+    reports without rerunning the engine.
     """
 
     try:
@@ -124,10 +137,18 @@ async def _engine_loop(
                 yield Done(reason="ask_user", payload={"prompt": prompt})
 
     except ToolError as exc:
-        yield ErrorEvent(message=f"工具错误: {exc}")
+        # ``ToolError`` is a domain exception (path / permission / tool not
+        # found / workflow not found); capture the traceback so the user
+        # can see *where* in the tool / workflow the failure originated
+        # without needing to attach a debugger.
+        tb = traceback.format_exc()
+        log.warning("工具错误: %s", exc, exc_info=True)
+        yield ErrorEvent(message=f"工具错误: {exc}", traceback=tb)
         yield Done(reason="aborted", payload={"error": str(exc)})
     except Exception as exc:  # noqa: BLE001 — engine boundary must never raise
-        yield ErrorEvent(message=f"引擎异常: {exc}")
+        tb = traceback.format_exc()
+        log.exception("引擎边界异常: %s", exc)
+        yield ErrorEvent(message=f"引擎异常: {exc}", traceback=tb)
         yield Done(reason="aborted", payload={"error": str(exc)})
 
 
@@ -139,7 +160,12 @@ async def _run_outline_command(
     """Dispatch ``/大纲 <创意>`` to :class:`StoryConsultant` and stream the outline."""
     if not cfg.fast_mode:
         yield TextChunk(text="[engine] /大纲 → StoryConsultant.draft_outline\n")
-    idea = ctx.user_input[len("/大纲"):].strip()
+    # ``removeprefix`` (3.9+) replaces the previous ``[len("/大纲"):]`` slice
+    # (arch-optimizer M3): the slice misbehaves when ``ctx.user_input`` is
+    # exactly ``"/大纲"`` (returns the whole string, no leading space) and
+    # makes the multi-space / repeated-prefix edge case silently
+    # mis-parse. ``removeprefix`` is the canonical, defensive form.
+    idea = ctx.user_input.removeprefix("/大纲").strip()
     outline = deps.story_consultant.draft_outline(idea)
 
     yield TextChunk(text=f"标题: {outline.title}\n")

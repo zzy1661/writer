@@ -9,7 +9,7 @@ future LLM-backed implementations).
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -23,6 +23,7 @@ from writer.routing import (
     RuleBasedIntentRouter,
 )
 from writer.tools import ToolRegistry, ToolRuntime, built_tool_registry
+from writer.tools.errors import WorkflowNotFoundError
 from writer.workflows import WORKFLOWS, WorkflowStub
 
 if TYPE_CHECKING:
@@ -67,6 +68,23 @@ class EngineDeps(Protocol):
     def run_workflow(self, name: str, ctx: EngineContext) -> Iterable[str]:
         ...
 
+    def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
+        """Return a new (or in-place mutated) ``EngineDeps`` with the runtime swapped.
+
+        Called by :meth:`writer.session.EngineSession.set_project_root` to
+        point the existing deps at a new project root without rebuilding
+        router / story_consultant / tool_registry. Implementations are
+        free to return a new instance (default impl uses ``dataclasses
+        .replace``) or mutate ``self`` — both are valid as long as the
+        returned value is used as the new deps.
+
+        Added 2026-07-05 to fix arch-optimizer M6: the old code
+        duck-typed ``is_dataclass(self.deps) and any(f.name == ...)``,
+        which broke the moment a test injected a non-dataclass
+        ``EngineDeps`` implementation.
+        """
+        ...
+
 
 @dataclass
 class _DefaultEngineDeps:
@@ -89,27 +107,49 @@ class _DefaultEngineDeps:
     def run_workflow(self, name: str, ctx: EngineContext) -> Iterable[str]:
         runner = self._workflows.get(name)
         if runner is None:
-            return [
-                f"[workflow] 未知工作流 {name!r}（占位 stub: {sorted(self._workflows)}）"
-            ]
+            # Raised as a domain exception (per arch-optimizer m18) so the
+            # engine's ``except ToolError`` branch in ``_engine_loop`` can
+            # surface it as an ``ErrorEvent`` instead of pretending the
+            # unknown name produced a legitimate workflow chunk.
+            available = sorted(self._workflows)
+            raise WorkflowNotFoundError(
+                f"未知工作流 {name!r}; available: {available}"
+            )
         return runner(ctx)
 
+    def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
+        # Use ``dataclasses.replace`` so the production wiring stays
+        # effectively immutable; tests that need mutation can still
+        # override the method.
+        return replace(self, tool_runtime=new_runtime)
 
-def _select_router(settings: Settings) -> IntentRouter:
-    """Return ``CompositeRouter`` when API key is configured, else bare rule router."""
 
+def _select_router(
+    settings: Settings,
+    *,
+    primary: IntentRouter | None = None,
+) -> IntentRouter:
+    """Return ``CompositeRouter`` when API key is configured, else bare rule router.
+
+    ``primary`` lets callers (esp. tests) inject a custom rule router
+    without rewriting this factory; defaults to a fresh
+    :class:`RuleBasedIntentRouter`. Added 2026-07-05 per arch-optimizer
+    M5: the previous code hard-coded ``RuleBasedIntentRouter()`` inside
+    the factory, so a future "RuleBasedIntentRouterV2" would silently
+    miss the wiring.
+    """
+
+    rule = primary or RuleBasedIntentRouter()
     if settings.has_api_key:
-        return CompositeRouter(
-            primary=RuleBasedIntentRouter(),
-            fallback=LlmIntentRouter(settings),
-        )
-    return RuleBasedIntentRouter()
+        return CompositeRouter(primary=rule, fallback=LlmIntentRouter(settings))
+    return rule
 
 
 def production_deps(
     settings: Settings | None = None,
     *,
     project_root: Path | None = None,
+    primary_router: IntentRouter | None = None,
 ) -> EngineDeps:
     """Default dependency wiring used by the REPL and tests.
 
@@ -123,12 +163,16 @@ def production_deps(
             ``None`` (the S0 path), a sentinel root is used so
             ``safe_path`` still rejects escapes; path-free tools
             (``foreshadow_query`` etc.) keep working.
+        primary_router: Optional override for the rule router used as
+            the primary in the ``CompositeRouter`` (when API key is
+            set) or as the bare router (when not). Defaults to a fresh
+            :class:`RuleBasedIntentRouter`. Added 2026-07-05 per M5.
     """
 
     resolved = settings if settings is not None else get_settings()
     root = (project_root or _NO_PROJECT_ROOT).resolve()
     return _DefaultEngineDeps(
-        router=_select_router(resolved),
+        router=_select_router(resolved, primary=primary_router),
         story_consultant=StoryConsultant(resolved),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=root),

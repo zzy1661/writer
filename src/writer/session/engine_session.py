@@ -88,30 +88,25 @@ class EngineSession:
 
         Setting ``new_root`` to the same path is a no-op (no rebuild).
         Setting ``new_root=None`` falls back to the S0 sentinel root.
+
+        The actual swap goes through :meth:`EngineDeps.rebind_tool_runtime`
+        (per arch-optimizer M6) so we never need to know whether the
+        concrete ``EngineDeps`` is a dataclass, a plain object, or a
+        test fake. Previously this method duck-typed
+        ``is_dataclass(self.deps) and any(f.name == ...)`` and silently
+        fell back to rebuilding the whole deps (losing router /
+        story_consultant) when a test injected a Protocol-only stub.
         """
 
         if new_root == self.project_root:
             return
 
-        from writer.engine.deps import production_deps
         from writer.tools import ToolRuntime
 
         self.project_root = new_root
         resolved = (new_root or _SENTINEL_PROJECT_ROOT).resolve()
         new_runtime = ToolRuntime(project_root=resolved)
-
-        # ``EngineDeps`` is a Protocol; the production impl is a dataclass
-        # whose attributes we can overwrite in place. Tests that inject
-        # custom deps (Protocol-only) won't have these attributes — in
-        # that case we fall back to rebuilding the full production wiring.
-        from dataclasses import fields, is_dataclass
-
-        if is_dataclass(self.deps) and any(
-            f.name == "tool_runtime" for f in fields(self.deps)
-        ):
-            self.deps.tool_runtime = new_runtime  # type: ignore[attr-defined]
-        else:
-            self.deps = production_deps(project_root=new_root)
+        self.deps = self.deps.rebind_tool_runtime(new_runtime)
 
     # ------------------------------------------------------------------
     # Turn history

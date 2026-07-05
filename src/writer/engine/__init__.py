@@ -6,7 +6,7 @@ is owned by the caller (REPL today, ``EngineSession`` tomorrow).
 """
 
 from writer.engine.config import EngineConfig, build_engine_config
-from writer.engine.context import EngineContext, EngineState
+from writer.engine.context import EngineContext
 from writer.engine.deps import EngineDeps, production_deps
 from writer.engine.events import (
     ActionEvent,
@@ -28,7 +28,6 @@ __all__ = [
     "EngineConfig",
     "EngineContext",
     "EngineDeps",
-    "EngineState",
     "ErrorEvent",
     "Event",
     "Interrupt",

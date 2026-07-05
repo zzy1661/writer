@@ -195,20 +195,30 @@ def test_engine_streams_workflow_stub_chunks() -> None:
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
 
-    assert "[workflow] 占位: write_chapter" in text_blob
-    assert "Plan-Execute-Review" in text_blob
+    assert "[workflow] (stub) write_chapter" in text_blob
+    assert "LangGraph" in text_blob
     assert any(isinstance(e, Done) and e.reason == "workflow_pending" for e in events)
 
 
-def test_engine_workflow_unknown_name_yields_explanatory_chunk() -> None:
-    """Unknown workflow names should produce a visible explanatory chunk, not silently fail."""
+def test_engine_workflow_unknown_name_raises_domain_error() -> None:
+    """Unknown workflow names should raise WorkflowNotFoundError, not return a placeholder chunk.
+
+    Per arch-optimizer m18 (2026-07-05): the previous behavior of
+    returning a ``[workflow] 未知工作流 ...`` chunk looked like a
+    legitimate workflow response to the user. Now the engine surfaces
+    it as a ``ToolError`` via the existing ``except ToolError`` branch
+    in ``_engine_loop`` -> ``ErrorEvent`` + ``Done(aborted)``.
+    """
     from pathlib import Path
+
+    import pytest
 
     from writer.config import get_settings
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
     from writer.routing import RuleBasedIntentRouter
     from writer.tools import ToolRuntime, built_tool_registry
+    from writer.tools.errors import WorkflowNotFoundError
 
     deps = _DefaultEngineDeps(
         router=RuleBasedIntentRouter(),
@@ -218,11 +228,10 @@ def test_engine_workflow_unknown_name_yields_explanatory_chunk() -> None:
         _workflows={},
     )
 
-    chunks = list(deps.run_workflow("not_a_real_workflow", _ctx("ignored")))
+    with pytest.raises(WorkflowNotFoundError) as exc_info:
+        deps.run_workflow("not_a_real_workflow", _ctx("ignored"))
 
-    assert len(chunks) == 1
-    assert "未知工作流" in chunks[0]
-    assert "not_a_real_workflow" in chunks[0]
+    assert "not_a_real_workflow" in str(exc_info.value)
 
 
 def test_production_deps_includes_all_registered_workflows() -> None:

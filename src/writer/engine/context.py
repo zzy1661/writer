@@ -1,4 +1,4 @@
-"""Input contract and mutable loop state for the agent engine."""
+"""Input contract for the agent engine."""
 
 from __future__ import annotations
 
@@ -22,16 +22,4 @@ class EngineContext:
     session_id: str = ""
 
 
-@dataclass
-class EngineState:
-    """Mutable per-turn state shared across loop iterations.
-
-    ``transition`` records why the previous iteration asked to ``continue``
-    — useful for error recovery hooks planned for later iterations.
-    """
-
-    ctx: EngineContext
-    transition: str | None = None
-
-
-__all__ = ["EngineContext", "EngineState"]
+__all__ = ["EngineContext"]
