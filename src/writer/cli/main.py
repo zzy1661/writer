@@ -13,7 +13,6 @@ from rich.panel import Panel
 from rich.table import Table
 
 from writer import __version__
-from writer.agent import NovelAgent
 from writer.config import get_settings
 from writer.engine import (
     ActionEvent,
@@ -287,9 +286,18 @@ def outline(
     idea: Annotated[str, typer.Argument(help="一句话小说创意")],
 ) -> None:
     """根据一句话创意生成最小大纲。"""
-    settings = get_settings()
-    agent = NovelAgent(settings)
-    result = agent.draft_outline(idea)
+    # Reuse the same ``StoryConsultant`` the REPL would dispatch to (per
+    # arch-optimizer M2 / Q1 2026-07-05). Previously the Typer subcommand
+    # independently constructed ``NovelAgent(settings)`` while the REPL
+    # used ``EngineSession.deps.story_consultant`` — two parallel paths,
+    # so swapping the role implementation required changes in both
+    # places. ``production_deps()`` is cheap; the extra cost over a
+    # direct ``StoryConsultant(settings)`` call is negligible for a CLI
+    # subcommand invoked once per process.
+    from writer.engine.deps import production_deps
+
+    deps = production_deps()
+    result = deps.story_consultant.draft_outline(idea)
 
     console.print(f"[bold]{result.title}[/bold]")
     console.print(result.premise)
