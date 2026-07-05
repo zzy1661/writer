@@ -55,18 +55,27 @@ def test_repl_handles_help_and_user_input() -> None:
 
 
 def test_handle_repl_input_returns_false_on_exit() -> None:
-    assert handle_repl_input("/退出") is False
-    assert handle_repl_input("/q") is False
-    assert handle_repl_input("exit") is False
+    from writer.session import EngineSession
+
+    session = EngineSession()
+    assert handle_repl_input("/退出", session) is False
+    assert handle_repl_input("/q", session) is False
+    assert handle_repl_input("exit", session) is False
 
 
 def test_handle_repl_input_keeps_loop_on_empty() -> None:
-    assert handle_repl_input("") is True
-    assert handle_repl_input("   ") is True
+    from writer.session import EngineSession
+
+    session = EngineSession()
+    assert handle_repl_input("", session) is True
+    assert handle_repl_input("   ", session) is True
 
 
 def test_handle_repl_input_unknown_slash_command() -> None:
-    assert handle_repl_input("/init") is True
+    from writer.session import EngineSession
+
+    session = EngineSession()
+    assert handle_repl_input("/init", session) is True
 
 
 def test_build_prompt_session_writes_history_file(tmp_path: Path) -> None:
@@ -92,3 +101,54 @@ def test_repl_command_aliases_present() -> None:
     assert {"/init", "/大纲", "/目录", "/写", "/续写", "/改", "/审核", "/状态", "/帮助", "/退出"} <= command_names
     assert "/退出" in EXIT_COMMANDS
     assert "/帮助" in HELP_COMMANDS
+
+
+# ---------------------------------------------------------------------------
+# EngineSession integration (per add-engine-session change)
+# ---------------------------------------------------------------------------
+
+
+def test_repl_session_survives_across_lines() -> None:
+    """Multiple /状态 calls in one REPL run print the same session_id."""
+    result = runner.invoke(app, input="/状态\n/状态\n/退出\n")
+
+    assert result.exit_code == 0
+    # Both /状态 outputs should show the same UUID
+    import re
+
+    uuids = re.findall(
+        r"session=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        result.stdout,
+    )
+    assert len(uuids) == 2, f"expected 2 /状态 outputs, got: {uuids}"
+    assert uuids[0] == uuids[1], f"session_id changed across turns: {uuids}"
+
+
+def test_repl_exit_command_terminates_session() -> None:
+    """`/退出` returns False from handle_repl_input → REPL loop ends."""
+    from writer.session import EngineSession
+
+    session = EngineSession()
+    assert handle_repl_input("/退出", session) is False
+
+
+def test_repl_pending_interrupt_visible_in_next_turn() -> None:
+    """When an Interrupt event is emitted, the next turn's input is composed."""
+    from writer.engine.events import Interrupt
+    from writer.session import EngineSession, compose_pending_input
+
+    # Simulate engine emitting Interrupt then Done across two turns
+    session = EngineSession()
+    intr = Interrupt(type="text", prompt="你想修改哪一段？")
+    session.set_pending_interrupt(intr)
+
+    # Simulate the REPL driver's behavior at start of next turn
+    next_input = compose_pending_input("修第2段", session.pending_interrupt)
+
+    assert "[pending] 你想修改哪一段？" in next_input
+    assert "[answer] 修第2段" in next_input
+
+    # Simulate end-of-turn: Done clears the pending interrupt
+    session.record_turn("修第2段", "answered")  # type: ignore[arg-type]
+    session.clear_pending_interrupt()
+    assert session.pending_interrupt is None

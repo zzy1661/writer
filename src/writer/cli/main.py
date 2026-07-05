@@ -3,7 +3,6 @@ import re
 import sys
 from pathlib import Path
 from typing import Annotated
-from uuid import uuid4
 
 import typer
 from prompt_toolkit import PromptSession
@@ -25,10 +24,10 @@ from writer.engine import (
     TextChunk,
     ToolCall,
     ToolResult,
-    production_deps,
     run_engine,
 )
 from writer.project import create_workspace
+from writer.session import EngineSession, compose_pending_input
 
 app = typer.Typer(
     name="writer",
@@ -92,7 +91,7 @@ def print_repl_help() -> None:
     console.print(table)
 
 
-def handle_repl_input(line: str) -> bool:
+def handle_repl_input(line: str, session: EngineSession) -> bool:
     """Handle one REPL input line.
 
     Returns False when the loop should stop.
@@ -110,26 +109,39 @@ def handle_repl_input(line: str) -> bool:
         return True
 
     if text == "/状态":
-        console.print("[blue]当前状态：[/blue]控制台已启动，项目状态机将在后续步骤接入。")
+        console.print(
+            f"[blue]当前状态：[/blue]session={session.session_id} "
+            f"turns={len(session.turns)} project_state={session.project_state}"
+        )
         return True
 
     # 框架命令（退出/帮助/状态）之外的所有输入——斜杠命令与自然语言
     # 一律交给 agent engine 统一分发，避免 CLI 层重复维护命令路由。
-    asyncio.run(_run_engine(text, console))
+    asyncio.run(_run_engine(text, session, console))
     return True
 
 
-async def _run_engine(user_input: str, console: Console) -> None:
-    """Drive the agent engine for one natural-language turn."""
-    ctx = EngineContext(
-        user_input=user_input,
-        project_root=None,
-        project_state="S0",
-        session_id=str(uuid4()),
-    )
-    deps = production_deps()
+async def _run_engine(
+    user_input: str,
+    session: EngineSession,
+    console: Console,
+) -> None:
+    """Drive the agent engine for one natural-language turn.
 
-    async for event in run_engine(ctx, deps):
+    Uses ``session.deps`` (built once at REPL start) and
+    ``session.session_id`` (frozen across turns). If the previous turn
+    yielded an ``Interrupt`` event, the pending prompt is composed with
+    the user's input before being fed to the engine.
+    """
+    composed_input = compose_pending_input(user_input, session.pending_interrupt)
+    ctx = EngineContext(
+        user_input=composed_input,
+        project_root=session.project_root,
+        project_state=session.project_state,
+        session_id=str(session.session_id),
+    )
+
+    async for event in run_engine(ctx, session.deps):
         match event:
             case TextChunk(text=chunk):
                 # engine output is plain text — disable Rich markup so
@@ -141,10 +153,14 @@ async def _run_engine(user_input: str, console: Console) -> None:
                 console.print(f"[yellow]⚙ {n}[/yellow]")
             case ToolResult(name=name, output=output):
                 console.print(f"[green]✓ {name}: {output}[/green]")
-            case Interrupt(prompt=p):
-                console.print(f"[cyan]? {p}[/cyan]")
+            case Interrupt() as interrupt:
+                # Show prompt and stash for next turn
+                console.print(f"[cyan]? {interrupt.prompt}[/cyan]")
+                session.set_pending_interrupt(interrupt)
             case Done(reason=r):
                 console.print(f"[green]✓ {r}[/green]\n")
+                session.record_turn(user_input, r)
+                session.clear_pending_interrupt()
             case ErrorEvent(message=m):
                 console.print(f"[red]✗ {m}[/red]")
 
@@ -191,21 +207,25 @@ def _read_line(session: PromptSession[str] | None, prompt: str) -> str:
     return input(prompt)
 
 
-def run_repl(session: PromptSession[str] | None = None) -> None:
+def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
     """Start the interactive writer command loop."""
     print_welcome()
 
-    if session is None:
-        session = build_prompt_session() if sys.stdin.isatty() else None
+    if prompt_session is None:
+        prompt_session = build_prompt_session() if sys.stdin.isatty() else None
+
+    # One EngineSession for the lifetime of the REPL — owns session_id,
+    # deps, turn history, and pending Interrupt state.
+    engine_session = EngineSession()
 
     while True:
         try:
-            line = _read_line(session, REPL_PROMPT)
+            line = _read_line(prompt_session, REPL_PROMPT)
         except (EOFError, KeyboardInterrupt):
             console.print("\n[green]已退出 writer。[/green]")
             break
 
-        if not handle_repl_input(line):
+        if not handle_repl_input(line, engine_session):
             break
 
 

@@ -61,7 +61,8 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 
 | 包                 | 职责                                                                                                                            | 关键文件                                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全                                                            | `cli/main.py`                                                              |
+| `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全；构造一个 `EngineSession` 跨 turn 复用                                | `cli/main.py`                                                              |
+| `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `pending_interrupt` / `turns` + 一次性构造的 `deps`               | `session/engine_session.py`                                                |
 | `writer.routing`   | L2 前台意图路由：**`IntentRouter` Protocol** + **`RuleBasedIntentRouter` MVP**；`AgentAction` 是路由的输出而非业务 agent 的属性 | `routing/intent_router.py`                                                 |
 | `writer.engine`    | L2 状态机 + AsyncGenerator（events / context / deps / config / loop 五个模块）                                                  | `engine/{loop,deps,events,context,config}.py`                              |
 | `writer.roles`     | L3 子代理角色（当前只 `StoryConsultant`，含 `draft_outline()`）                                                                 | `roles/story_consultant.py`                                                |
@@ -91,6 +92,8 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 - `workflow_pending`——`/写` `/审核` 工作流
 - `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮)
 - `aborted`——`ErrorEvent` 后兜底分支(引擎异常/工具异常)
+
+**会话层**：以上每轮事件由 `EngineSession`(`writer.session`)驱动 — REPL 启动时构造一个,跨所有 turn 复用;`session_id` frozen、`deps` 一次性构建、`tool_runtime` 在 `set_project_root()` 时按需换；`Interrupt` 事件入 `session.pending_interrupt`,下一轮 `ctx.user_input` 自动拼接 `"[pending] {prompt}\n[answer] {user_input}"` 后再喂给引擎;`Done` 事件触发 `session.record_turn(...)` + `session.clear_pending_interrupt()`。
 
 ## 测试
 
