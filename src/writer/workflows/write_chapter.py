@@ -14,11 +14,19 @@ if TYPE_CHECKING:
 
 
 def stub(ctx: EngineContext) -> list[str]:
-    """Return placeholder chunks describing what ``write_chapter`` will do."""
+    """Return placeholder chunks describing what ``write_chapter`` will do.
+
+    Note: this is a **stub**. It does not yet invoke the LangGraph
+    Plan-Execute-Review graph (per 备忘 04); the engine still surfaces a
+    ``Done(reason='workflow_pending')`` afterwards so callers know the
+    workflow is not real. Kept short on purpose to avoid the earlier
+    "TODO" leak that confused users into thinking writing had actually
+    started.
+    """
     return [
-        "[workflow] 占位: write_chapter 阶段启动",
-        f"[workflow] session={ctx.session_id or '-'} project_root={ctx.project_root or '-'}",
-        "[workflow] TODO: LangGraph Plan-Execute-Review 图（备忘 04）",
+        "[workflow] (stub) write_chapter 阶段启动",
+        f"[workflow] (stub) session={ctx.session_id or '-'} project_root={ctx.project_root or '-'}",
+        "[workflow] (stub) LangGraph 图未落地；不会产生正文。",
     ]
 
 

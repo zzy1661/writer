@@ -76,8 +76,8 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 ### 关键设计约束
 
 - **`IntentRouter` 是 Protocol，不是具体类**。engine 只依赖 Protocol；`RuleBasedIntentRouter` 是无网络 MVP，`LlmIntentRouter`（LangChain structured output）作为同一协议后面的插槽，未来切换不动 `engine/` 或 `cli/`。
-- **`EngineDeps` 是 DI 边界**。engine 不直接 new 协作者，所有外部依赖（`router`、`story_consultant`、未来的 `tool_registry` / `workflow_starter`）都通过 Protocol 注入；`production_deps()` 是默认装配。
-- **Engine 输出是事件流**（`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`），全部 `@dataclass(frozen=True)`。CLI 在 `_run_engine` 里 `match` 渲染。
+- **`EngineDeps` 是 DI 边界**。engine 不直接 new 协作者，所有外部依赖（`router`、`story_consultant`、未来的 `tool_registry` / `workflow_starter`）都通过 Protocol 注入；`production_deps()` 是默认装配；`EngineDeps.rebind_tool_runtime(new)` 用于 `EngineSession.set_project_root` 时的 runtime 热替换（2026-07-05 替代旧的 duck-typed mutation）。
+- **Engine 输出是事件流**（`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`），全部 `@dataclass(frozen=True)`。`AgentAction`（路由输出）是 **Pydantic `BaseModel` + `model_config={"frozen": True}`**——不是 `@dataclass`，新人不要用 `dataclasses.replace(...)`；用 `model_copy(update=...)`。CLI 在 `_run_engine` 里 `match` 渲染。
 - **REPL 路由原则**：除框架命令（`/退出` `/帮助` `/状态`）外，斜杠命令与自然语言**一律交给 engine**，避免 CLI 层重复维护命令路由。
 - **Tool 安全**：所有 builtin Tool 必须经 `runtime.safe_path()` 防越界；`Tool` 必须用**命名 keyword 参数**（`def run(self, runtime, *, path: str)`），不能用 `**kwargs`，否则 LangChain `args_schema` 无法生成。
 
@@ -98,7 +98,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 ## 测试
 
 - 框架：pytest + pytest-asyncio（`asyncio_mode = "auto"`）
-- 当前基线：40 个测试（10 cli + 16 engine + 14 tool），`IntentRouter` Protocol 拆分后新增 `test_rule_based_router_satisfies_protocol`
+- 当前基线：详见 `MEMORY.md` 中「## 验证基线」一节（最后一次实测 2026-07-06：121 测试 / ruff+mypy clean；不要在此处硬编码数字，详见 N6）
 - 关键覆盖点：router 分类、engine 五种 Done 分支、Tool 路径越界拒绝
 - `tests/conftest.py`（如有）会注入 `EngineDeps` 替身
 

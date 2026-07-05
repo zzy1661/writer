@@ -75,3 +75,43 @@ def test_built_tool_registry_is_usable_via_deps() -> None:
     )
     assert result.output
     assert "chapter_id" in result.metadata
+
+
+# ---------------------------------------------------------------------------
+# primary_router kwarg (arch-optimizer N3, 2026-07-05)
+# ---------------------------------------------------------------------------
+
+
+def test_production_deps_respects_explicit_primary_router_when_no_api_key() -> None:
+    """When ``primary_router`` is passed, production_deps uses it as the bare router.
+
+    Per arch-optimizer N3 (2026-07-05): before M5, ``production_deps``
+    hard-coded ``RuleBasedIntentRouter()`` inside the factory. M5 added
+    the ``primary_router`` kwarg so tests / callers can inject a custom
+    rule router without rewriting ``_select_router``. This test covers
+    the no-api-key path: the bare router IS the supplied sentinel.
+    """
+    sentinel = RuleBasedIntentRouter()
+
+    deps = production_deps(_settings(with_key=False), primary_router=sentinel)
+
+    # No API key → bare rule router, NOT wrapped in CompositeRouter
+    assert deps.router is sentinel
+
+
+def test_production_deps_respects_explicit_primary_router_with_api_key() -> None:
+    """When ``primary_router`` is passed AND an API key is set, the sentinel becomes CompositeRouter.primary.
+
+    Companion to the no-api-key test. With API key configured,
+    ``production_deps`` wraps the primary in a :class:`CompositeRouter`
+    (rule-first, LLM fallback). The sentinel must be wired as the
+    primary, not silently replaced by a fresh ``RuleBasedIntentRouter``.
+    """
+    sentinel = RuleBasedIntentRouter()
+
+    deps = production_deps(_settings(with_key=True), primary_router=sentinel)
+
+    assert isinstance(deps.router, CompositeRouter)
+    assert deps.router.primary is sentinel
+    # Fallback is the LLM router; primary must remain the sentinel
+    assert isinstance(deps.router.fallback, LlmIntentRouter)

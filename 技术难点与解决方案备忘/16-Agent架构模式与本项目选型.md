@@ -325,7 +325,7 @@ def build_context_pack(chapter_id: str) -> dict:
 - 不要让多角色变成多进程。角色之间的差异由 prompt 区分,上下文通过 `ContextPack` 裁剪,而非共享可变内存。
 - 引入新范式前先问:它解决的是哪一层的痛点?是前台路由、长任务编排、还是反思回流?混用要明确边界。
 - 把每种范式的特征(思考轨迹、计划、反思)落盘:计划写到 `大纲/`,反思历史写到 `修订/`,便于后续训练或调试。
-- MVP 阶段保留规则版 `decide()` 作为 fallback,避免 LLM 把 `/写` 误识别为说明性问题。
+- MVP 阶段保留规则版 `route()` 作为 primary(配合 `CompositeRouter` 包装 LLM fallback),避免 LLM 把 `/写` 误识别为说明性问题。
 
 ## 已落地的 Engine 层结构（v0.1）
 
@@ -337,7 +337,7 @@ def build_context_pack(chapter_id: str) -> dict:
 writer/engine/
 ├── __init__.py    # 公共门面: 只 re-export, 不放逻辑
 ├── events.py      # Event 数据类层级(frozen=True, 单一基类)
-├── context.py     # EngineContext(frozen) + EngineState(mutable)
+├── context.py     # EngineContext(frozen) — 单一输入契约，2026-07-05 m4 删除 EngineState 后
 ├── deps.py        # EngineDeps Protocol + production_deps()
 ├── config.py      # EngineConfig(frozen, "环境冰封")
 └── loop.py        # run_engine() + _engine_loop() AsyncGenerator
@@ -349,18 +349,18 @@ writer/engine/
 |---|---|---|---|---|
 | `events.py` | — | Event 子类层级 | 不可变 (frozen dataclass) | 全局共享 |
 | `context.py` | 用户调用 | `EngineContext` 实例 | 不可变 (frozen) | 当次 turn |
-| `context.py` | engine 内部 | `EngineState` 实例 | 可变 (普通 dataclass) | 当次 turn 循环内 |
 | `deps.py` | DI 边界 | `EngineDeps` 协议 + 默认实现 | 不可变 (Protocol + dataclass) | 长生命周期 / session 级 |
 | `config.py` | ctx + 运行时 | `EngineConfig` 实例 | 不可变 (frozen) | 当次 turn |
 | `loop.py` | ctx + deps + config | AsyncIterator[Event] | — | 当次 turn |
 
-### 三种"状态对象"的切分原则
+### 两种"状态对象"的切分原则
 
-不把 EngineContext / EngineState / EngineConfig 揉成一坨,是因为它们在生命周期和写入权限上不一样:
+不把 `EngineContext` 和 `EngineConfig` 揉成一坨,是因为它们在生命周期和写入权限上不一样:
 
-- **EngineContext (frozen)**: 当次 turn 的全部输入,函数参数。LLM / LangGraph 任何外部输入都只能写进这个,不能写 loop 内的可变状态。
-- **EngineState (mutable)**: engine 内部跨迭代状态,比如"`retry_count` 计数"、"上一轮 transition"。目前 MVP 还没填字段,留类不填实例,等 continue 站点接入(per 03 + 06)时直接长出来。
-- **EngineConfig (frozen)**: 一次 turn 内不变的运行时配置(session_id、fast_mode 等)。Mirrors Claude Code §八"环境冰封"——消费者在 AsyncGenerator 流式消费事件时,config 不会突变,可放心依赖。
+- **`EngineContext` (frozen)**: 当次 turn 的全部输入,函数参数。LLM / LangGraph 任何外部输入都只能写进这个,不能写 loop 内的可变状态。
+- **`EngineConfig` (frozen)**: 一次 turn 内不变的运行时配置(session_id、fast_mode 等)。Mirrors Claude Code §八"环境冰封"——消费者在 AsyncGenerator 流式消费事件时,config 不会突变,可放心依赖。
+
+> **2026-07-05 修订 (m4)**: 早期版本还有第三个 `EngineState`(mutable,engine 内部跨迭代状态)。MVP 阶段从未实例化,且字段 `transition` 也从未被任何代码引用——属于死代码。删除后,所有 input contract 全部 frozen,engine 内部不再持有可变状态(loop 是纯 AsyncGenerator)。若未来需要"retry_count"等跨迭代字段,优先放进 `EngineSession`(writer/session),不在 engine 内引入可变状态。
 
 ### Engine 是无状态 AsyncGenerator
 
@@ -406,7 +406,7 @@ class EngineDeps(Protocol):
 在原本六条之外,补充:
 
 - Engine 包严格 5 文件布局,新增能力(workflow / tool / interrupt)只通过 `EngineDeps` 扩展,不直接改 `loop.py`
-- `EngineContext / EngineConfig` 全程 frozen,`EngineState` 是唯一可变对象
+- `EngineContext / EngineConfig` 全程 frozen（2026-07-05 m4 删除 `EngineState` 后,所有 input contract 均不可变）
 - `run_engine` 是 `AsyncIterator[Event]`,不持有会话状态
 - `EngineDeps` 必须 `@runtime_checkable`,便于测试时 mock
 

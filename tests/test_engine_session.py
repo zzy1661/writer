@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID
 
+from writer.config import get_settings
 from writer.engine import Interrupt
-from writer.routing import IntentRouter
+from writer.engine.context import EngineContext
+from writer.engine.deps import EngineDeps
+from writer.roles import StoryConsultant
+from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
+from writer.tools import ToolRuntime, built_tool_registry
 
 # ---------------------------------------------------------------------------
 # Identity & defaults
@@ -205,3 +211,65 @@ def test_session_package_public_surface() -> None:
     assert _mod.EngineSession is EngineSession
     assert _mod.TurnRecord is TurnRecord
     assert _mod.compose_pending_input is compose_pending_input
+
+
+# ---------------------------------------------------------------------------
+# Protocol-only EngineDeps (arch-optimizer N9, 2026-07-05)
+# ---------------------------------------------------------------------------
+
+
+def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> None:
+    """A non-dataclass ``EngineDeps`` implementation must survive ``set_project_root``.
+
+    Per arch-optimizer N9 (2026-07-05): M6 added ``rebind_tool_runtime``
+    to the ``EngineDeps`` Protocol so we no longer duck-type
+    ``is_dataclass(self.deps)`` inside ``set_project_root``. This test
+    verifies the new contract: a plain class (NOT ``@dataclass``)
+    implementing all 4 fields + 3 methods of ``EngineDeps`` can be
+    injected into ``EngineSession`` and ``set_project_root`` swaps
+    ``tool_runtime`` cleanly.
+
+    The old code skipped the duck-typed branch and rebuilt the whole
+    production_deps (losing router / story_consultant) for any
+    Protocol-only stub — the test below would have failed before M6.
+    """
+
+    class PlainDeps:
+        """Plain (non-dataclass) ``EngineDeps`` implementation."""
+
+        def __init__(self) -> None:
+            self.router = RuleBasedIntentRouter()
+            self.story_consultant = StoryConsultant(get_settings())
+            self.tool_registry = built_tool_registry()
+            self.tool_runtime = ToolRuntime(
+                project_root=Path("/__no_project__").resolve()
+            )
+
+        def route(self, user_input: str, project_state: str) -> AgentAction:
+            return self.router.route(user_input, project_state)
+
+        def run_workflow(self, name: str, ctx: EngineContext) -> Iterable[str]:
+            return []
+
+        def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
+            self.tool_runtime = new_runtime
+            return self
+
+    # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.
+    stub = PlainDeps()
+    assert isinstance(stub, EngineDeps)
+
+    # Inject into session (skip the default production_deps construction).
+    session = EngineSession()
+    session.deps = stub
+    original_router = session.deps.router
+
+    # ``set_project_root`` must NOT raise ``AttributeError`` (regression
+    # on M6: the old duck-typed branch needed ``is_dataclass(self.deps)``).
+    session.set_project_root(tmp_path)
+
+    assert session.project_root == tmp_path
+    # Router preserved across the swap (no full production_deps rebuild).
+    assert session.deps.router is original_router
+    # Runtime swapped to the new root.
+    assert session.deps.tool_runtime.project_root == tmp_path.resolve()

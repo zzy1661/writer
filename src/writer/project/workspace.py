@@ -13,7 +13,11 @@ def create_workspace(name: str, base_dir: Path, *, force: bool = False) -> Novel
     root = base_dir / project_name
 
     if root.exists() and not force:
-        msg = f"项目目录已存在: {root}"
+        msg = (
+            f"项目目录已存在: {root}。"
+            f"如要覆盖请重新执行 `writer new {project_name} --force`，"
+            f"或先手动删除/重命名该目录。"
+        )
         raise FileExistsError(msg)
 
     directories = [
@@ -47,6 +51,9 @@ def create_workspace(name: str, base_dir: Path, *, force: bool = False) -> Novel
 def _normalize_name(name: str) -> str:
     normalized = name.strip().replace(" ", "-")
     if not normalized:
-        msg = "项目名称不能为空"
+        msg = (
+            "项目名称不能为空。"
+            "请传入至少一个非空白字符，例如 `writer new 我的小说`。"
+        )
         raise ValueError(msg)
     return normalized
