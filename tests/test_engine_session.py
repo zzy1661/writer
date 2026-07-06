@@ -284,7 +284,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 def _seed_agent_md(root: Path, *, genre: str | None) -> None:
     root.mkdir(parents=True, exist_ok=True)
     (root / "AGENT.md").write_text(
-        "# test\n\n## 当前状态\n\n- state: S1\n- label: 已初始化\n"
+        "# test\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n"
         + (f"- 题材: {genre}\n" if genre else "")
         + "\n## 目录约定\n\n",
         encoding="utf-8",

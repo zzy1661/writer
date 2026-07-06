@@ -128,7 +128,7 @@ def _seed_genre(tmp_path: Path, genre: str) -> Path:
     root = tmp_path / "novel"
     root.mkdir(parents=True, exist_ok=True)
     (root / "AGENT.md").write_text(
-        f"# novel\n\n## 当前状态\n\n- state: S1\n- label: 已初始化\n- 题材: {genre}\n\n",
+        f"# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n- 题材: {genre}\n\n",
         encoding="utf-8",
     )
     return root

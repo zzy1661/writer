@@ -19,12 +19,12 @@ class ProjectState(StrEnum):
 
 
 STATE_DESCRIPTIONS: dict[ProjectState, str] = {
-    ProjectState.UNINITIALIZED: "未初始化",
-    ProjectState.INITIALIZED: "已初始化",
-    ProjectState.HAS_OUTLINE: "已有大纲",
-    ProjectState.HAS_TOC: "已有目录",
-    ProjectState.WRITING: "写作中",
-    ProjectState.FINISHED: "已完成",
+    ProjectState.UNINITIALIZED: "待启动",
+    ProjectState.INITIALIZED: "初始化",
+    ProjectState.HAS_OUTLINE: "大纲拟定中",
+    ProjectState.HAS_TOC: "框架搭建中",
+    ProjectState.WRITING: "正文编辑中",
+    ProjectState.FINISHED: "审核中",
 }
 
 
@@ -98,8 +98,8 @@ COMMAND_HINTS: dict[str, str] = {
     "/大纲": "请先执行 /init <项目名> 创建项目。",
     "/目录": "请先用 /大纲 生成并落盘大纲。",
     "/创作": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
-    "/续写": "请先进入写作中状态，也就是至少有一章正文草稿。",
-    "/改": "请先进入写作中状态，也就是至少有一章正文草稿。",
+    "/续写": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
+    "/改": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
     "/审核": "请先写出至少一章正文。",
     "/查看": "请先执行 /init <项目名> 创建项目。",
     "/搜索": "请先执行 /init <项目名> 创建项目。",
