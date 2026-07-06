@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from writer.rag import ProjectRagIndex, format_hits
 from writer.tools.protocol import ToolResult
 
 if TYPE_CHECKING:
@@ -53,7 +54,7 @@ class Wordcount:
 
 
 class ProjectSearch:
-    """Small grep-like search over text files inside ``project_root``."""
+    """Search project text with exact matches plus project-level RAG."""
 
     name = "project_search"
     description = "在项目目录内搜索关键词;返回匹配文件、行号和片段。"
@@ -72,7 +73,7 @@ class ProjectSearch:
 
         target = runtime.safe_path(path)
         files = [target] if target.is_file() else list(_iter_text_files(target))
-        lines: list[str] = []
+        exact_lines: list[str] = []
 
         for file in files:
             try:
@@ -85,17 +86,33 @@ class ProjectSearch:
                     continue
                 relative = file.relative_to(runtime.project_root)
                 snippet = line.strip()
-                lines.append(f"{relative.as_posix()}:{line_no}: {snippet}")
-                if len(lines) >= limit:
+                exact_lines.append(f"{relative.as_posix()}:{line_no}: {snippet}")
+                if len(exact_lines) >= limit:
+                    output = "\n".join(exact_lines)
                     return ToolResult(
-                        output="\n".join(lines),
+                        output=output,
                         truncated=True,
-                        metadata={"matched": len(lines), "query": keyword},
+                        metadata={
+                            "matched": len(exact_lines),
+                            "query": keyword,
+                            "rag_matched": 0,
+                        },
                     )
 
+        rag_hits = ProjectRagIndex(runtime.project_root).query(keyword, k=5)
+        sections: list[str] = []
+        if exact_lines:
+            sections.append("关键词命中:\n" + "\n".join(exact_lines))
+        if rag_hits:
+            sections.append("RAG 召回:\n" + format_hits(rag_hits))
+        output = "\n\n".join(sections) if sections else f"未找到关键词：{keyword}"
         return ToolResult(
-            output="\n".join(lines) if lines else f"未找到关键词：{keyword}",
-            metadata={"matched": len(lines), "query": keyword},
+            output=output,
+            metadata={
+                "matched": len(exact_lines),
+                "query": keyword,
+                "rag_matched": len(rag_hits),
+            },
         )
 
 

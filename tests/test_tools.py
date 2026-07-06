@@ -163,12 +163,17 @@ def test_chapter_locate_returns_handle_json() -> None:
     assert parsed["project_root"] == str(runtime.project_root)
 
 
-def test_foreshadow_query_returns_mock_with_ids() -> None:
-    runtime = ToolRuntime(project_root=Path("/tmp"))
-    result = ForeshadowQuery().run(runtime, query="F003 玉簪来历")
+def test_foreshadow_query_uses_project_rag(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    chapter = tmp_path / "manuscript" / "chapter-01.md"
+    chapter.parent.mkdir()
+    chapter.write_text("第一章\n\nF003 玉簪真实来历被藏在旧匣子里。", encoding="utf-8")
+
+    result = ForeshadowQuery().run(runtime, query="玉簪来历")
+
     assert "F003" in result.output
-    assert "F012" in result.output
-    assert result.metadata["matched"] == ["F003", "F012"]
+    assert "manuscript/chapter-01.md" in result.output
+    assert result.metadata["rag_matched"] >= 1
 
 
 # ---------------------------------------------------------------------------
