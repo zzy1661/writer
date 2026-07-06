@@ -36,7 +36,7 @@
 | --- | --- | --- | --- | --- | --- |
 | 1 | **Hooks 系统缺失** | 27 生命周期事件 + 三层 Event/Matcher/Hook + exit code 语义 | 0 个事件点,Plugin/Agent 协作无扩展接口 | 🔴 Major | 阻塞 Plugin / Sub-agent / 预写校验 |
 | 2 | **state.transition 显式状态机** | `while(true) + state.transition`,7+ continue 站点 | `try/match/yield`,错误恢复靠 try/except | 🔴 Major | 阻塞上下文压缩 / max_tokens 升级 / Sub-agent 续转 |
-| 3 | **Sub-agent 隔离 + Fork vs Fresh** | 默认全隔离 + opt-in 共享;fork 复用 prompt cache | 没有 sub-agent;`workflows/{write,review}_chapter.py` 还是 stub | 🔴 Major | 阻塞多角色并行(编剧/校对/审核) |
+| 3 | **Sub-agent 隔离 + Fork vs Fresh** | 默认全隔离 + opt-in 共享;fork 复用 prompt cache | 没有 sub-agent;`write_chapter` 已是 LangGraph MVP 但节点仍为确定性占位,`review_chapter` 仍是 stub | 🔴 Major | 阻塞多角色并行(编剧/校对/审核) |
 | 4 | **Markdown frontmatter 协议同构** | Skill/Agent/Command/OutputStyle 共用一套加载逻辑 | SKILL.md 对齐了,其他都没对齐 | 🟠 Major | 影响未来 Plugin 系统可发现性 |
 | 5 | **多层配置(5+1 优先级链)** | user/project/policy/managed + TRUSTED_SETTING_SOURCES | 单层 Pydantic Settings | 🟠 Major | 影响未来企业 MDM / Plugin 市场 |
 | 6 | **Tool 注册表运行时过滤** | 三层漏斗 + deny 规则 + isEnabled | 只有名字索引,运行时启用/禁用无 | 🟡 Minor | 影响 Plugin 粒度的工具控制 |
@@ -121,9 +121,9 @@
 - 工具过滤三层漏斗(全局禁止 → 异步白名单 → Agent 定义级)
 - MCP 工具 `mcp__` 前缀无条件穿透
 
-**我们的现状**:`workflows/write_chapter.py` 和 `review_chapter.py` 是 stub,只 yield 字符串提示文案(本会话 m27 修复后改了文案但实质未变)。没有 Sub-agent 调度、没有 prompt cache、没有 sidechain transcript、没有 fork vs fresh 双模式。
+**我们的现状**:`workflows/write_chapter.py` 已升级为真实 LangGraph MVP,当前图为 `prep_context -> write_chapter -> proofread -> review_gate -> (rewrite | END)`,并带项目内 `.writer/checkpoints.sqlite` checkpoint；但各节点仍是确定性占位文本,尚未调用编剧/校对/审核子代理。`review_chapter.py` 仍是 stub。没有 Sub-agent 调度、没有 prompt cache、没有 sidechain transcript、没有 fork vs fresh 双模式。
 
-**为什么是 Major**:长篇小说写作本质就是**多角色协作**(编剧 / 校对 / 历史 / 审核),目前 stub 不能并发、不能复用 prompt cache、不能崩溃恢复。这是项目从"CLI demo"走向"能写完整小说"的核心能力。
+**为什么是 Major**:长篇小说写作本质就是**多角色协作**(编剧 / 校对 / 历史 / 审核)。当前 `write_chapter` 已验证 LangGraph 形状和 checkpoint 管线,但还不能并发调用真实角色、不能复用 prompt cache、不能记录 sidechain transcript。这是项目从"CLI demo"走向"能写完整小说"的核心能力。
 
 **建议做法**:
 - 把 `_DefaultEngineDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator
@@ -207,7 +207,7 @@
 
 **理由**:多角色并行(编剧/校对/审核)是项目从"CLI demo"走向"能写完整小说"的核心。LangGraph 自带 fork / checkpoint / message persistence,直接用避免重造轮子。
 
-**第一步**:把 `_DefaultEngineDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator,引入 LangGraph `StateGraph` 实现 `write_chapter` 的 Plan-Execute-Review 三节点。**这次实装会自然把 Hooks 串起来**。
+**第一步**:在现有 `write_chapter` LangGraph MVP 基础上,把 `_DefaultEngineDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator,并把确定性占位节点替换为可隔离的编剧/校对/审核角色节点。**这次实装会自然把 Hooks 串起来**。
 
 ### 不做
 

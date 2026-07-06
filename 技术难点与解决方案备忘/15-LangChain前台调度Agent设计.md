@@ -56,10 +56,10 @@ class RuleBasedIntentRouter:
     def route(self, user_input: str, project_state: str) -> AgentAction:
         text = user_input.strip()
 
-        if text.startswith("/写作"):
+        if text.startswith("/创作"):
             return AgentAction(
                 action_type="start_workflow",
-                command="/写作",
+                command="/创作",
                 role="story_consultant",
                 workflow="write_chapter",
                 arguments={"raw": text},
@@ -84,9 +84,11 @@ class RuleBasedIntentRouter:
 
         return AgentAction(
             action_type="answer_directly",
-            answer="我可以处理 /init、/大纲、/目录、/写作、/审核、/改 等写作命令。",
+            answer="我可以处理 /init、/大纲、/目录、/创作、/审核、/改 等写作命令。",
         )
 ```
+
+> 当前实现以 `/创作` 作为写章节工作流入口；早期文档中的 `/写作` 可视为旧命名,除非后续显式增加别名,不要在 router / 状态机示例里继续使用。
 
 ## 核心依赖版 LangChain Agent 代码
 

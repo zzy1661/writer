@@ -329,7 +329,7 @@ def build_context_pack(chapter_id: str) -> dict:
 - 不要让多角色变成多进程。角色之间的差异由 prompt 区分,上下文通过 `ContextPack` 裁剪,而非共享可变内存。
 - 引入新范式前先问:它解决的是哪一层的痛点?是前台路由、长任务编排、还是反思回流?混用要明确边界。
 - 把每种范式的特征(思考轨迹、计划、反思)落盘:计划写到 `大纲/`,反思历史写到 `修订/`,便于后续训练或调试。
-- MVP 阶段保留规则版 `route()` 作为 primary(配合 `CompositeRouter` 包装 LLM fallback),避免 LLM 把 `/写作` 误识别为说明性问题。
+- MVP 阶段保留规则版 `route()` 作为 primary(配合 `CompositeRouter` 包装 LLM fallback),避免 LLM 把 `/创作` 误识别为说明性问题。
 
 ## 已落地的 Engine 层结构（v0.1）
 

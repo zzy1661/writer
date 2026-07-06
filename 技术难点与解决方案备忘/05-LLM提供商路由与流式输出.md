@@ -102,5 +102,5 @@ class OpenAICompatibleProvider:
 
 - L3 Agent 节点代码中不出现具体模型名。
 - 切换 Provider 只需要改配置,不需要改写作流程代码。
-- `/写作` 可以实时显示正文 token。
+- `/创作` 可以实时显示正文 token。
 - `finish_reason=length` 时不盲目重试,而是给出明确错误。
