@@ -8,6 +8,7 @@ get a serviceable estimate.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from writer.tools.protocol import ToolResult
@@ -17,18 +18,97 @@ if TYPE_CHECKING:
 
 
 class Wordcount:
-    """Estimate 字数 for a chunk of text."""
+    """Estimate 字数 for a chunk of text or project file tree."""
 
     name = "wordcount"
-    description = "统计文本的粗略字数(剔除空白);适合中文小说草稿。"
+    description = "统计文本或项目路径的粗略字数(剔除空白);适合中文小说草稿。"
 
-    def run(self, runtime: ToolRuntime, *, text: str) -> ToolResult:
+    def run(
+        self,
+        runtime: ToolRuntime,
+        *,
+        text: str | None = None,
+        path: str | None = None,
+    ) -> ToolResult:
+        if path is not None:
+            target = runtime.safe_path(path)
+            if target.is_dir():
+                texts = [
+                    file.read_text(encoding="utf-8")
+                    for file in _iter_text_files(target)
+                ]
+                text = "\n".join(texts)
+            else:
+                text = target.read_text(encoding="utf-8")
+
+        if text is None:
+            text = ""
+
         stripped = text.replace("\n", "").replace(" ", "").replace("\t", "")
         chars = len(stripped)
         return ToolResult(
             output=str(chars),
-            metadata={"chars": chars, "raw_len": len(text)},
+            metadata={"chars": chars, "raw_len": len(text), "path": path},
         )
 
 
-__all__ = ["Wordcount"]
+class ProjectSearch:
+    """Small grep-like search over text files inside ``project_root``."""
+
+    name = "project_search"
+    description = "在项目目录内搜索关键词;返回匹配文件、行号和片段。"
+
+    def run(
+        self,
+        runtime: ToolRuntime,
+        *,
+        query: str,
+        path: str = ".",
+        limit: int = 20,
+    ) -> ToolResult:
+        keyword = query.strip()
+        if not keyword:
+            return ToolResult(output="请提供搜索关键词。", metadata={"matched": 0})
+
+        target = runtime.safe_path(path)
+        files = [target] if target.is_file() else list(_iter_text_files(target))
+        lines: list[str] = []
+
+        for file in files:
+            try:
+                content = file.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+
+            for line_no, line in enumerate(content.splitlines(), start=1):
+                if keyword not in line:
+                    continue
+                relative = file.relative_to(runtime.project_root)
+                snippet = line.strip()
+                lines.append(f"{relative.as_posix()}:{line_no}: {snippet}")
+                if len(lines) >= limit:
+                    return ToolResult(
+                        output="\n".join(lines),
+                        truncated=True,
+                        metadata={"matched": len(lines), "query": keyword},
+                    )
+
+        return ToolResult(
+            output="\n".join(lines) if lines else f"未找到关键词：{keyword}",
+            metadata={"matched": len(lines), "query": keyword},
+        )
+
+
+def _iter_text_files(root: Path) -> list[Path]:
+    suffixes = {".md", ".txt"}
+    files: list[Path] = []
+    for path in sorted(root.rglob("*")):
+        relative_parts = path.relative_to(root).parts
+        if any(part.startswith(".") for part in relative_parts):
+            continue
+        if path.is_file() and path.suffix.lower() in suffixes:
+            files.append(path)
+    return files
+
+
+__all__ = ["ProjectSearch", "Wordcount"]

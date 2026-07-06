@@ -15,6 +15,7 @@ from langchain_core.tools import BaseTool
 from writer.tools import (
     ChapterLocate,
     ForeshadowQuery,
+    ProjectSearch,
     SafeListDir,
     SafeReadFile,
     ToolDeniedError,
@@ -129,6 +130,30 @@ def test_wordcount_handles_chinese_with_whitespace() -> None:
     assert result.metadata["chars"] == 8
 
 
+def test_wordcount_can_count_project_path(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    manuscript = tmp_path / "manuscript"
+    manuscript.mkdir()
+    (manuscript / "chapter-01.md").write_text("第一章\n\n少年 出门", encoding="utf-8")
+
+    result = Wordcount().run(runtime, path="manuscript")
+
+    assert result.output == "7"
+    assert result.metadata["path"] == "manuscript"
+
+
+def test_project_search_finds_keyword_inside_project(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    target = tmp_path / "outline" / "大纲.md"
+    target.parent.mkdir()
+    target.write_text("主角得到玉簪\n反派现身", encoding="utf-8")
+
+    result = ProjectSearch().run(runtime, query="玉簪")
+
+    assert "outline/大纲.md:1" in result.output
+    assert result.metadata["matched"] == 1
+
+
 def test_chapter_locate_returns_handle_json() -> None:
     runtime = ToolRuntime(project_root=Path("/tmp/proj").resolve())
     result = ChapterLocate().run(runtime, chapter="1.3")
@@ -169,6 +194,7 @@ def test_built_tool_registry_includes_core_tools() -> None:
         "safe_read_file",
         "safe_list_dir",
         "wordcount",
+        "project_search",
         "chapter_locate",
         "foreshadow_query",
     }

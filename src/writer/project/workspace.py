@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from writer.project.state import ProjectState, render_agent_file
+
 
 @dataclass(frozen=True)
 class NovelWorkspace:
@@ -31,6 +33,7 @@ def create_workspace(name: str, base_dir: Path, *, force: bool = False) -> Novel
         directory.mkdir(parents=True, exist_ok=True)
 
     files = {
+        root / "AGENT.md": render_agent_file(project_name, ProjectState.INITIALIZED),
         root / "README.md": f"# {project_name}\n\n长篇小说项目工作区。\n",
         root / "outline" / "premise.md": "# 一句话创意\n\n",
         root / "outline" / "volume-plan.md": "# 分卷规划\n\n",

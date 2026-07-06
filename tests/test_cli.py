@@ -261,6 +261,33 @@ def test_run_engine_renders_tool_result_event(monkeypatch: pytest.MonkeyPatch) -
     assert "file contents" in text
 
 
+def test_run_engine_binds_project_root_from_done_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A successful /init payload should bind the REPL session to the project."""
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text("state: S1", encoding="utf-8")
+
+    async def fake_run_engine(ctx: object, deps: object) -> object:
+        yield Done(
+            reason="answered",
+            payload={"project_root": str(project), "project_state": "S1"},
+        )
+
+    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+
+    session = EngineSession()
+    buf = Console(record=True, force_terminal=False)
+
+    asyncio.run(_run_engine("/init novel", session, buf))
+
+    assert session.project_root == project
+    assert session.project_state == "S1"
+
+
 def test_run_engine_renders_interrupt_event(monkeypatch: pytest.MonkeyPatch) -> None:
     """An ``Interrupt`` event stashes a prompt on the session and renders ? + prompt."""
 

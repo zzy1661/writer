@@ -25,7 +25,7 @@ from writer.engine import (
     ToolResult,
     run_engine,
 )
-from writer.project import create_workspace
+from writer.project import STATE_DESCRIPTIONS, create_workspace, inspect_project
 from writer.session import EngineSession, compose_pending_input
 
 app = typer.Typer(
@@ -46,6 +46,9 @@ REPL_COMMANDS = [
     ("/续写", "继续未完成章节"),
     ("/改", "修改章节内容"),
     ("/审核", "审核当前正文"),
+    ("/查看", "查看项目文件或目录"),
+    ("/搜索", "搜索项目文本"),
+    ("/字数统计", "统计项目或文件字数"),
     ("/状态", "查看当前项目状态"),
     ("/帮助", "显示帮助"),
     ("/退出", "退出 writer"),
@@ -108,9 +111,22 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         return True
 
     if text == "/状态":
+        session.refresh_project_state()
+        snapshot = inspect_project(session.project_root)
+        root = str(snapshot.root) if snapshot.root is not None else "未绑定"
+        outline = (
+            snapshot.outline_path.relative_to(snapshot.root).as_posix()
+            if snapshot.root is not None and snapshot.outline_path is not None
+            else "无"
+        )
         console.print(
             f"[blue]当前状态：[/blue]session={session.session_id} "
-            f"turns={len(session.turns)} project_state={session.project_state}"
+            f"turns={len(session.turns)} "
+            f"project_state={snapshot.state.value} "
+            f"({STATE_DESCRIPTIONS[snapshot.state]}) "
+            f"project_root={root} "
+            f"chapters={snapshot.chapter_count} "
+            f"outline={outline}"
         )
         return True
 
@@ -132,6 +148,7 @@ async def _run_engine(
     yielded an ``Interrupt`` event, the pending prompt is composed with
     the user's input before being fed to the engine.
     """
+    session.refresh_project_state()
     composed_input = compose_pending_input(user_input, session.pending_interrupt)
     ctx = EngineContext(
         user_input=composed_input,
@@ -156,7 +173,11 @@ async def _run_engine(
                 # Show prompt and stash for next turn
                 console.print(f"[cyan]? {interrupt.prompt}[/cyan]")
                 session.set_pending_interrupt(interrupt)
-            case Done(reason=r):
+            case Done(reason=r, payload=payload):
+                if payload is not None and "project_root" in payload:
+                    session.set_project_root(Path(str(payload["project_root"])))
+                else:
+                    session.refresh_project_state()
                 console.print(f"[green]✓ {r}[/green]\n")
                 session.record_turn(user_input, r)
                 session.clear_pending_interrupt()

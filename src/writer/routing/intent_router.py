@@ -89,6 +89,34 @@ class RuleBasedIntentRouter:
 
         text = user_input.strip()
 
+        if text.startswith("/查看"):
+            path = _command_argument(text, "/查看") or "."
+            tool_name = "safe_list_dir" if path in {".", "./"} or path.endswith("/") else "safe_read_file"
+            return AgentAction(
+                action_type="call_tool",
+                command="/查看",
+                role="story_consultant",
+                tool_name=tool_name,
+                arguments={"path": path},
+            )
+        if text.startswith("/搜索"):
+            query = _command_argument(text, "/搜索")
+            return AgentAction(
+                action_type="call_tool",
+                command="/搜索",
+                role="story_consultant",
+                tool_name="project_search",
+                arguments={"query": query, "path": "."},
+            )
+        if text.startswith("/字数统计"):
+            path = _command_argument(text, "/字数统计") or "."
+            return AgentAction(
+                action_type="call_tool",
+                command="/字数统计",
+                role="story_consultant",
+                tool_name="wordcount",
+                arguments={"path": path},
+            )
         if text.startswith("/写"):
             return AgentAction(
                 action_type="start_workflow",
@@ -143,6 +171,12 @@ class RuleBasedIntentRouter:
             return True
         # Bare framework keyword (e.g. "退出", "状态")
         return stripped in cls._FRAMEWORK_KEYWORDS
+
+
+def _command_argument(text: str, command: str) -> str:
+    """Return the text after a slash command, stripped of surrounding space."""
+
+    return text.removeprefix(command).strip()
 
 
 __all__ = [

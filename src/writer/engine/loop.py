@@ -41,6 +41,7 @@ from __future__ import annotations
 import logging
 import traceback
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 from writer.engine.config import EngineConfig, build_engine_config
 from writer.engine.context import EngineContext
@@ -54,6 +55,13 @@ from writer.engine.events import (
     ToolCall,
     ToolResult,
 )
+from writer.project import (
+    ProjectState,
+    create_workspace,
+    refresh_agent_file,
+    validate_command_available,
+)
+from writer.roles import OutlineResult
 from writer.routing import AgentAction
 from writer.tools.errors import ToolError
 
@@ -102,13 +110,33 @@ async def _engine_loop(
         action = deps.route(ctx.user_input, ctx.project_state)
         yield ActionEvent(action=action)
 
+        check = validate_command_available(
+            action.command,
+            ctx.project_root,
+            ctx.project_state,
+        )
+        if not check.ok:
+            yield TextChunk(text=f"{check.reason}\n")
+            yield Done(
+                reason="aborted",
+                payload={
+                    "command": action.command,
+                    "project_state": check.state.value,
+                    "error": check.reason,
+                },
+            )
+            return
+
         match action.action_type:
             case "answer_directly":
                 yield TextChunk(text=action.answer or "")
                 yield Done(reason="answered", payload={"answer": action.answer})
 
             case "run_command":
-                if action.command == "/大纲":
+                if action.command == "/init":
+                    async for event in _run_init_command(ctx, cfg):
+                        yield event
+                elif action.command == "/大纲":
                     async for event in _run_outline_command(ctx, deps, cfg):
                         yield event
                 else:
@@ -167,11 +195,14 @@ async def _run_outline_command(
     # mis-parse. ``removeprefix`` is the canonical, defensive form.
     idea = ctx.user_input.removeprefix("/大纲").strip()
     outline = deps.story_consultant.draft_outline(idea)
+    outline_path = _write_outline(ctx.project_root, outline)
 
     yield TextChunk(text=f"标题: {outline.title}\n")
     yield TextChunk(text=f"前提: {outline.premise}\n")
     for chapter in outline.chapters:
         yield TextChunk(text=f"- {chapter}\n")
+    root = ctx.project_root or outline_path.parent.parent
+    yield TextChunk(text=f"已写入: {outline_path.relative_to(root).as_posix()}\n")
 
     yield Done(
         reason="answered",
@@ -179,7 +210,64 @@ async def _run_outline_command(
             "answer": outline.title,
             "outline": True,
             "chapter_count": len(outline.chapters),
+            "outline_path": str(outline_path),
+            "project_state": ProjectState.HAS_OUTLINE.value,
         },
+    )
+
+
+async def _run_init_command(
+    ctx: EngineContext,
+    cfg: EngineConfig,
+) -> AsyncIterator[TextChunk | Done]:
+    """Create a project workspace from ``/init <name>`` and return its root."""
+
+    if not cfg.fast_mode:
+        yield TextChunk(text="[engine] /init → create_workspace\n")
+
+    name = ctx.user_input.removeprefix("/init").strip()
+    if not name:
+        msg = "用法：/init <项目名>。例如：/init 我的小说"
+        yield TextChunk(text=f"{msg}\n")
+        yield Done(reason="aborted", payload={"command": "/init", "error": msg})
+        return
+
+    workspace = create_workspace(name, Path("novels"))
+    yield TextChunk(text=f"已初始化项目: {workspace.root}\n")
+    yield Done(
+        reason="answered",
+        payload={
+            "command": "/init",
+            "project_root": str(workspace.root.resolve()),
+            "project_state": ProjectState.INITIALIZED.value,
+        },
+    )
+
+
+def _write_outline(project_root: Path | None, outline: OutlineResult) -> Path:
+    """Persist an outline result under the current project."""
+
+    if project_root is None:
+        msg = "未绑定项目，无法写入大纲。请先执行 /init <项目名>。"
+        raise ToolError(msg)
+
+    root = project_root.resolve()
+    outline_dir = root / "outline"
+    outline_dir.mkdir(parents=True, exist_ok=True)
+    target = outline_dir / "大纲.md"
+    target.write_text(_format_outline(outline), encoding="utf-8")
+    refresh_agent_file(root)
+    return target
+
+
+def _format_outline(outline: OutlineResult) -> str:
+    chapters = "\n".join(f"- {chapter}" for chapter in outline.chapters)
+    return (
+        f"# {outline.title}\n\n"
+        "## 前提\n\n"
+        f"{outline.premise}\n\n"
+        "## 四幕大纲\n\n"
+        f"{chapters}\n"
     )
 
 

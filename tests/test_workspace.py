@@ -27,6 +27,7 @@ EXPECTED_DIRS = [
 ]
 
 EXPECTED_FILES = [
+    "AGENT.md",
     "README.md",
     "outline/premise.md",
     "outline/volume-plan.md",
@@ -74,6 +75,9 @@ def test_create_workspace_file_contents_match_template(tmp_path: Path) -> None:
 
     readme = (workspace.root / "README.md").read_text(encoding="utf-8")
     assert readme == "# 测试项目\n\n长篇小说项目工作区。\n"
+
+    agent = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "state: S1" in agent
 
     premise = (workspace.root / "outline" / "premise.md").read_text(encoding="utf-8")
     assert premise == "# 一句话创意\n\n"

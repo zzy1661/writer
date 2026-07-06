@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from writer.tools.builtin.analysis_tools import Wordcount
+from writer.tools.builtin.analysis_tools import ProjectSearch, Wordcount
 from writer.tools.builtin.file_tools import SafeListDir, SafeReadFile
 from writer.tools.builtin.foreshadow_tools import ForeshadowQuery
 from writer.tools.builtin.locate_tools import ChapterLocate
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ChapterLocate",
     "ForeshadowQuery",
+    "ProjectSearch",
     "SafeListDir",
     "SafeReadFile",
     "Wordcount",
@@ -46,6 +47,7 @@ def built_tool_registry() -> ToolRegistry:
                 SafeReadFile(),
                 SafeListDir(),
                 Wordcount(),
+                ProjectSearch(),
                 ChapterLocate(),
                 ForeshadowQuery(),
             ],

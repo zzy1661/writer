@@ -16,6 +16,7 @@ from writer.tools import builtin
 from writer.tools.builtin import (
     ChapterLocate,
     ForeshadowQuery,
+    ProjectSearch,
     SafeListDir,
     SafeReadFile,
     Wordcount,
@@ -37,6 +38,7 @@ from writer.tools.runtime import ToolRuntime
 __all__ = [
     "ChapterLocate",
     "ForeshadowQuery",
+    "ProjectSearch",
     "SafeListDir",
     "SafeReadFile",
     "Tool",

@@ -4,8 +4,8 @@ The ``EngineSession`` is created once at REPL startup and reused for every
 turn. It owns:
 
 - **Identity** (frozen): ``session_id`` (UUID) and ``started_at`` (datetime).
-- **Project context** (mutable): ``project_root`` (Path | None) and
-  ``project_state`` (str placeholder until ``detect_state()`` lands later).
+- **Project context** (mutable): ``project_root`` (Path | None) and the
+  latest state detected from disk.
 - **deps** (mutable): the ``EngineDeps`` instance, built once at
   construction. ``tool_runtime`` is swapped via :meth:`set_project_root`
   while router / story_consultant / tool_registry are preserved.
@@ -56,7 +56,7 @@ class EngineSession:
 
     # Project context (mutable).
     project_root: Path | None = None
-    project_state: str = "S0"  # placeholder until detect_state() lands
+    project_state: str = "S0"
 
     # Deps — built once at construction; tool_runtime swap on project_root change.
     deps: EngineDeps = field(default=None)  # type: ignore[assignment]
@@ -107,6 +107,15 @@ class EngineSession:
         resolved = (new_root or _SENTINEL_PROJECT_ROOT).resolve()
         new_runtime = ToolRuntime(project_root=resolved)
         self.deps = self.deps.rebind_tool_runtime(new_runtime)
+        self.refresh_project_state()
+
+    def refresh_project_state(self) -> str:
+        """Refresh ``project_state`` from files on disk and return it."""
+
+        from writer.project import detect_state
+
+        self.project_state = detect_state(self.project_root).value
+        return self.project_state
 
     # ------------------------------------------------------------------
     # Turn history
