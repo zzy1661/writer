@@ -66,7 +66,7 @@ COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
     "/init": {ProjectState.UNINITIALIZED},
     "/大纲": {ProjectState.INITIALIZED, ProjectState.HAS_OUTLINE},
     "/目录": {ProjectState.HAS_OUTLINE, ProjectState.HAS_TOC},
-    "/写": {ProjectState.HAS_TOC, ProjectState.WRITING},
+    "/创作": {ProjectState.HAS_TOC, ProjectState.WRITING},
     "/续写": {ProjectState.WRITING},
     "/改": {ProjectState.WRITING},
     "/审核": {ProjectState.WRITING, ProjectState.FINISHED},
@@ -97,7 +97,7 @@ COMMAND_HINTS: dict[str, str] = {
     "/init": "当前已经绑定项目；如需新项目，请先退出当前 REPL 或另开目录。",
     "/大纲": "请先执行 /init <项目名> 创建项目。",
     "/目录": "请先用 /大纲 生成并落盘大纲。",
-    "/写": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
+    "/创作": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
     "/续写": "请先进入写作中状态，也就是至少有一章正文草稿。",
     "/改": "请先进入写作中状态，也就是至少有一章正文草稿。",
     "/审核": "请先写出至少一章正文。",
@@ -190,34 +190,83 @@ def count_chapters(project_root: Path) -> int:
     return total
 
 
-def render_agent_file(project_name: str, state: ProjectState) -> str:
-    """Render the project control file used by state detection."""
+def render_agent_file(
+    project_name: str,
+    state: ProjectState,
+    *,
+    genre: str = "other",
+) -> str:
+    """Render the project control file used by state detection.
 
-    return (
-        f"# {project_name}\n\n"
-        "Writer Agent 项目状态文件。\n\n"
-        "## 当前状态\n\n"
-        f"- state: {state.value}\n"
-        f"- label: {STATE_DESCRIPTIONS[state]}\n\n"
-        "## 目录约定\n\n"
-        "- outline/: 大纲、目录与分卷规划\n"
-        "- manuscript/: 正文草稿\n"
-        "- characters/: 人物设定\n"
-        "- world/: 世界观设定\n"
-        "- notes/: 写作笔记\n"
+    When ``genre`` is a known genre (not ``"other"``), a ``题材: <genre>``
+    line is included directly below the state line so downstream code
+    (``EngineSession._read_genre_from_agent``, ``production_deps`` etc.)
+    can pick it up via simple regex. The default ``"other"`` skips the
+    line to keep legacy ``AGENT.md`` content unchanged.
+    """
+
+    lines = [
+        f"# {project_name}\n",
+        "\n",
+        "Writer Agent 项目状态文件。\n",
+        "\n",
+        "## 当前状态\n",
+        "\n",
+        f"- state: {state.value}\n",
+        f"- label: {STATE_DESCRIPTIONS[state]}\n",
+    ]
+    if genre and genre != "other":
+        lines.append(f"- 题材: {genre}\n")
+    lines.extend(
+        [
+            "\n",
+            "## 目录约定\n",
+            "\n",
+            "- outline/: 大纲、目录与分卷规划\n",
+            "- manuscript/: 正文草稿\n",
+            "- characters/: 人物设定\n",
+            "- world/: 世界观设定\n",
+            "- notes/: 写作笔记\n",
+        ]
     )
+    return "".join(lines)
 
 
 def refresh_agent_file(project_root: Path) -> None:
-    """Update ``AGENT.md`` with the current detected state."""
+    """Update ``AGENT.md`` with the current detected state.
+
+    Preserves any ``题材:`` line already in the file so re-rendering after
+    a state transition (e.g. S1 → S2) doesn't clobber the genre set by
+    ``create_workspace(genre=...)``.
+    """
 
     root = project_root.resolve()
     state = detect_state(root)
     project_name = root.name
+    existing_genre = read_genre_from_agent(root / "AGENT.md")
     (root / "AGENT.md").write_text(
-        render_agent_file(project_name, state),
+        render_agent_file(project_name, state, genre=existing_genre),
         encoding="utf-8",
     )
+
+
+def read_genre_from_agent(agent_md: Path) -> str:
+    """Parse the ``题材:`` line out of an ``AGENT.md`` file.
+
+    Returns ``"other"`` if the file is missing, unreadable, or has no
+    ``题材:`` line — never raises. Whitespace is stripped on both sides.
+    """
+
+    try:
+        text = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return "other"
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("题材:"):
+            value = stripped.split(":", 1)[1].strip()
+            return value or "other"
+    return "other"
 
 
 def _coerce_state(value: str | ProjectState | None) -> ProjectState:
@@ -262,6 +311,7 @@ __all__ = [
     "count_chapters",
     "detect_state",
     "inspect_project",
+    "read_genre_from_agent",
     "refresh_agent_file",
     "render_agent_file",
     "validate_command_available",

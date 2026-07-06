@@ -31,7 +31,7 @@ def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
     (tmp_path / "outline").mkdir()
     (tmp_path / "outline" / "toc.md").write_text("1.3 回流测试章", encoding="utf-8")
     ctx = EngineContext(
-        user_input="/写 1.3 触发回流",
+        user_input="/创作 1.3 触发回流",
         project_root=tmp_path,
         project_state="S2",
         session_id="rewrite-test",

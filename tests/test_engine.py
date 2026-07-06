@@ -27,12 +27,12 @@ from writer.routing import (
 
 
 def test_router_classifies_write_command() -> None:
-    action = RuleBasedIntentRouter().route("/写 1.3", "S0")
+    action = RuleBasedIntentRouter().route("/创作 1.3", "S0")
 
     assert action.action_type == "start_workflow"
     assert action.workflow == "write_chapter"
     assert action.role == "story_consultant"
-    assert action.command == "/写"
+    assert action.command == "/创作"
 
 
 def test_router_classifies_review_command() -> None:
@@ -155,7 +155,7 @@ def test_engine_yields_done_for_workflow(tmp_path: Path) -> None:
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
 
-    events = _consume(run_engine(_workspace_ctx("/写 1.3", workspace.root), deps))
+    events = _consume(run_engine(_workspace_ctx("/创作 1.3", workspace.root), deps))
 
     assert any(isinstance(e, ActionEvent) and e.action.workflow == "write_chapter" for e in events)
     assert any(isinstance(e, Done) and e.reason == "workflow_pending" for e in events)
@@ -241,7 +241,7 @@ def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
 
-    events = _consume(run_engine(_workspace_ctx("/写 1.3", workspace.root), deps))
+    events = _consume(run_engine(_workspace_ctx("/创作 1.3", workspace.root), deps))
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
 
@@ -254,10 +254,10 @@ def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
 def test_engine_blocks_write_before_toc() -> None:
     deps = production_deps()
 
-    events = _consume(run_engine(_ctx("/写 1.3"), deps))
+    events = _consume(run_engine(_ctx("/创作 1.3"), deps))
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
-    assert "/写 当前不可用" in text_blob
+    assert "/创作 当前不可用" in text_blob
     assert any(isinstance(e, Done) and e.reason == "aborted" for e in events)
 
 

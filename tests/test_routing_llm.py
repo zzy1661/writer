@@ -56,7 +56,7 @@ def test_llm_router_returns_structured_action() -> None:
         action_type="start_workflow",
         workflow="write_chapter",
         role="story_consultant",
-        command="/写",
+        command="/创作",
     )
     chain = RunnableLambda(lambda _: expected)
 
@@ -153,7 +153,7 @@ def test_composite_router_deterministic_for_fixed_inputs() -> None:
 
 def test_looks_like_command_slash_prefix() -> None:
     assert RuleBasedIntentRouter.looks_like_command("/init")
-    assert RuleBasedIntentRouter.looks_like_command("/写 1.3")
+    assert RuleBasedIntentRouter.looks_like_command("/创作 1.3")
     assert RuleBasedIntentRouter.looks_like_command("  /审核  ")
 
 

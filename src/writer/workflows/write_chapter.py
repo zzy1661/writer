@@ -154,7 +154,7 @@ def _route_after_review(state: WriterState) -> Literal["rewrite", "end"]:
 
 
 def _extract_chapter_id(user_input: str) -> str:
-    text = user_input.removeprefix("/写").strip()
+    text = user_input.removeprefix("/创作").strip()
     return text.split(maxsplit=1)[0] if text else "1.1"
 
 

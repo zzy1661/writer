@@ -89,7 +89,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 - `command_pending`——其它斜杠命令
 - `tool_pending`——保留(目前未使用,实际工具调用走 `tool_completed`)
 - `tool_completed`——`call_tool` 真调 `ToolRegistry.invoke()` 后(含 `ToolCall`/`ToolResult` 事件)
-- `workflow_pending`——`/写` `/审核` 工作流
+- `workflow_pending`——`/创作` `/审核` 工作流
 - `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮)
 - `aborted`——`ErrorEvent` 后兜底分支(引擎异常/工具异常)
 

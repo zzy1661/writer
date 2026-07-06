@@ -56,7 +56,7 @@ def test_repl_handles_help_and_user_input() -> None:
 
     assert result.exit_code == 0
     assert "可用命令" in result.stdout
-    assert "/写" in result.stdout
+    assert "/创作" in result.stdout
     # 自然语言输入被 agent engine 接走，进入 answer_directly 终止分支
     assert "[engine] 分析输入" in result.stdout
     assert "帮我继续写下一章" in result.stdout
@@ -107,7 +107,7 @@ def test_build_prompt_session_supports_no_history() -> None:
 def test_repl_command_aliases_present() -> None:
     """Every documented REPL command should be reachable via its slash form."""
     command_names = {cmd for cmd, _ in REPL_COMMANDS}
-    assert {"/init", "/大纲", "/目录", "/写", "/续写", "/改", "/审核", "/状态", "/帮助", "/退出"} <= command_names
+    assert {"/init", "/大纲", "/目录", "/创作", "/续写", "/改", "/审核", "/状态", "/帮助", "/退出"} <= command_names
     assert "/退出" in EXIT_COMMANDS
     assert "/帮助" in HELP_COMMANDS
 

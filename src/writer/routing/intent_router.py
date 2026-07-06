@@ -117,10 +117,10 @@ class RuleBasedIntentRouter:
                 tool_name="wordcount",
                 arguments={"path": path},
             )
-        if text.startswith("/写"):
+        if text.startswith("/创作"):
             return AgentAction(
                 action_type="start_workflow",
-                command="/写",
+                command="/创作",
                 role="story_consultant",
                 workflow="write_chapter",
                 arguments={"raw": text},
@@ -149,7 +149,7 @@ class RuleBasedIntentRouter:
         return AgentAction(
             action_type="answer_directly",
             answer=(
-                "我可以处理 /init、/大纲、/目录、/写、/审核、/改 等写作命令。"
+                "我可以处理 /init、/大纲、/目录、/创作、/审核、/改 等写作命令。"
                 f"你刚才说的是：{text}"
             ),
         )

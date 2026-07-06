@@ -74,7 +74,7 @@ def test_refresh_agent_file_writes_detected_state(tmp_path: Path) -> None:
 
 
 def test_validate_command_blocks_write_in_s0() -> None:
-    check = validate_command_available("/写", None, "S0")
+    check = validate_command_available("/创作", None, "S0")
 
     assert check.ok is False
     assert check.state == ProjectState.UNINITIALIZED
