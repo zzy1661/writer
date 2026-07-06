@@ -1,11 +1,4 @@
-"""Long-task workflows (Plan-Execute-Review graphs, per 备忘 04).
-
-This package currently exposes *placeholder stubs* that return text chunks
-so the engine's ``start_workflow`` branch can be exercised end-to-end.
-Concrete LangGraph ``StateGraph`` implementations will land here later; the
-engine's contract is the :data:`WorkflowStub` signature — switching from
-stub to real graph is a registration change, not a call-site change.
-"""
+"""Long-task workflows (Plan-Execute-Review graphs, per 备忘 04)."""
 
 from __future__ import annotations
 
@@ -16,12 +9,12 @@ if TYPE_CHECKING:
     from writer.engine.context import EngineContext
 
 from writer.workflows.review_chapter import stub as review_chapter_stub
-from writer.workflows.write_chapter import stub as write_chapter_stub
+from writer.workflows.write_chapter import run as write_chapter_run
 
 WorkflowStub = Callable[["EngineContext"], Iterable[str]]
 
 WORKFLOWS: dict[str, WorkflowStub] = {
-    "write_chapter": write_chapter_stub,
+    "write_chapter": write_chapter_run,
     "review_chapter": review_chapter_stub,
 }
 

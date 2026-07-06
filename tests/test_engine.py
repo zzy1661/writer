@@ -236,7 +236,7 @@ def test_engine_runs_outline_via_story_consultant(tmp_path: Path) -> None:
 
 
 def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
-    """``start_workflow`` must dispatch to a registered workflow stub and stream its output."""
+    """``start_workflow`` must dispatch to the registered LangGraph workflow."""
     deps = production_deps()
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
@@ -245,8 +245,9 @@ def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
 
-    assert "[workflow] (stub) write_chapter" in text_blob
-    assert "LangGraph" in text_blob
+    assert "[workflow] LangGraph write_chapter 图完成" in text_blob
+    assert "prep_context" in text_blob
+    assert "review_gate" in text_blob
     assert any(isinstance(e, Done) and e.reason == "workflow_pending" for e in events)
 
 
