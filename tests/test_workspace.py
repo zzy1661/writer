@@ -4,6 +4,7 @@ Covers:
 - ``create_workspace`` (directory creation, file templates, force flag)
 - ``_normalize_name`` (whitespace stripping, space→dash, empty rejection)
 - ``NovelWorkspace`` (frozen dataclass)
+- Genre-aware scaffolding (fea-genre-aware-init Block 1)
 """
 
 from __future__ import annotations
@@ -35,6 +36,28 @@ EXPECTED_FILES = [
     "world/setting.md",
     "notes/todo.md",
 ]
+
+HISTORY_FILES = [
+    "史实/年表.md",
+    "史实/人物.md",
+    "史实/事件.md",
+    "史实/考证.md",
+]
+
+XUANHUAN_FILES = [
+    "伏笔/foreshadow.md",
+    "大纲/境界表.md",
+]
+
+ROMANCE_FILES = [
+    "人设/男主.md",
+    "人设/女主.md",
+    "大纲/感情线时间轴.md",
+]
+
+
+def _relative(paths: list[Path], root: Path) -> set[str]:
+    return {p.relative_to(root).as_posix() for p in paths}
 
 
 def test_create_workspace_creates_expected_dirs_and_files(tmp_path: Path) -> None:
@@ -111,7 +134,6 @@ def test_create_workspace_overwrites_existing_files_when_force(tmp_path: Path) -
 
     assert workspace_second.root == workspace_first.root
     assert readme.read_text(encoding="utf-8") == "# dup\n\n长篇小说项目工作区。\n"
-    # All template files should be re-created and reported
     relative = {p.relative_to(workspace_second.root).as_posix() for p in workspace_second.created_files}
     assert relative == set(EXPECTED_FILES)
 
@@ -130,7 +152,6 @@ def test_create_workspace_keeps_existing_files_when_not_force(tmp_path: Path) ->
     with pytest.raises(FileExistsError):
         create_workspace("dup", tmp_path)
 
-    # The stale README was preserved because we never made it past the guard.
     assert (first.root / "README.md").read_text(encoding="utf-8") == "stale"
 
 
@@ -146,7 +167,6 @@ def test_create_workspace_raises_value_error_on_whitespace_name(tmp_path: Path) 
 
 def test_normalize_name_replaces_internal_spaces() -> None:
     assert _normalize_name("hello world") == "hello-world"
-    # Every space becomes a dash — consecutive spaces are preserved as consecutive dashes.
     assert _normalize_name("a  b  c") == "a--b--c"
     assert _normalize_name(" leading") == "leading"
     assert _normalize_name("trailing ") == "trailing"
@@ -160,3 +180,82 @@ def test_novel_workspace_is_frozen(tmp_path: Path) -> None:
 
     with pytest.raises(FrozenInstanceError):
         workspace.created_files = []  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Genre-aware scaffolding (fea-genre-aware-init Block 1)
+# ---------------------------------------------------------------------------
+
+
+def test_create_workspace_history_genre_appends_history_dirs(tmp_path: Path) -> None:
+    workspace = create_workspace("长安", tmp_path, genre="历史")
+
+    for relative in HISTORY_FILES:
+        assert (workspace.root / relative).is_file()
+    for relative in EXPECTED_FILES:
+        assert (workspace.root / relative).is_file()
+    assert HISTORY_FILES[0] in _relative(workspace.created_files, workspace.root)
+
+
+def test_create_workspace_xuanhuan_genre_appends_xuanhuan_dirs(tmp_path: Path) -> None:
+    workspace = create_workspace("破界", tmp_path, genre="玄幻")
+
+    for relative in XUANHUAN_FILES:
+        assert (workspace.root / relative).is_file()
+    assert not (workspace.root / "史实").exists()
+    assert not (workspace.root / "人设").exists()
+
+
+def test_create_workspace_romance_genre_appends_romance_dirs(tmp_path: Path) -> None:
+    workspace = create_workspace("双生", tmp_path, genre="言情")
+
+    for relative in ROMANCE_FILES:
+        assert (workspace.root / relative).is_file()
+    assert not (workspace.root / "史实").exists()
+    assert not (workspace.root / "伏笔").exists()
+
+
+def test_create_workspace_other_genre_is_backward_compatible(tmp_path: Path) -> None:
+    workspace = create_workspace("杂项", tmp_path)
+
+    relative = _relative(workspace.created_files, workspace.root)
+    assert relative == set(EXPECTED_FILES)
+    assert not (workspace.root / "史实").exists()
+    assert not (workspace.root / "伏笔").exists()
+    assert not (workspace.root / "人设").exists()
+
+
+def test_create_workspace_unknown_genre_falls_back_to_other(tmp_path: Path) -> None:
+    workspace = create_workspace("试验", tmp_path, genre="都市悬疑")
+
+    relative = _relative(workspace.created_files, workspace.root)
+    assert relative == set(EXPECTED_FILES)
+    assert "史实" not in relative
+    assert "伏笔" not in relative
+    assert "人设" not in relative
+
+
+def test_create_workspace_english_genre_aliases_resolve(tmp_path: Path) -> None:
+    workspace_x = create_workspace("a1", tmp_path, genre="xuanhuan")
+    workspace_r = create_workspace("b1", tmp_path, genre="romance")
+    workspace_h = create_workspace("c1", tmp_path, genre="history")
+
+    assert "大纲/境界表.md" in _relative(workspace_x.created_files, workspace_x.root)
+    assert "人设/男主.md" in _relative(workspace_r.created_files, workspace_r.root)
+    assert "史实/年表.md" in _relative(workspace_h.created_files, workspace_h.root)
+
+
+def test_create_workspace_writes_genre_line_in_agent_md(tmp_path: Path) -> None:
+    workspace = create_workspace("贞观", tmp_path, genre="历史")
+
+    agent_text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "题材: 历史" in agent_text
+    assert "state: S1" in agent_text
+
+
+def test_create_workspace_other_genre_has_no_ticaline_in_agent_md(tmp_path: Path) -> None:
+    workspace = create_workspace("default", tmp_path)
+
+    agent_text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "state: S1" in agent_text
+    assert "题材:" not in agent_text

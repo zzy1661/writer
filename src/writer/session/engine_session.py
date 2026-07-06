@@ -57,6 +57,7 @@ class EngineSession:
     # Project context (mutable).
     project_root: Path | None = None
     project_state: str = "S0"
+    project_genre: str = "other"
 
     # Deps — built once at construction; tool_runtime swap on project_root change.
     deps: EngineDeps = field(default=None)  # type: ignore[assignment]
@@ -108,6 +109,7 @@ class EngineSession:
         new_runtime = ToolRuntime(project_root=resolved)
         self.deps = self.deps.rebind_tool_runtime(new_runtime)
         self.refresh_project_state()
+        self.refresh_project_genre()
 
     def refresh_project_state(self) -> str:
         """Refresh ``project_state`` from files on disk and return it."""
@@ -116,6 +118,26 @@ class EngineSession:
 
         self.project_state = detect_state(self.project_root).value
         return self.project_state
+
+    def refresh_project_genre(self) -> str:
+        """Refresh ``project_genre`` from ``(project_root / AGENT.md)``.
+
+        Returns the refreshed value (``"other"`` when missing or empty).
+        The method never raises — a torn AGENT.md just falls back to
+        ``"other"``. Called automatically from
+        :meth:`set_project_root` and on demand by callers that want to
+        re-read after an external ``AGENT.md`` edit.
+        """
+
+        if self.project_root is None:
+            self.project_genre = "other"
+        else:
+            from writer.project import read_genre_from_agent
+
+            self.project_genre = read_genre_from_agent(
+                self.project_root / "AGENT.md"
+            )
+        return self.project_genre
 
     # ------------------------------------------------------------------
     # Turn history

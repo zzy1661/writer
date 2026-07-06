@@ -112,6 +112,7 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
 
     if text == "/状态":
         session.refresh_project_state()
+        session.refresh_project_genre()
         snapshot = inspect_project(session.project_root)
         root = str(snapshot.root) if snapshot.root is not None else "未绑定"
         outline = (
@@ -124,10 +125,58 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
             f"turns={len(session.turns)} "
             f"project_state={snapshot.state.value} "
             f"({STATE_DESCRIPTIONS[snapshot.state]}) "
+            f"project_genre={session.project_genre} "
             f"project_root={root} "
             f"chapters={snapshot.chapter_count} "
             f"outline={outline}"
         )
+        return True
+
+    if text.startswith("/init ") and ("--" in text or " -" in text):
+        # ``/init`` alone (no args) falls through to engine dispatch; only
+        # flag-form inputs (e.g. ``/init --name 双生 --genre 言情``) take
+        # this code path. Mirrors Typer subcommand behaviour.
+        # Parse argv-style flags after the command for the REPL form.
+        # Supported flags mirror the Typer subcommand: --name, --dir/-d,
+        # --genre/-g, --force. Missing --genre falls through to the same
+        # Typer-style prompt (4-option chooser → free-text follow-up).
+        from writer.cli.main import _parse_repl_init_argv  # local import: forward-ref cycle
+
+        try:
+            name, directory, force, genre = _parse_repl_init_argv(text)
+        except ValueError as exc:
+            console.print(f"[red]错误：{exc}[/red]")
+            return True
+
+        if genre is None:
+            # Interactive prompt — show the canonical labels as a hint;
+            # actual prompt is free-text per project decision.
+            console.print(
+                f"可用题材（输入后回车；其它值视为 other）：{', '.join(_INIT_PROMPT_GENRES)}"
+            )
+            picked = typer.prompt("请选择小说题材", default="其他")
+            genre_arg: str | None = picked
+        else:
+            genre_arg = genre
+
+        try:
+            resolved_genre = init_project(
+                name,
+                directory,
+                force=force,
+                genre=genre_arg,
+            )
+        except typer.Exit:
+            return True
+
+        # Bind the freshly-created project to the live session so subsequent
+        # engine turns can find the right RAG files / Consultant.
+        try:
+            session.set_project_root(directory / name)
+            session.refresh_project_genre()
+        except Exception:  # noqa: BLE001 — set_project_root is path-tolerant
+            pass
+        console.print(f"[dim]session.project_genre={resolved_genre}[/dim]")
         return True
 
     # 框架命令（退出/帮助/状态）之外的所有输入——斜杠命令与自然语言
@@ -289,17 +338,169 @@ def new_project(
         bool,
         typer.Option("--force", help="允许覆盖缺失的初始化文件"),
     ] = False,
+    genre: Annotated[
+        str | None,
+        typer.Option(
+            "--genre",
+            "-g",
+            help="小说题材（历史 / 言情 / 玄幻，其他值视为 other 兜底）",
+        ),
+    ] = None,
 ) -> None:
     """创建一个小说项目工作区。"""
+    resolved_genre = _resolve_genre_for_init(genre)
     try:
-        workspace = create_workspace(name, directory, force=force)
+        workspace = create_workspace(
+            name, directory, force=force, genre=resolved_genre
+        )
     except (FileExistsError, ValueError) as exc:
         console.print(f"[red]错误：{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
     console.print(f"[green]已创建小说项目：[/green]{workspace.root}")
+    console.print(f"题材：{resolved_genre}")
     for path in workspace.created_files:
         console.print(f"  - {path}")
+
+
+# Four genre options shown in the interactive prompt when ``--genre``
+# is missing. Selecting ``其他`` triggers a free-text follow-up prompt;
+# anything the user types there is then treated as the ``other`` bucket.
+_INIT_PROMPT_GENRES = ["历史", "言情", "玄幻", "其他"]
+
+
+def _normalize_cli_genre(raw: str) -> str:
+    """Map a CLI-side genre string (Chinese label or alias) to a canonical key.
+
+    Returns ``"other"`` for empty input, whitespace, or any value outside
+    the alias table — including user-typed custom strings like ``"都市悬疑"``
+    or ``"科幻"`` (per ``fea-genre-aware-init`` decision: free input allowed,
+    falls through to the four-act fallback).
+    """
+    key = (raw or "").strip().lower()
+    if not key:
+        return "other"
+    aliases = {
+        "历史": "历史",
+        "history": "历史",
+        "historical": "历史",
+        "言情": "言情",
+        "romance": "言情",
+        "玄幻": "玄幻",
+        "xuanhuan": "玄幻",
+        "fantasy": "玄幻",
+        "其他": "other",
+        "other": "other",
+    }
+    return aliases.get(key, "other")
+
+
+def _resolve_genre_for_init(raw: str | None) -> str:
+    """Resolve the final genre string used by ``create_workspace``.
+
+    ``raw`` is what the user passed (or what the REPL parser extracted).
+    The REPL side supplies a non-null string already; the Typer side
+    uses Typer's interactive prompt machinery to gather it. Either way,
+    this function normalises to the same canonical key.
+    """
+    return _normalize_cli_genre(raw or "other")
+
+
+def _parse_repl_init_argv(text: str) -> tuple[str, Path, bool, str | None]:
+    """Parse ``"/init --name 双生 --dir novels --genre 言情"`` style input.
+
+    Returns ``(name, directory, force, genre)``. Raises ``ValueError`` on
+    missing/empty ``--name``. The REPL form does not support positional
+    ``name`` (it's a single-line shell-ish string, so the first token
+    after ``/init`` MUST be a flag) — explicit ``--name`` keeps parsing
+    deterministic and produces a clearer error when omitted.
+    """
+    from argparse import ArgumentParser
+
+    rest = text[len("/init"):].strip()
+    parser = ArgumentParser(prog="init", add_help=False)
+    parser.add_argument("--name", "-n", required=True, dest="name")
+    parser.add_argument("--dir", "-d", default="novels", dest="directory")
+    parser.add_argument("--genre", "-g", default=None, dest="genre")
+    parser.add_argument(
+        "--force", action="store_true", default=False, dest="force"
+    )
+    args = parser.parse_args(rest.split())
+    if not args.name.strip():
+        msg = "--name 不能为空"
+        raise ValueError(msg)
+    return (
+        args.name.strip(),
+        Path(args.directory),
+        bool(args.force),
+        args.genre,
+    )
+
+
+def init_project(
+    name: str,
+    directory: Path,
+    *,
+    force: bool = False,
+    genre: str | None = None,
+) -> str:
+    """Shared backend for the Typer ``init`` subcommand and the REPL ``/init``.
+
+    Returns the canonical genre used (never raises — surfaces errors via
+    ``console.print`` and exit codes so the REPL driver doesn't crash).
+    """
+    resolved_genre = _normalize_cli_genre(genre or "other")
+    try:
+        workspace = create_workspace(
+            name, directory, force=force, genre=resolved_genre
+        )
+    except (FileExistsError, ValueError) as exc:
+        console.print(f"[red]错误：{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    console.print(f"[green]已创建小说项目：[/green]{workspace.root}")
+    console.print(f"题材：{resolved_genre}")
+    for path in workspace.created_files:
+        console.print(f"  - {path}")
+    return resolved_genre
+
+
+@app.command("init")
+def init_project_cmd(
+    name: Annotated[str, typer.Argument(help="小说项目名称")],
+    directory: Annotated[
+        Path,
+        typer.Option("--dir", "-d", help="项目创建到哪个目录下"),
+    ] = Path("novels"),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="允许覆盖缺失的初始化文件"),
+    ] = False,
+    genre: Annotated[
+        str | None,
+        typer.Option(
+            "--genre",
+            "-g",
+            help="小说题材（历史 / 言情 / 玄幻，其他视为兜底）",
+            prompt=False,
+        ),
+    ] = None,
+) -> None:
+    """创建一个小说项目工作区（题材感知版）。"""
+    if genre is None:
+        # Interactive prompt — show the canonical labels as a hint; the
+        # actual ``typer.prompt`` is free-text per the project decision
+        # ("``其他`` 允许自由输入；任何非白名单值都落到 other 兜底").
+        console.print(
+            f"可用题材（输入后回车；其它值视为 other）：{', '.join(_INIT_PROMPT_GENRES)}"
+        )
+        picked = typer.prompt(
+            "请选择小说题材",
+            default="其他",
+        )
+    else:
+        picked = genre
+    init_project(name, directory, force=force, genre=picked)
 
 
 @app.command()

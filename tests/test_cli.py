@@ -345,3 +345,95 @@ def test_run_repl_handles_eof() -> None:
 
     assert result.exit_code == 0
     assert "已退出 writer" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# init / /init (genre-aware) — fea-genre-aware-init Block 6
+# ---------------------------------------------------------------------------
+
+
+def test_init_subcommand_with_genre_flag_creates_genre_files(
+    tmp_path: Path,
+) -> None:
+    result = runner.invoke(
+        app,
+        ["init", "贞观", "--dir", str(tmp_path), "--genre", "历史"],
+    )
+
+    assert result.exit_code == 0
+    project_root = tmp_path / "贞观"
+    assert (project_root / "史实" / "年表.md").is_file()
+    assert "题材: 历史" in (project_root / "AGENT.md").read_text(encoding="utf-8")
+
+
+def test_init_subcommand_short_genre_flag_alias(tmp_path: Path) -> None:
+    """`-g` short option is equivalent to `--genre`."""
+
+    result = runner.invoke(
+        app,
+        ["init", "双生", "--dir", str(tmp_path), "-g", "言情"],
+    )
+
+    assert result.exit_code == 0
+    project_root = tmp_path / "双生"
+    assert (project_root / "人设" / "男主.md").is_file()
+
+
+def test_init_subcommand_unknown_genre_falls_through_to_other(
+    tmp_path: Path,
+) -> None:
+    """User-typed ``--genre 都市悬疑`` is treated as the ``other`` fallback."""
+
+    result = runner.invoke(
+        app,
+        ["init", "试验", "--dir", str(tmp_path), "--genre", "都市悬疑"],
+    )
+
+    assert result.exit_code == 0
+    project_root = tmp_path / "试验"
+    assert not (project_root / "史实").exists()
+    assert not (project_root / "伏笔").exists()
+    assert not (project_root / "人设").exists()
+
+
+def test_init_subcommand_force_flag_still_works(tmp_path: Path) -> None:
+    runner.invoke(app, ["init", "dup-test", "--dir", str(tmp_path)])
+
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "dup-test",
+            "--dir",
+            str(tmp_path),
+            "--genre",
+            "玄幻",
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0
+    project_root = tmp_path / "dup-test"
+    assert (project_root / "伏笔" / "foreshadow.md").is_file()
+
+
+def test_repl_init_with_flags_creates_workspace_and_binds_session(
+    tmp_path: Path,
+) -> None:
+    """REPL ``/init --name 双生 --genre 言情`` form mirrors the Typer subcommand."""
+
+    cli_input = f"/init --name 双生 --dir {tmp_path} --genre 言情\n/退出\n"
+    result = runner.invoke(app, input=cli_input)
+
+    assert result.exit_code == 0
+    project_root = tmp_path / "双生"
+    assert (project_root / "人设" / "男主.md").is_file()
+
+
+def test_repl_init_alone_falls_through_to_engine(tmp_path: Path) -> None:
+    """Plain ``/init`` (no flags) should NOT enter our argv parser
+    and instead fall through to the engine's command_pending branch."""
+
+    result = runner.invoke(app, input="/init\n/退出\n")
+
+    assert result.exit_code == 0

@@ -254,7 +254,9 @@ def read_genre_from_agent(agent_md: Path) -> str:
     """Parse the ``题材:`` line out of an ``AGENT.md`` file.
 
     Returns ``"other"`` if the file is missing, unreadable, or has no
-    ``题材:`` line — never raises. Whitespace is stripped on both sides.
+    ``题材:`` line — never raises. Whitespace is stripped on both sides;
+    optional Markdown bullet prefix (``- `` / ``* ``) is tolerated so the
+    parser is robust to ``render_agent_file`` formatting changes.
     """
 
     try:
@@ -263,6 +265,10 @@ def read_genre_from_agent(agent_md: Path) -> str:
         return "other"
     for line in text.splitlines():
         stripped = line.strip()
+        # Tolerate a leading bullet character so the line can appear as
+        # either ``题材: 历史`` or ``- 题材: 历史`` without breaking the parser.
+        if stripped.startswith(("- ", "* ", "· ", "• ")):
+            stripped = stripped[2:].lstrip()
         if stripped.startswith("题材:"):
             value = stripped.split(":", 1)[1].strip()
             return value or "other"

@@ -1,16 +1,24 @@
-"""Unit tests for ``writer.roles.story_consultant``.
+"""Unit tests for ``writer.roles`` package.
 
-Covers StoryConsultant.draft_outline() branches:
+Covers StoryConsultant.draft_outline() branches (fallback):
 - empty / whitespace idea → fallback title
 - long idea → 18-char truncation with ellipsis
 - newlines in idea → collapsed in title
 - always-4-act structure
+
+Plus genre Consultants (fea-genre-aware-init Block 2):
+- HistoryConsultant: ≥4 chapters with 史实: / 虚构: markers
+- XuanhuanConsultant: ≥4 chapters with 境界: markers
+- RomanceConsultant: 8 ~ 12 chapters with 节拍: markers
 """
 
 from __future__ import annotations
 
 from writer.config import Settings
+from writer.roles.history_consultant import HistoryConsultant
+from writer.roles.romance_consultant import RomanceConsultant
 from writer.roles.story_consultant import OutlineResult, StoryConsultant
+from writer.roles.xuanhuan_consultant import XuanhuanConsultant
 
 
 def _make_consultant() -> StoryConsultant:
@@ -39,7 +47,6 @@ def test_story_consultant_draft_outline_truncates_long_title_to_18_chars() -> No
 
     result = _make_consultant().draft_outline(long_idea)
 
-    # 18 chars of content + 3-char ellipsis "..."
     assert len(result.title) == 21
     assert result.title.endswith("...")
     assert result.title.startswith(long_idea[:18])
@@ -53,9 +60,7 @@ def test_story_consultant_draft_outline_replaces_newlines_in_title() -> None:
     assert "\n" not in result.title
     assert "第一行创意" in result.title
     assert "第二行细节" in result.title
-    # The title should keep a single space between formerly-newline-separated parts
     assert "第一行创意 第二行细节..." in result.title
-    # The premise keeps the original newlines — only the title collapses them
     assert "\n" in result.premise
 
 
@@ -67,3 +72,59 @@ def test_story_consultant_returns_four_chapters() -> None:
     assert result.chapters[1].startswith("第二幕")
     assert result.chapters[2].startswith("第三幕")
     assert result.chapters[3].startswith("第四幕")
+
+
+# ---------------------------------------------------------------------------
+# Genre Consultants (fea-genre-aware-init Block 2)
+# ---------------------------------------------------------------------------
+
+
+def test_history_consultant_draft_outline_emits_shishi_anchors() -> None:
+    result = HistoryConsultant(Settings()).draft_outline("贞观治世")
+
+    assert isinstance(result, OutlineResult)
+    assert len(result.chapters) >= 4
+    for chapter in result.chapters:
+        # Every chapter MUST carry both 史实: and 虚构: markers.
+        assert "史实:" in chapter
+        assert "虚构:" in chapter
+
+
+def test_xuanhuan_consultant_draft_outline_emits_jingjie_nodes() -> None:
+    result = XuanhuanConsultant(Settings()).draft_outline("废柴觉醒")
+
+    assert isinstance(result, OutlineResult)
+    assert len(result.chapters) >= 4
+    for chapter in result.chapters:
+        assert "境界" in chapter
+
+
+def test_romance_consultant_draft_outline_emits_jiepai_beats() -> None:
+    result = RomanceConsultant(Settings()).draft_outline("仇人之子")
+
+    assert isinstance(result, OutlineResult)
+    assert 8 <= len(result.chapters) <= 12
+    for chapter in result.chapters:
+        assert chapter.startswith("节拍")
+
+
+def test_genre_consultants_share_outline_result_shape() -> None:
+    """All four Consultants MUST return the standard OutlineResult shape."""
+    for cls in (
+        StoryConsultant,
+        HistoryConsultant,
+        XuanhuanConsultant,
+        RomanceConsultant,
+    ):
+        result = cls(Settings()).draft_outline("测试")
+        assert hasattr(result, "title")
+        assert hasattr(result, "premise")
+        assert hasattr(result, "chapters")
+        assert isinstance(result.chapters, list)
+
+
+def test_genre_consultants_inherit_default_fallback_title() -> None:
+    """Empty input → 未命名长篇小说 (inherited from parent)."""
+    for cls in (StoryConsultant, HistoryConsultant, XuanhuanConsultant, RomanceConsultant):
+        result = cls(Settings()).draft_outline("")
+        assert result.title == "未命名长篇小说"

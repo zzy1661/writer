@@ -53,6 +53,7 @@ def test_session_defaults() -> None:
 
     assert session.project_root is None
     assert session.project_state == "S0"
+    assert session.project_genre == "other"
     assert session.turns == []
     assert session.pending_interrupt is None
 
@@ -273,3 +274,56 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
     assert session.deps.router is original_router
     # Runtime swapped to the new root.
     assert session.deps.tool_runtime.project_root == tmp_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# project_genre (fea-genre-aware-init Block 3)
+# ---------------------------------------------------------------------------
+
+
+def _seed_agent_md(root: Path, *, genre: str | None) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "AGENT.md").write_text(
+        "# test\n\n## 当前状态\n\n- state: S1\n- label: 已初始化\n"
+        + (f"- 题材: {genre}\n" if genre else "")
+        + "\n## 目录约定\n\n",
+        encoding="utf-8",
+    )
+
+
+def test_session_refresh_project_genre_reads_agent_md(tmp_path: Path) -> None:
+    _seed_agent_md(tmp_path, genre="言情")
+    session = EngineSession()
+    session.project_root = tmp_path
+
+    result = session.refresh_project_genre()
+    assert result == "言情"
+    assert session.project_genre == "言情"
+
+
+def test_session_refresh_project_genre_falls_back_when_missing_ticaline(
+    tmp_path: Path,
+) -> None:
+    _seed_agent_md(tmp_path, genre=None)
+    session = EngineSession()
+
+    assert session.refresh_project_genre() == "other"
+    assert session.project_genre == "other"
+
+
+def test_session_refresh_project_genre_falls_back_when_agent_md_missing(
+    tmp_path: Path,
+) -> None:
+    session = EngineSession()
+
+    assert session.refresh_project_genre() == "other"
+    assert session.project_genre == "other"
+
+
+def test_session_set_project_root_triggers_genre_refresh(tmp_path: Path) -> None:
+    _seed_agent_md(tmp_path, genre="玄幻")
+    session = EngineSession()
+
+    session.set_project_root(tmp_path)
+
+    assert session.project_genre == "玄幻"

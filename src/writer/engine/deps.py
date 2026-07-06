@@ -14,7 +14,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from writer.config import Settings, get_settings
-from writer.roles import StoryConsultant
+from writer.roles import (
+    HistoryConsultant,
+    RomanceConsultant,
+    StoryConsultant,
+    XuanhuanConsultant,
+)
 from writer.routing import (
     AgentAction,
     CompositeRouter,
@@ -33,6 +38,36 @@ if TYPE_CHECKING:
 # Tools that need file access will fail their safe_path check; tools that
 # don't (foreshadow_query, chapter_locate, wordcount) still work.
 _NO_PROJECT_ROOT = Path("/__no_project__")
+
+
+# Maps the four supported canonical genres onto their Consultant classes.
+# Anything outside the whitelist (and ``"other"``) falls through to the
+# default :class:`StoryConsultant` per the ``fea-genre-aware-init`` spec.
+_GENRE_CONSULTANT: dict[str, type[StoryConsultant]] = {
+    "历史": HistoryConsultant,
+    "言情": RomanceConsultant,
+    "玄幻": XuanhuanConsultant,
+}
+
+
+def _select_consultant(settings: Settings, project_root: Path | None) -> StoryConsultant:
+    """Pick a Consultant subclass based on the ``题材:`` line in AGENT.md.
+
+    Falls back to :class:`StoryConsultant` whenever ``project_root`` is
+    ``None``, the AGENT.md is missing, or the genre is unknown / "other".
+    Genre detection is intentionally a one-shot read at construction
+    time; mid-project genre changes are out of scope (per the
+    ``fea-genre-aware-init`` non-goals).
+    """
+    if project_root is None:
+        return StoryConsultant(settings)
+
+    from writer.project import read_genre_from_agent
+
+    raw_genre = read_genre_from_agent(project_root / "AGENT.md")
+    canonical = (raw_genre or "").strip()
+    consultant_cls = _GENRE_CONSULTANT.get(canonical, StoryConsultant)
+    return consultant_cls(settings)
 
 
 @runtime_checkable
@@ -173,7 +208,7 @@ def production_deps(
     root = (project_root or _NO_PROJECT_ROOT).resolve()
     return _DefaultEngineDeps(
         router=_select_router(resolved, primary=primary_router),
-        story_consultant=StoryConsultant(resolved),
+        story_consultant=_select_consultant(resolved, project_root),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=root),
         _workflows=dict(WORKFLOWS),
