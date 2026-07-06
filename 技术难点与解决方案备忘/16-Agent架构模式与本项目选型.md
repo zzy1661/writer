@@ -154,8 +154,12 @@ Tool-Use 本身不是 Agent 范式,但是大多数 Agent 都依赖它。RAG Agen
   - 主范式:Tool-Use,但只允许调用项目注册的业务 Tool
 - **记忆层**:RAG + 摘要 + 状态文件
   - 主范式:RAG Agent,数据来自正典文件、伏笔库、人物库等
+- **角色层（题材分支）**:每个题材一个 `StoryConsultant` 子类（[OpenSpec `fea-genre-aware-init`](../../openspec/changes/fea-genre-aware-init/proposal.md) 2026-07-06）
+  - `HistoryConsultant` / `XuanhuanConsultant` / `RomanceConsultant` / `StoryConsultant`(兜底)
+  - 通过 `EngineDeps.story_consultant` 槽位按 `AGENT.md` `题材:` 行动态派生
+  - 每个子类的 `chapters` 字符串前缀约定表达题材差异
 
-这四个层级分别对应不同的范式,但共同遵循几个原则:
+这五个层级分别对应不同的范式,但共同遵循几个原则:
 
 1. **不把长任务交给前台 Agent。** `start_workflow` 一旦返回,前台就不再干涉,由 LangGraph 接管。
 2. **不引入独立的多 Agent 实例通信。** 多个角色通过 LangGraph 节点的 prompt 模板切换,而不是各自拥有独立进程;它们看到的上下文由 `ContextPack` 裁剪。
@@ -325,7 +329,7 @@ def build_context_pack(chapter_id: str) -> dict:
 - 不要让多角色变成多进程。角色之间的差异由 prompt 区分,上下文通过 `ContextPack` 裁剪,而非共享可变内存。
 - 引入新范式前先问:它解决的是哪一层的痛点?是前台路由、长任务编排、还是反思回流?混用要明确边界。
 - 把每种范式的特征(思考轨迹、计划、反思)落盘:计划写到 `大纲/`,反思历史写到 `修订/`,便于后续训练或调试。
-- MVP 阶段保留规则版 `route()` 作为 primary(配合 `CompositeRouter` 包装 LLM fallback),避免 LLM 把 `/创作` 误识别为说明性问题。
+- MVP 阶段保留规则版 `route()` 作为 primary(配合 `CompositeRouter` 包装 LLM fallback),避免 LLM 把 `/写作` 误识别为说明性问题。
 
 ## 已落地的 Engine 层结构（v0.1）
 

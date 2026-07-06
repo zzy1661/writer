@@ -56,10 +56,10 @@ class RuleBasedIntentRouter:
     def route(self, user_input: str, project_state: str) -> AgentAction:
         text = user_input.strip()
 
-        if text.startswith("/创作"):
+        if text.startswith("/写作"):
             return AgentAction(
                 action_type="start_workflow",
-                command="/创作",
+                command="/写作",
                 role="story_consultant",
                 workflow="write_chapter",
                 arguments={"raw": text},
@@ -84,7 +84,7 @@ class RuleBasedIntentRouter:
 
         return AgentAction(
             action_type="answer_directly",
-            answer="我可以处理 /init、/大纲、/目录、/创作、/审核、/改 等写作命令。",
+            answer="我可以处理 /init、/大纲、/目录、/写作、/审核、/改 等写作命令。",
         )
 ```
 
