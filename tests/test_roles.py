@@ -14,6 +14,8 @@ Plus genre Consultants (fea-genre-aware-init Block 2):
 
 from __future__ import annotations
 
+from langchain_core.messages import AIMessage
+
 from writer.config import Settings
 from writer.roles.history_consultant import HistoryConsultant
 from writer.roles.romance_consultant import RomanceConsultant
@@ -23,6 +25,15 @@ from writer.roles.xuanhuan_consultant import XuanhuanConsultant
 
 def _make_consultant() -> StoryConsultant:
     return StoryConsultant(Settings())
+
+
+class _FakeOutlineChat:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+    def invoke(self, messages: object) -> AIMessage:
+        self.messages = messages
+        return AIMessage(content=self.content)
 
 
 def test_story_consultant_draft_outline_with_empty_idea() -> None:
@@ -72,6 +83,40 @@ def test_story_consultant_returns_four_chapters() -> None:
     assert result.chapters[1].startswith("第二幕")
     assert result.chapters[2].startswith("第三幕")
     assert result.chapters[3].startswith("第四幕")
+
+
+def test_story_consultant_uses_llm_outline_when_chat_model_is_injected() -> None:
+    fake = _FakeOutlineChat(
+        """
+        {
+          "title": "开元编译局",
+          "premise": "程序员穿越唐朝，用工程思维重构开元盛世。",
+          "chapters": [
+            "第一卷: 金銮殿报错，主角被迫解释天机",
+            "第二卷: 改造驿站账册，触动门阀利益",
+            "第三卷: 科举题库成形，朝堂派系围猎",
+            "第四卷: 系统真相暴露，盛世代码进入死循环"
+          ]
+        }
+        """
+    )
+
+    result = StoryConsultant(Settings(), llm=fake).draft_outline("穿越到唐朝的程序员")
+
+    assert result.title == "开元编译局"
+    assert "工程思维" in result.premise
+    assert len(result.chapters) == 4
+    assert result.chapters[0].startswith("第一卷")
+
+
+def test_story_consultant_falls_back_when_llm_outline_is_invalid() -> None:
+    fake = _FakeOutlineChat("不是 JSON")
+
+    result = StoryConsultant(Settings(), llm=fake).draft_outline("一个普通的故事创意")
+
+    assert result.title == "一个普通的故事创意..."
+    assert len(result.chapters) == 4
+    assert result.chapters[0].startswith("第一幕")
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from langchain_core.messages import AIMessage
 from pydantic import SecretStr
 
 from writer.config import Settings
@@ -43,6 +44,23 @@ class _StubLLMRouter:
         return self._responses[0]
 
 
+class _JsonOnlyChat:
+    """Fake ChatModel without ``with_structured_output``.
+
+    If the DeepSeek-compatible route tried the native LangChain structured
+    path, this fake would fail before returning JSON.
+    """
+
+    def invoke(self, messages: object) -> AIMessage:
+        self.messages = messages
+        return AIMessage(
+            content=(
+                '{"action_type":"start_workflow","command":"/创作",'
+                '"role":"story_consultant","workflow":"write_chapter"}'
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # LlmIntentRouter
 # ---------------------------------------------------------------------------
@@ -66,6 +84,23 @@ def test_llm_router_returns_structured_action() -> None:
     assert action.action_type == "start_workflow"
     assert action.workflow == "write_chapter"
     assert action.role == "story_consultant"
+
+
+def test_llm_router_uses_json_prompt_for_deepseek_compatible_output() -> None:
+    settings = Settings(
+        model="deepseek-v4-pro",
+        api_key=None,
+        base_url="https://api.deepseek.com",
+        temperature=0.0,
+    )
+    router = LlmIntentRouter(settings, llm=_JsonOnlyChat())  # type: ignore[arg-type]
+
+    action = router.route("帮我写下一章", "S3")
+
+    assert action.action_type == "start_workflow"
+    assert action.command == "/创作"
+    assert action.role == "story_consultant"
+    assert action.workflow == "write_chapter"
 
 
 def test_llm_router_falls_back_on_validation_error() -> None:
