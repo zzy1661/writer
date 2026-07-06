@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import pytest
+
 from writer.engine import (
     ActionEvent,
     Done,
@@ -233,6 +235,29 @@ def test_engine_runs_outline_via_story_consultant(tmp_path: Path) -> None:
     assert answered[0].payload.get("outline") is True
     assert answered[0].payload.get("chapter_count") == 4
     assert answered[0].payload.get("project_state") == "S2"
+
+
+def test_write_outline_raises_value_error_when_project_root_missing() -> None:
+    """``_write_outline`` must raise ``ValueError`` (not ``ToolError``) when no project is bound.
+
+    Per arch-optimizer m23 (2026-07-07): ``ToolError`` is a tool-layer
+    exception — using it for engine-setup failures (no project bound)
+    confused the user-facing error message ("工具错误:" vs "引擎异常:").
+    ``ValueError`` falls through the generic ``except Exception`` arm
+    with the more accurate "引擎异常:" prefix.
+    """
+    from writer.engine.loop import _write_outline
+    from writer.roles.story_consultant import OutlineResult
+
+    with pytest.raises(ValueError, match="未绑定项目"):
+        _write_outline(
+            None,
+            OutlineResult(
+                title="测试",
+                premise="测试 premise",
+                chapters=["第一幕", "第二幕", "第三幕", "第四幕"],
+            ),
+        )
 
 
 def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:

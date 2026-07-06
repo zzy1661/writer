@@ -328,6 +328,39 @@ def test_run_engine_renders_error_event(monkeypatch: pytest.MonkeyPatch) -> None
     assert "boom" in text
 
 
+def test_run_engine_renders_project_state_on_aborted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``Done(aborted, payload={'project_state': ...})`` must surface the state.
+
+    Per arch-optimizer M5 (2026-07-07): previously the payload's
+    ``project_state`` was silently dropped — the user saw
+    ``[green]✓ aborted[/green]`` but had no idea *why*. The fix
+    renders the state (with optional description from
+    ``STATE_DESCRIPTIONS``) on the line below.
+    """
+
+    async def fake_run_engine(ctx: object, deps: object) -> object:
+        yield Done(
+            reason="aborted",
+            payload={
+                "command": "/创作",
+                "project_state": "S1",
+                "error": "状态机拦截",
+            },
+        )
+
+    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+
+    session = EngineSession()
+    buf = Console(record=True, force_terminal=False)
+
+    asyncio.run(_run_engine("/创作 1.3", session, buf))
+
+    text = buf.export_text()
+    assert "当前状态: S1" in text
+
+
 def test_read_line_uses_prompt_session_when_provided() -> None:
     """When a prompt_session is passed, _read_line delegates to session.prompt()."""
     mock_session = MagicMock()

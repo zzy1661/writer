@@ -50,7 +50,30 @@ _GENRE_CONSULTANT: dict[str, type[StoryConsultant]] = {
 }
 
 
-def _select_consultant(settings: Settings, project_root: Path | None) -> StoryConsultant:
+def _consultant_for_genre(
+    settings: Settings, genre: str
+) -> StoryConsultant:
+    """Pure factory — pick a Consultant subclass by canonical genre key.
+
+    No filesystem IO. Falls back to :class:`StoryConsultant` for unknown,
+    empty, or ``"other"`` values. Used by both ``production_deps`` (via
+    :func:`_select_consultant`) and :meth:`writer.session.EngineSession
+    .set_project_root` (after :meth:`refresh_project_genre` has read the
+    AGENT.md ``题材:`` line).
+
+    Added 2026-07-07 to fix arch-optimizer M1: ``EngineSession`` needs
+    to rebuild its consultant when the bound project changes genre,
+    which requires a helper that doesn't re-read AGENT.md (the session
+    has already read it).
+    """
+    canonical = (genre or "").strip()
+    consultant_cls = _GENRE_CONSULTANT.get(canonical, StoryConsultant)
+    return consultant_cls(settings)
+
+
+def _select_consultant(
+    settings: Settings, project_root: Path | None
+) -> StoryConsultant:
     """Pick a Consultant subclass based on the ``题材:`` line in AGENT.md.
 
     Falls back to :class:`StoryConsultant` whenever ``project_root`` is
@@ -58,16 +81,19 @@ def _select_consultant(settings: Settings, project_root: Path | None) -> StoryCo
     Genre detection is intentionally a one-shot read at construction
     time; mid-project genre changes are out of scope (per the
     ``fea-genre-aware-init`` non-goals).
+
+    Note (2026-07-07): the IO lives here for backward compat with
+    ``production_deps`` callers that don't know the genre yet. New code
+    should call :func:`_consultant_for_genre` directly with an already-
+    read genre string (per M2 / sprint candidate).
     """
     if project_root is None:
-        return StoryConsultant(settings)
+        return _consultant_for_genre(settings, "other")
 
     from writer.project import read_genre_from_agent
 
     raw_genre = read_genre_from_agent(project_root / "AGENT.md")
-    canonical = (raw_genre or "").strip()
-    consultant_cls = _GENRE_CONSULTANT.get(canonical, StoryConsultant)
-    return consultant_cls(settings)
+    return _consultant_for_genre(settings, raw_genre)
 
 
 @runtime_checkable
@@ -120,6 +146,28 @@ class EngineDeps(Protocol):
         """
         ...
 
+    def rebind_story_consultant(
+        self, new_consultant: StoryConsultant
+    ) -> EngineDeps:
+        """Return a new (or in-place mutated) ``EngineDeps`` with the consultant swapped.
+
+        Symmetric to :meth:`rebind_tool_runtime`. Called by
+        :meth:`writer.session.EngineSession.set_project_root` after
+        :meth:`refresh_project_genre` has read the new project's
+        ``AGENT.md`` ``题材:`` line — Consultant classes
+        (History / Romance / Xuanhuan / Story fallback) are picked at
+        construction time, so a genre change requires a fresh
+        consultant instance.
+
+        Added 2026-07-07 to fix arch-optimizer M1 (audit after
+        OpenSpec apply): the old code only refreshed ``session
+        .project_genre`` (the field) but never rebuilt ``deps
+        .story_consultant`` (the instance), so a REPL session that
+        switched from ``/init 历史`` to ``/init 玄幻`` would keep the
+        old HistoryConsultant in deps and serve stale outlines.
+        """
+        ...
+
 
 @dataclass
 class _DefaultEngineDeps:
@@ -157,6 +205,13 @@ class _DefaultEngineDeps:
         # effectively immutable; tests that need mutation can still
         # override the method.
         return replace(self, tool_runtime=new_runtime)
+
+    def rebind_story_consultant(
+        self, new_consultant: StoryConsultant
+    ) -> EngineDeps:
+        # Symmetric to ``rebind_tool_runtime``; uses ``dataclasses.replace``
+        # to keep the production wiring effectively immutable.
+        return replace(self, story_consultant=new_consultant)
 
 
 def _select_router(

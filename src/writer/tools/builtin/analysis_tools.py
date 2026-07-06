@@ -33,14 +33,24 @@ class Wordcount:
     ) -> ToolResult:
         if path is not None:
             target = runtime.safe_path(path)
-            if target.is_dir():
-                texts = [
-                    file.read_text(encoding="utf-8")
-                    for file in _iter_text_files(target)
-                ]
-                text = "\n".join(texts)
-            else:
-                text = target.read_text(encoding="utf-8")
+            try:
+                if target.is_dir():
+                    texts = [
+                        file.read_text(encoding="utf-8")
+                        for file in _iter_text_files(target)
+                    ]
+                    text = "\n".join(texts)
+                else:
+                    text = target.read_text(encoding="utf-8")
+            except (PermissionError, OSError) as exc:
+                # Per arch-optimizer M6 (2026-07-07): surface I/O errors
+                # as a ToolResult instead of letting them bubble to the
+                # engine's ``except Exception`` branch. Mirrors
+                # ``ProjectSearch``'s handling of ``UnicodeDecodeError``.
+                return ToolResult(
+                    output=f"读取失败: {exc}",
+                    metadata={"path": path, "error": "io"},
+                )
 
         if text is None:
             text = ""

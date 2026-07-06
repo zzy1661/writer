@@ -10,7 +10,7 @@ from writer.config import get_settings
 from writer.engine import Interrupt
 from writer.engine.context import EngineContext
 from writer.engine.deps import EngineDeps
-from writer.roles import StoryConsultant
+from writer.roles import HistoryConsultant, StoryConsultant, XuanhuanConsultant
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
 from writer.tools import ToolRuntime, built_tool_registry
@@ -131,6 +131,47 @@ def test_session_set_project_root_same_path_is_noop(tmp_path: Path) -> None:
 
     session.set_project_root(tmp_path)  # same path
     assert session.deps.tool_runtime is runtime_after_first
+
+
+def test_session_set_project_root_rebuilds_story_consultant_on_genre_change(
+    tmp_path: Path,
+) -> None:
+    """Switching projects across genres must rebuild ``deps.story_consultant``.
+
+    Per arch-optimizer M1 (2026-07-07): the old code only refreshed
+    ``session.project_genre`` (the field) but never rebuilt ``deps
+    .story_consultant`` (the instance). This test pins the new
+    contract — a REPL session that runs ``/init 历史`` then ``/init
+    玄幻`` ends up with an :class:`XuanhuanConsultant` in deps, not
+    the stale :class:`HistoryConsultant` from the previous project.
+    """
+
+    def _seed_genre(root: Path, genre: str) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        (root / "AGENT.md").write_text(
+            f"# novel\n\n## 当前状态\n\n- state: S1\n"
+            f"- label: 初始化\n- 题材: {genre}\n\n",
+            encoding="utf-8",
+        )
+
+    history_root = tmp_path / "history"
+    xuanhuan_root = tmp_path / "xuanhuan"
+    _seed_genre(history_root, "历史")
+    _seed_genre(xuanhuan_root, "玄幻")
+
+    session = EngineSession()
+    session.set_project_root(history_root)
+    assert isinstance(
+        session.deps.story_consultant, HistoryConsultant
+    ), f"expected HistoryConsultant, got {type(session.deps.story_consultant).__name__}"
+
+    session.set_project_root(xuanhuan_root)
+    assert isinstance(
+        session.deps.story_consultant, XuanhuanConsultant
+    ), (
+        f"expected XuanhuanConsultant after switching genres, "
+        f"got {type(session.deps.story_consultant).__name__}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -254,6 +295,16 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
         def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
             self.tool_runtime = new_runtime
+            return self
+
+        def rebind_story_consultant(
+            self, new_consultant: StoryConsultant
+        ) -> EngineDeps:
+            # Mirror M1's production wiring: in-place mutation is
+            # allowed by the Protocol. The session-level test below
+            # asserts this method is *called* during set_project_root,
+            # not that it returns a new object.
+            self.story_consultant = new_consultant
             return self
 
     # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.

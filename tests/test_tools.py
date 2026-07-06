@@ -142,6 +142,34 @@ def test_wordcount_can_count_project_path(tmp_path: Path) -> None:
     assert result.metadata["path"] == "manuscript"
 
 
+def test_wordcount_returns_io_error_on_permission_denied(tmp_path: Path) -> None:
+    """An unreadable path must surface as a ToolResult, not an unhandled exception.
+
+    Per arch-optimizer M6 (2026-07-07): previously, a path under
+    project_root that the OS refused to read would bubble out of
+    ``Wordcount.run`` as ``PermissionError`` (or ``OSError``), hit
+    the engine's generic ``except Exception`` arm, and surface as
+    a generic ``ErrorEvent`` with no project context. The fix
+    catches both and returns a ToolResult carrying the I/O error.
+    """
+    import stat
+
+    runtime = ToolRuntime(project_root=tmp_path)
+    locked = tmp_path / "locked.md"
+    locked.write_text("看不见", encoding="utf-8")
+    # Strip all permissions — Wordcount's ``read_text`` will raise
+    # ``PermissionError`` (POSIX) or ``OSError`` (Windows fallback).
+    locked.chmod(0)
+    try:
+        result = Wordcount().run(runtime, path="locked.md")
+        assert result.output.startswith("读取失败")
+        assert result.metadata["path"] == "locked.md"
+        assert result.metadata["error"] == "io"
+    finally:
+        # Restore so pytest's tmp_path cleanup can delete the tree.
+        locked.chmod(stat.S_IRUSR | stat.S_IWUSR)
+
+
 def test_project_search_finds_keyword_inside_project(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path)
     target = tmp_path / "outline" / "大纲.md"

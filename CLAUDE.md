@@ -98,7 +98,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 ## 测试
 
 - 框架：pytest + pytest-asyncio（`asyncio_mode = "auto"`）
-- 当前基线：详见 `MEMORY.md` 中「## 验证基线」一节（最后一次实测 2026-07-06：121 测试 / ruff+mypy clean；不要在此处硬编码数字，详见 N6）
+- 当前基线：详见 `MEMORY.md` 中「## 验证基线」一节（最后一次实测 2026-07-07：181 测试 / ruff+mypy clean；不要在此处硬编码数字，详见 N6 / m24）
 - 关键覆盖点：router 分类、engine 五种 Done 分支、Tool 路径越界拒绝
 - `tests/conftest.py`（如有）会注入 `EngineDeps` 替身
 

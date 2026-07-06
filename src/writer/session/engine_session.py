@@ -83,25 +83,30 @@ class EngineSession:
     def set_project_root(self, new_root: Path | None) -> None:
         """Update ``project_root`` and rebuild ``deps.tool_runtime``.
 
-        Router / story_consultant / tool_registry are preserved across
-        the swap. ``tool_runtime`` is rebuilt because it holds the
-        project_root that gates ``safe_path`` checks.
+        Router / tool_registry are preserved across the swap.
+        ``tool_runtime`` is rebuilt because it holds the project_root
+        that gates ``safe_path`` checks. ``story_consultant`` is ALSO
+        rebuilt if the bound project's ``AGENT.md`` ``题材:`` line
+        resolves to a different Consultant subclass (per arch-optimizer
+        M1, 2026-07-07): without this rebuild, a REPL session that
+        runs ``/init 历史`` then ``/init 玄幻`` would keep the
+        HistoryConsultant in deps and serve stale outlines.
 
         Setting ``new_root`` to the same path is a no-op (no rebuild).
         Setting ``new_root=None`` falls back to the S0 sentinel root.
 
-        The actual swap goes through :meth:`EngineDeps.rebind_tool_runtime`
-        (per arch-optimizer M6) so we never need to know whether the
-        concrete ``EngineDeps`` is a dataclass, a plain object, or a
-        test fake. Previously this method duck-typed
-        ``is_dataclass(self.deps) and any(f.name == ...)`` and silently
-        fell back to rebuilding the whole deps (losing router /
-        story_consultant) when a test injected a Protocol-only stub.
+        The actual swap goes through
+        :meth:`EngineDeps.rebind_tool_runtime` /
+        :meth:`EngineDeps.rebind_story_consultant` so we never need to
+        know whether the concrete ``EngineDeps`` is a dataclass, a
+        plain object, or a test fake.
         """
 
         if new_root == self.project_root:
             return
 
+        from writer.config import get_settings
+        from writer.engine.deps import _consultant_for_genre
         from writer.tools import ToolRuntime
 
         self.project_root = new_root
@@ -110,6 +115,14 @@ class EngineSession:
         self.deps = self.deps.rebind_tool_runtime(new_runtime)
         self.refresh_project_state()
         self.refresh_project_genre()
+
+        # Rebuild story_consultant against the freshly-read genre. Uses
+        # the same Settings the deps were originally built with so
+        # LLM/feature flags stay consistent across the swap.
+        new_consultant = _consultant_for_genre(
+            get_settings(), self.project_genre
+        )
+        self.deps = self.deps.rebind_story_consultant(new_consultant)
 
     def refresh_project_state(self) -> str:
         """Refresh ``project_state`` from files on disk and return it."""

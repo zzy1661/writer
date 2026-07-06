@@ -248,8 +248,13 @@ def _write_outline(project_root: Path | None, outline: OutlineResult) -> Path:
     """Persist an outline result under the current project."""
 
     if project_root is None:
+        # Per arch-optimizer m23 (2026-07-07): ``ToolError`` is for
+        # tool-layer failures; "no project bound" is engine setup
+        # invalid. ``ValueError`` falls through to the generic
+        # ``except Exception`` arm with a "引擎异常:" prefix that
+        # more accurately describes the failure.
         msg = "未绑定项目，无法写入大纲。请先执行 /init <项目名>。"
-        raise ToolError(msg)
+        raise ValueError(msg)
 
     root = project_root.resolve()
     outline_dir = root / "outline"

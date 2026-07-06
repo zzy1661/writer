@@ -25,7 +25,7 @@ from writer.engine import (
     ToolResult,
     run_engine,
 )
-from writer.project import STATE_DESCRIPTIONS, create_workspace, inspect_project
+from writer.project import STATE_DESCRIPTIONS, ProjectState, create_workspace, inspect_project
 from writer.session import EngineSession, compose_pending_input
 
 app = typer.Typer(
@@ -228,6 +228,23 @@ async def _run_engine(
                 else:
                     session.refresh_project_state()
                 console.print(f"[green]✓ {r}[/green]\n")
+                # Per arch-optimizer M5 (2026-07-07): surface the
+                # ``project_state`` from the aborted payload so the user
+                # knows *why* the engine rejected the command (e.g. "S1
+                # 状态不允许 /创作"). Without this, an aborted Done
+                # leaves the user guessing.
+                if r == "aborted" and payload is not None and "project_state" in payload:
+                    state_value = str(payload["project_state"])
+                    # STATE_DESCRIPTIONS is keyed on ProjectState enum;
+                    # payload carries the str form. Try the enum lookup
+                    # first, fall back to raw value if the string is
+                    # not a known ProjectState member.
+                    try:
+                        description = STATE_DESCRIPTIONS[ProjectState(state_value)]
+                    except (KeyError, ValueError):
+                        description = ""
+                    label = f"{state_value}（{description}）" if description else state_value
+                    console.print(f"[yellow]当前状态: {label}[/yellow]")
                 session.record_turn(user_input, r)
                 session.clear_pending_interrupt()
             case ErrorEvent(message=m):
