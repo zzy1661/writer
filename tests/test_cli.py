@@ -32,14 +32,6 @@ def test_version() -> None:
     assert "writer-agent 0.1.0" in result.stdout
 
 
-def test_outline() -> None:
-    result = runner.invoke(app, ["outline", "废土少年继承一座会说话的图书馆"])
-
-    assert result.exit_code == 0
-    assert "废土少年继承一座会说话的图书馆" in result.stdout
-    assert "第一幕" in result.stdout
-
-
 def test_repl_starts_with_welcome_page() -> None:
     result = runner.invoke(app, input="/退出\n")
 
@@ -57,10 +49,12 @@ def test_repl_handles_help_and_user_input() -> None:
     assert result.exit_code == 0
     assert "可用命令" in result.stdout
     assert "/创作" in result.stdout
-    # 自然语言输入被 agent engine 接走，进入 answer_directly 终止分支
+    # 自然语言输入被 agent engine 接走:出现 engine 分析日志 + 任意 Done 终止符
+    # (LLM router 可能路由为 answer_directly / start_workflow / call_tool,
+    # 任意一种都会渲染 ✓ <reason>，无需锁定具体分支)
     assert "[engine] 分析输入" in result.stdout
     assert "帮我继续写下一章" in result.stdout
-    assert "✓ answered" in result.stdout
+    assert "✓ " in result.stdout
 
 
 def test_handle_repl_input_returns_false_on_exit() -> None:
@@ -201,7 +195,7 @@ def test_repl_pending_interrupt_visible_in_next_turn() -> None:
 
 
 # ---------------------------------------------------------------------------
-# doctor / init subcommands + _run_engine event rendering + REPL EOF
+# doctor subcommand + _run_engine event rendering + REPL EOF
 # ---------------------------------------------------------------------------
 
 
@@ -219,39 +213,6 @@ def test_doctor_command_renders_settings_table() -> None:
     assert "0.7" in result.stdout
     # API Key column is either 已配置 or 未配置 depending on env.
     assert ("已配置" in result.stdout) or ("未配置" in result.stdout)
-
-
-def test_init_subcommand_with_brief_writes_core_idea(tmp_path: Path) -> None:
-    result = runner.invoke(
-        app,
-        [
-            "init",
-            "创意测试",
-            "--dir",
-            str(tmp_path),
-            "--genre",
-            "其他",
-            "--brief",
-            "程序员穿越唐朝",
-        ],
-    )
-
-    assert result.exit_code == 0
-    project_root = tmp_path / "创意测试"
-    assert (project_root / "创意" / "核心创意.md").is_file()
-    assert "## 基本要求" in (project_root / "AGENT.md").read_text(encoding="utf-8")
-
-
-def test_init_subcommand_creates_workspace_and_lists_files(tmp_path: Path) -> None:
-    result = runner.invoke(
-        app,
-        ["init", "我的项目", "--dir", str(tmp_path), "--genre", "其他"],
-    )
-
-    assert result.exit_code == 0
-    assert "已创建小说项目" in result.stdout
-    assert "README.md" in result.stdout
-    assert "manuscript" in result.stdout or "outline" in result.stdout
 
 
 def test_run_engine_renders_tool_call_event(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -413,117 +374,14 @@ def test_run_repl_handles_eof() -> None:
 
 
 # ---------------------------------------------------------------------------
-# init / /init (genre-aware) — fea-genre-aware-init Block 6
+# /init (REPL flag-form & engine fallthrough)
 # ---------------------------------------------------------------------------
-
-
-def test_init_subcommand_with_genre_flag_creates_genre_files(
-    tmp_path: Path,
-) -> None:
-    result = runner.invoke(
-        app,
-        ["init", "贞观", "--dir", str(tmp_path), "--genre", "历史"],
-    )
-
-    assert result.exit_code == 0
-    project_root = tmp_path / "贞观"
-    assert (project_root / "史实" / "年表.md").is_file()
-    assert "题材: 历史" in (project_root / "AGENT.md").read_text(encoding="utf-8")
-
-
-def test_init_subcommand_defaults_to_current_directory(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    result = runner.invoke(app, ["init", "贞观", "--genre", "历史"])
-
-    assert result.exit_code == 0
-    assert (tmp_path / "贞观" / "史实" / "年表.md").is_file()
-    assert not (tmp_path / "novels" / "贞观").exists()
-
-
-def test_init_subcommand_short_genre_flag_alias(tmp_path: Path) -> None:
-    """`-g` short option is equivalent to `--genre`."""
-
-    result = runner.invoke(
-        app,
-        ["init", "双生", "--dir", str(tmp_path), "-g", "言情"],
-    )
-
-    assert result.exit_code == 0
-    project_root = tmp_path / "双生"
-    assert (project_root / "人设" / "男主.md").is_file()
-
-
-def test_init_subcommand_unknown_genre_falls_through_to_other(
-    tmp_path: Path,
-) -> None:
-    """User-typed ``--genre 都市悬疑`` is treated as the ``other`` fallback."""
-
-    result = runner.invoke(
-        app,
-        ["init", "试验", "--dir", str(tmp_path), "--genre", "都市悬疑"],
-    )
-
-    assert result.exit_code == 0
-    project_root = tmp_path / "试验"
-    assert not (project_root / "史实").exists()
-    assert not (project_root / "伏笔").exists()
-    assert not (project_root / "人设").exists()
-
-
-def test_init_subcommand_force_flag_still_works(tmp_path: Path) -> None:
-    runner.invoke(app, ["init", "dup-test", "--dir", str(tmp_path)])
-
-    result = runner.invoke(
-        app,
-        [
-            "init",
-            "dup-test",
-            "--dir",
-            str(tmp_path),
-            "--genre",
-            "玄幻",
-            "--force",
-        ],
-    )
-
-    assert result.exit_code == 0
-    project_root = tmp_path / "dup-test"
-    assert (project_root / "伏笔" / "foreshadow.md").is_file()
-
-
-def test_init_subcommand_exits_1_when_dir_exists(tmp_path: Path) -> None:
-    runner.invoke(
-        app,
-        ["init", "dup-test", "--dir", str(tmp_path), "--genre", "其他"],
-    )
-
-    result = runner.invoke(
-        app,
-        ["init", "dup-test", "--dir", str(tmp_path), "--genre", "其他"],
-    )
-
-    assert result.exit_code == 1
-    assert "错误" in result.stdout
-
-
-def test_init_subcommand_exits_1_on_invalid_name(tmp_path: Path) -> None:
-    result = runner.invoke(
-        app,
-        ["init", "   ", "--dir", str(tmp_path), "--genre", "其他"],
-    )
-
-    assert result.exit_code == 1
-    assert "错误" in result.stdout
 
 
 def test_repl_init_with_flags_creates_workspace_and_binds_session(
     tmp_path: Path,
 ) -> None:
-    """REPL ``/init --name 双生 --genre 言情`` form mirrors the Typer subcommand."""
+    """REPL ``/init --name 双生 --genre 言情`` form creates and binds a project."""
 
     cli_input = f"/init --name 双生 --dir {tmp_path} --genre 言情\n/退出\n"
     result = runner.invoke(app, input=cli_input)
@@ -553,42 +411,6 @@ def test_repl_init_alone_falls_through_to_engine(tmp_path: Path) -> None:
     result = runner.invoke(app, input="/init\n/退出\n")
 
     assert result.exit_code == 0
-
-
-def test_repl_auto_binds_after_typer_init_and_runs_outline_toc(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """``writer init`` + REPL should auto-bind and complete init→大纲→目录."""
-
-    monkeypatch.chdir(tmp_path)
-
-    init_result = runner.invoke(
-        app,
-        ["init", "闭环测试", "--genre", "其他"],
-    )
-    assert init_result.exit_code == 0
-
-    cli_input = (
-        "/状态\n"
-        "/大纲 一个穿越到唐朝的程序员\n"
-        "/状态\n"
-        "/目录\n"
-        "/状态\n"
-        "/退出\n"
-    )
-    repl_result = runner.invoke(app, input=cli_input)
-
-    assert repl_result.exit_code == 0
-    assert "已自动绑定项目" in repl_result.stdout
-    assert "project_state=S1" in repl_result.stdout
-    assert "project_state=S2" in repl_result.stdout
-    assert "project_state=S3" in repl_result.stdout
-    assert "✓ answered" in repl_result.stdout
-
-    project_root = tmp_path / "闭环测试"
-    assert (project_root / "outline" / "大纲.md").is_file()
-    assert (project_root / "outline" / "toc.md").is_file()
 
 
 def test_build_prompt_session_falls_back_when_home_is_unwritable(

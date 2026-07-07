@@ -35,44 +35,7 @@ uv run writer
 
 `writer new` 会创建完整项目目录，并附带 `.writer/` 元数据（`skills/`、`agents/`、`config`）与 `创意/` 目录。
 
-### 方式 B：Typer init + REPL 写作
-
-```bash
-mkdir 我的小说 && cd 我的小说
-uv run writer init 长安程序员 --genre 历史
-# 创建后会提示输入自然语言创意；也可用 --brief 一次性传入
-uv run writer init 长安程序员 --brief "程序员穿越唐朝"
-uv run writer init 长安程序员 --skip-brief   # 跳过创意访谈
-uv run writer
-```
-
-进入 REPL 后，若当前目录下只有一个含 `AGENT.md` 的项目，会自动绑定并提示：
-
-```text
-已自动绑定项目: .../长安程序员 (初始化)
-```
-
-然后依次执行：
-
-```text
-/大纲 一个穿越到唐朝的程序员
-/目录
-/状态
-/退出
-```
-
-状态流转：`S1 初始化` → `S2 大纲拟定中` → `S3 框架搭建中`。
-
-落盘文件：
-
-| 命令 | 输出文件 |
-|------|----------|
-| `/大纲 <创意>` | `outline/大纲.md` |
-| `/目录` | `outline/toc.md` |
-
-`init` 后的创意访谈会写入 `创意/核心创意.md`，并将基本要求追加到 `AGENT.md`。
-
-### 方式 C：全程在 REPL 内
+### 方式 B：全程在 REPL 内
 
 ```bash
 uv run writer
@@ -87,14 +50,6 @@ uv run writer
 
 注意：S0 时 `/init` 须带项目名（例如 `/init 我的小说`）；S1 已绑定后可直接 `/init <故事梗概>` 完成创意访谈。
 
-### 一次性预览（不落盘）
-
-```bash
-uv run writer outline 一个穿越到唐朝的程序员
-```
-
-仅在终端打印大纲，不写入项目文件。
-
 ## 当前能力
 
 | 命令 | 说明 |
@@ -102,8 +57,6 @@ uv run writer outline 一个穿越到唐朝的程序员
 | `writer` | 进入 REPL；输入 `/帮助` 查看命令 |
 | `writer doctor` | 检查模型、Base URL、API Key 等配置 |
 | `writer new <书名>` | 创建新书项目（含 `.writer/`、`创意/`；创建前多选题材） |
-| `writer init <name>` | 创建小说项目目录（`--genre` / `--brief` / `--skip-brief`） |
-| `writer outline <idea>` | 根据一句话创意预览大纲（不落盘） |
 | REPL `/init <name>` | 在 REPL 内创建并绑定项目 |
 | REPL `/init <梗概>` | S1 已绑定项目时，写入 `创意/核心创意.md` 并更新 `AGENT.md` |
 | REPL `/大纲 <创意>` | 生成大纲并写入 `outline/大纲.md` |
