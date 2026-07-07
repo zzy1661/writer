@@ -6,18 +6,20 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from writer.engine.config import EngineConfig
-from writer.engine.context import EngineContext
-from writer.engine.events import Done, TextChunk
 from writer.project import ProjectState, find_outline_path, refresh_agent_file
 from writer.roles import TocResult
 
 if TYPE_CHECKING:
+    from writer.engine.config import EngineConfig
+    from writer.engine.context import EngineContext
     from writer.engine.deps import EngineDeps
+    from writer.engine.events import Done, TextChunk
 
 
 class TocSkill:
     command = "/目录"
+    description = "生成或查看章节目录"
+    requires_states = frozenset({ProjectState.HAS_OUTLINE, ProjectState.HAS_TOC})
 
     async def run(
         self,
@@ -25,6 +27,9 @@ class TocSkill:
         deps: EngineDeps,
         cfg: EngineConfig,
     ) -> AsyncIterator[TextChunk | Done]:
+        # Lazy import: see comment in ContinueWritingSkill.run().
+        from writer.engine.events import Done, TextChunk
+
         if not cfg.fast_mode:
             yield TextChunk(text="[engine] /目录 → toc skill\n")
 

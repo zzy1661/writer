@@ -41,6 +41,7 @@ from writer.project import (
 )
 from writer.project.init_brief import apply_init_brief
 from writer.session import EngineSession, compose_pending_input
+from writer.skills import SkillRegistry, built_skill_registry
 
 app = typer.Typer(
     name="writer",
@@ -52,13 +53,12 @@ console = Console()
 EXIT_COMMANDS = {"/退出", "/quit", "/q", "exit", "quit"}
 HELP_COMMANDS = {"/帮助", "/help", "help"}
 
-REPL_COMMANDS = [
+# Static REPL commands that aren't owned by a Skill. /大纲, /目录, /续写,
+# /改 used to live here too — they are now served by the SkillRegistry
+# (see ``build_repl_commands``).
+STATIC_REPL_COMMANDS = [
     ("/init", "初始化小说项目"),
-    ("/大纲", "生成或查看大纲"),
-    ("/目录", "生成或查看章节目录"),
     ("/创作", "创作指定章节或下一章"),
-    ("/续写", "继续未完成章节"),
-    ("/改", "修改章节内容"),
     ("/审核", "审核当前正文"),
     ("/查看", "查看项目文件或目录"),
     ("/搜索", "搜索项目文本"),
@@ -67,6 +67,25 @@ REPL_COMMANDS = [
     ("/帮助", "显示帮助"),
     ("/退出", "退出 writer"),
 ]
+
+# ``REPL_COMMANDS`` is kept as a module-level constant for backwards
+# compatibility with existing tests / completion behaviour. Derived from
+# the default skill registry at import time so the list still includes
+# every currently-registered Skill command.
+REPL_COMMANDS: list[tuple[str, str]] = list(STATIC_REPL_COMMANDS) + built_skill_registry().help_entries()
+
+
+def build_repl_commands(skill_registry: SkillRegistry) -> list[tuple[str, str]]:
+    """Return the full ``/帮助`` table: static commands + skills.
+
+    Static commands (init / 状态 / 帮助 / 退出, plus the not-yet-Skill
+    /创作 /审核 / 查看 / 搜索 / 字数统计) come first so the help table
+    stays stable across Skill additions. Skills follow in alphabetical
+    order (driven by :meth:`SkillRegistry.commands`).
+    """
+
+    return list(STATIC_REPL_COMMANDS) + skill_registry.help_entries()
+
 
 REPL_PROMPT = "writer> "
 try:
@@ -100,13 +119,21 @@ def print_welcome() -> None:
     )
 
 
-def print_repl_help() -> None:
-    """Render the first-pass command list used inside the REPL."""
+def print_repl_help(skill_registry: SkillRegistry | None = None) -> None:
+    """Render the first-pass command list used inside the REPL.
+
+    When ``skill_registry`` is provided, draws the help entries from it
+    so a plugin that registers a new skill is automatically reflected
+    in ``/帮助`` without restarting the process.
+    """
+
+    if skill_registry is None:
+        skill_registry = built_skill_registry()
     table = Table(title="可用命令")
     table.add_column("命令", style="cyan", no_wrap=True)
     table.add_column("说明")
 
-    for command, description in REPL_COMMANDS:
+    for command, description in build_repl_commands(skill_registry):
         table.add_row(command, description)
 
     console.print(table)
@@ -313,11 +340,20 @@ def _resolve_history_file(
 
 def build_prompt_session(
     history_file: Path | None | object = None,
+    *,
+    skill_registry: SkillRegistry | None = None,
 ) -> PromptSession[str]:
     """Construct a prompt session with persistent history + tab completion.
 
     Pass ``history_file=NO_HISTORY`` to disable history entirely (useful in
     tests). Passing ``None`` (the default) uses the user-level history file.
+
+    ``skill_registry`` is consulted for the completion word list so a
+    plugin can register new slash commands and they'll show up in
+    tab-completion without rebuilding the session. When omitted, the
+    default :func:`writer.skills.built_skill_registry` is used — keeping
+    the original zero-arg call sites (``build_prompt_session()`` in
+    :func:`_build_repl_prompt_session` and tests) working unchanged.
     """
     history_path = _resolve_history_file(history_file)
     history: FileHistory | None = None
@@ -327,7 +363,11 @@ def build_prompt_session(
         except OSError:
             history = None
 
-    completion_words = [cmd for cmd, _ in REPL_COMMANDS] + ["exit", "quit"]
+    if skill_registry is None:
+        skill_registry = built_skill_registry()
+    completion_words = (
+        [cmd for cmd, _ in build_repl_commands(skill_registry)] + ["exit", "quit"]
+    )
     completer = WordCompleter(
         completion_words, ignore_case=True, pattern=SLASH_CMD_PATTERN
     )
@@ -372,9 +412,6 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
         load_project_settings(discovered)
     refresh_settings()
 
-    if prompt_session is None:
-        prompt_session = _build_repl_prompt_session()
-
     # One EngineSession for the lifetime of the REPL — owns session_id,
     # deps, turn history, and pending Interrupt state.
     engine_session = EngineSession()
@@ -389,6 +426,17 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
             "[yellow]警告：当前 shell 的工作目录已失效（可能被移动或删除）。"
             "请先 [bold]cd[/bold] 到一个有效目录，或使用 [bold]/init <项目名>[/bold] 重新初始化。[/yellow]"
         )
+
+    # ``skill_registry`` lives on ``engine_session.deps`` (see
+    # ``EngineDeps.skill_registry``); passing it through to the prompt
+    # session + ``/帮助`` renderer keeps the help table and tab
+    # completion in sync with whatever skills are registered for this
+    # REPL run — including entry-point plugins discovered at import
+    # time.
+    skill_registry = engine_session.deps.skill_registry
+
+    if prompt_session is None and sys.stdin.isatty():
+        prompt_session = build_prompt_session(skill_registry=skill_registry)
 
     while True:
         try:
@@ -546,56 +594,6 @@ def _maybe_apply_init_brief(
     console.print("[green]已更新 AGENT.md 基本要求[/green]")
 
 
-@app.command("init")
-def init_project_cmd(
-    name: Annotated[str, typer.Argument(help="小说项目名称")],
-    directory: Annotated[
-        Path,
-        typer.Option("--dir", "-d", help="项目创建到哪个目录下"),
-    ] = Path("."),
-    force: Annotated[
-        bool,
-        typer.Option("--force", help="允许覆盖缺失的初始化文件"),
-    ] = False,
-    genre: Annotated[
-        str | None,
-        typer.Option(
-            "--genre",
-            "-g",
-            help="小说题材（历史 / 言情 / 玄幻，其他视为兜底）",
-            prompt=False,
-        ),
-    ] = None,
-    brief: Annotated[
-        str | None,
-        typer.Option("--brief", "-b", help="初始化后写入的核心创意描述"),
-    ] = None,
-    skip_brief: Annotated[
-        bool,
-        typer.Option("--skip-brief", help="跳过初始化后的创意访谈"),
-    ] = False,
-) -> None:
-    """创建一个小说项目工作区（题材感知版）。"""
-    if genre is None:
-        console.print(
-            f"可用题材（输入后回车；其它值视为 other）：{', '.join(_init_prompt_genre_labels())}"
-        )
-        picked = typer.prompt(
-            "请选择小说题材",
-            default="其他",
-        )
-    else:
-        picked = genre
-    init_project(
-        name,
-        directory,
-        force=force,
-        genre=picked,
-        brief=brief,
-        skip_brief=skip_brief,
-    )
-
-
 @app.command("new")
 def new_project_cmd(
     name: Annotated[str, typer.Argument(help="小说书名（目录名）")],
@@ -640,29 +638,3 @@ def new_project_cmd(
     console.print(
         "[dim]项目 LLM 配置位于 .writer/config（优先级高于 .env）。[/dim]"
     )
-
-
-@app.command()
-def outline(
-    idea: Annotated[str, typer.Argument(help="一句话小说创意")],
-) -> None:
-    """根据一句话创意生成最小大纲。"""
-    # Reuse the same ``StoryConsultant`` the REPL would dispatch to (per
-    # arch-optimizer M2 / Q1 2026-07-05). Previously the Typer subcommand
-    # independently constructed ``NovelAgent(settings)`` while the REPL
-    # used ``EngineSession.deps.story_consultant`` — two parallel paths,
-    # so swapping the role implementation required changes in both
-    # places. ``production_deps()`` is cheap; the extra cost over a
-    # direct ``StoryConsultant(settings)`` call is negligible for a CLI
-    # subcommand invoked once per process.
-    from writer.engine.deps import production_deps
-    from writer.project import discover_project_root
-
-    project_root = discover_project_root()
-    deps = production_deps(project_root=project_root)
-    result = deps.story_consultant.draft_outline(idea, project_root=project_root)
-
-    console.print(f"[bold]{result.title}[/bold]")
-    console.print(result.premise)
-    for chapter in result.chapters:
-        console.print(f"- {chapter}")

@@ -6,18 +6,25 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from writer.engine.config import EngineConfig
-from writer.engine.context import EngineContext
-from writer.engine.events import Done, TextChunk
 from writer.project import ProjectState, refresh_agent_file
 from writer.roles import OutlineResult
 
 if TYPE_CHECKING:
+    from writer.engine.config import EngineConfig
+    from writer.engine.context import EngineContext
     from writer.engine.deps import EngineDeps
+    from writer.engine.events import Done, TextChunk
 
 
 class OutlineSkill:
     command = "/大纲"
+    description = "生成或查看大纲"
+    # Matches the historical COMMAND_ALLOWED entry; see state matrix note
+    # in validate_command_available. The state matrix for /大纲 stays
+    # INITIALIZED + HAS_OUTLINE so the original behaviour is preserved
+    # (running /大纲 in S3+ would otherwise let it clobber the existing
+    # TOC pipeline state).
+    requires_states = frozenset({ProjectState.INITIALIZED, ProjectState.HAS_OUTLINE})
 
     async def run(
         self,
@@ -25,6 +32,9 @@ class OutlineSkill:
         deps: EngineDeps,
         cfg: EngineConfig,
     ) -> AsyncIterator[TextChunk | Done]:
+        # Lazy import: see comment in ContinueWritingSkill.run().
+        from writer.engine.events import Done, TextChunk
+
         if not cfg.fast_mode:
             yield TextChunk(text="[engine] /大纲 → outline skill\n")
         idea = ctx.user_input.removeprefix("/大纲").strip()

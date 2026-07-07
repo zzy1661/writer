@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 
 class ProjectState(StrEnum):
@@ -63,12 +64,12 @@ _MANUSCRIPT_DIRS = (
 )
 
 COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
+    # NOTE: /大纲, /目录, /续写, /改 are intentionally absent — they are
+    # Skill-backed commands whose availability is derived from the
+    # registered Skill's `requires_states`. See
+    # ``validate_command_available`` + ``SkillRegistryView``.
     "/init": {ProjectState.UNINITIALIZED},
-    "/大纲": {ProjectState.INITIALIZED, ProjectState.HAS_OUTLINE},
-    "/目录": {ProjectState.HAS_OUTLINE, ProjectState.HAS_TOC},
     "/创作": {ProjectState.HAS_TOC, ProjectState.WRITING},
-    "/续写": {ProjectState.WRITING},
-    "/改": {ProjectState.WRITING},
     "/审核": {ProjectState.WRITING, ProjectState.FINISHED},
     "/查看": {
         ProjectState.INITIALIZED,
@@ -98,11 +99,7 @@ COMMAND_HINTS: dict[str, str] = {
         "当前已经绑定项目。填写故事创意请直接输入 /init <故事梗概>；"
         "如需新建项目，请先退出当前 REPL 或另开目录。"
     ),
-    "/大纲": "请先执行 /init <项目名> 创建项目。",
-    "/目录": "请先用 /大纲 生成并落盘大纲。",
     "/创作": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
-    "/续写": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
-    "/改": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
     "/审核": "请先写出至少一章正文。",
     "/查看": "请先执行 /init <项目名> 创建项目。",
     "/搜索": "请先执行 /init <项目名> 创建项目。",
@@ -211,19 +208,48 @@ def validate_command_available(
     command: str | None,
     project_root: Path | None,
     project_state: str | ProjectState | None = None,
+    *,
+    skill_registry: SkillRegistryView | None = None,
 ) -> CommandCheck:
     """Validate a slash command against the state matrix.
 
-    Unknown commands stay pass-through for the existing ``command_pending``
-    branch; only commands declared in ``COMMAND_ALLOWED`` are blocked.
+    Lookup order for the availability set:
+
+    1. ``skill_registry.state_matrix()`` — drives the Skill-bound
+       commands (``/大纲`` / ``/目录`` / ``/续写`` / ``改``) so the
+       state matrix is fully derived from Skill metadata.
+    2. ``COMMAND_ALLOWED`` — the static fallback for commands that
+       aren't owned by any Skill (``/init`` itself plus the tool- and
+       workflow-backed commands still listed by hand).
+
+    Unknown commands stay pass-through for the existing
+    ``command_pending`` branch; only commands declared in either source
+    are blocked.
     """
 
     state = _coerce_state(project_state) if project_root is None else detect_state(project_root)
-    if command not in COMMAND_ALLOWED:
-        return CommandCheck(command=command or "", state=state, ok=True)
+    if not command:
+        return CommandCheck(command="", state=state, ok=True)
 
-    allowed = COMMAND_ALLOWED[command]
-    if state in allowed:
+    skill_matrix = skill_registry.state_matrix() if skill_registry is not None else {}
+    if command in skill_matrix:
+        skill_allowed = skill_matrix[command]
+        if state in skill_allowed:
+            return CommandCheck(command=command, state=state, ok=True)
+        description = STATE_DESCRIPTIONS[state]
+        hint = _skill_hint(command)
+        return CommandCheck(
+            command=command,
+            state=state,
+            ok=False,
+            reason=f"{command} 当前不可用：项目状态为 {state.value}（{description}）。{hint}",
+        )
+
+    if command not in COMMAND_ALLOWED:
+        return CommandCheck(command=command, state=state, ok=True)
+
+    static_allowed = COMMAND_ALLOWED[command]
+    if state in static_allowed:
         return CommandCheck(command=command, state=state, ok=True)
 
     description = STATE_DESCRIPTIONS[state]
@@ -234,6 +260,38 @@ def validate_command_available(
         ok=False,
         reason=f"{command} 当前不可用：项目状态为 {state.value}（{description}）。{hint}",
     )
+
+
+@runtime_checkable
+class SkillRegistryView(Protocol):
+    """Structural view of :class:`writer.skills.registry.SkillRegistry`.
+
+    Defined here (not imported from ``writer.skills``) to keep
+    :mod:`writer.project.state` free of the heavier skill dependencies.
+    The full :class:`writer.skills.registry.SkillRegistry` trivially
+    satisfies this Protocol because the two methods are part of its
+    public surface.
+    """
+
+    def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
+        ...
+
+
+def _skill_hint(command: str) -> str:
+    """Map a Skill-driven command to a user-facing hint string.
+
+    Kept here (not in :mod:`writer.skills`) so the state matrix only
+    reports on a command when the same command can be looked up in the
+    registry — this avoids pulling skill-side translation tables into
+    the static :data:`COMMAND_HINTS` fallback.
+    """
+
+    return {
+        "/大纲": "请先执行 /init <项目名> 创建项目。",
+        "/目录": "请先用 /大纲 生成并落盘大纲。",
+        "/续写": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
+        "/改": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
+    }.get(command, "请先推进项目到可用状态。")
 
 
 def count_chapters(project_root: Path) -> int:
@@ -390,6 +448,7 @@ __all__ = [
     "ProjectSnapshot",
     "ProjectState",
     "STATE_DESCRIPTIONS",
+    "SkillRegistryView",
     "append_agent_requirements",
     "count_chapters",
     "detect_state",

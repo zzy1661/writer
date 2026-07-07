@@ -68,6 +68,7 @@ from writer.project.init_brief import (
     should_run_init_brief,
 )
 from writer.routing import AgentAction
+from writer.skills.errors import SkillError
 from writer.tools.errors import ToolError
 
 log = logging.getLogger(__name__)
@@ -125,6 +126,7 @@ async def _engine_loop(
             action.command,
             ctx.project_root,
             ctx.project_state,
+            skill_registry=deps.skill_registry,
         )
         if not check.ok:
             yield TextChunk(text=f"{check.reason}\n")
@@ -147,11 +149,16 @@ async def _engine_loop(
                 if action.command == "/init":
                     async for event in _run_init_command(ctx, cfg):
                         yield event
-                elif action.command in {"/大纲", "/目录"}:
-                    skill = deps.skill_registry.get(action.command)
-                    if skill is None:
-                        msg = f"未注册 skill: {action.command}"
-                        raise ValueError(msg)
+                elif action.command and (skill := deps.skill_registry.get(action.command)) is not None:
+                    # Dynamic dispatch: any slash command that maps to a
+                    # registered Skill gets routed through that skill.
+                    # Adding a new skill does NOT touch this branch; the
+                    # SkillRegistry is the single source of truth.
+                    if not cfg.fast_mode:
+                        yield _log(
+                            f"[engine] {action.command} → {skill.__class__.__name__}\n",
+                            cfg,
+                        )
                     async for event in skill.run(ctx, deps, cfg):
                         yield event
                 else:
@@ -188,6 +195,23 @@ async def _engine_loop(
         log.warning("工具错误: %s", exc, exc_info=True)
         yield ErrorEvent(message=f"工具错误: {exc}", traceback=tb)
         yield Done(reason="aborted", payload={"error": str(exc)})
+    except SkillError as exc:
+        # ``SkillError`` is the Skill-side equivalent of ``ToolError``:
+        # raised by ``Skill.run`` for recoverable failures (missing
+        # project root, unsatisfied preconditions, malformed arguments).
+        # Tagged with the rejected command so the REPL can render a
+        # useful red ✗ message that tells the user *which* skill
+        # failed.
+        tb = traceback.format_exc()
+        log.warning("技能错误: %s", exc, exc_info=True)
+        # The skill command isn't on the SkillError itself — recover it
+        # from the last routed action to keep the payload stable.
+        command = getattr(exc, "command", action.command if action else None)
+        yield ErrorEvent(message=f"技能错误: {exc}", traceback=tb)
+        yield Done(
+            reason="aborted",
+            payload={"error": str(exc), "command": command},
+        )
     except Exception as exc:  # noqa: BLE001 — engine boundary must never raise
         tb = traceback.format_exc()
         log.exception("引擎边界异常: %s", exc)
