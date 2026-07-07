@@ -109,6 +109,12 @@ class EngineSession:
         from writer.engine.deps import _consultant_for_genre
         from writer.tools import ToolRuntime
 
+        if new_root is not None:
+            from writer.config import load_env_file, refresh_settings
+
+            load_env_file(new_root)
+            refresh_settings()
+
         self.project_root = new_root
         resolved = (new_root or _SENTINEL_PROJECT_ROOT).resolve()
         new_runtime = ToolRuntime(project_root=resolved)

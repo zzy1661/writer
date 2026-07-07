@@ -27,6 +27,7 @@ from writer.routing import (
     LlmIntentRouter,
     RuleBasedIntentRouter,
 )
+from writer.skills import SkillRegistry, built_skill_registry
 from writer.tools import ToolRegistry, ToolRuntime, built_tool_registry
 from writer.tools.errors import WorkflowNotFoundError
 from writer.workflows import WORKFLOWS, WorkflowStub
@@ -122,6 +123,7 @@ class EngineDeps(Protocol):
     story_consultant: StoryConsultant
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
+    skill_registry: SkillRegistry
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
         ...
@@ -182,6 +184,7 @@ class _DefaultEngineDeps:
     story_consultant: StoryConsultant
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
+    skill_registry: SkillRegistry
     _workflows: dict[str, WorkflowStub] = field(default_factory=dict)
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -266,6 +269,7 @@ def production_deps(
         story_consultant=_select_consultant(resolved, project_root),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=root),
+        skill_registry=built_skill_registry(),
         _workflows=dict(WORKFLOWS),
     )
 

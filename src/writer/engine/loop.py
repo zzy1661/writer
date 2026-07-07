@@ -58,10 +58,15 @@ from writer.engine.events import (
 from writer.project import (
     ProjectState,
     create_workspace,
-    refresh_agent_file,
+    detect_state,
     validate_command_available,
 )
-from writer.roles import OutlineResult
+from writer.project.init_brief import (
+    apply_init_brief,
+    extract_init_brief_text,
+    looks_like_creative_brief,
+    should_run_init_brief,
+)
 from writer.routing import AgentAction
 from writer.tools.errors import ToolError
 
@@ -110,6 +115,12 @@ async def _engine_loop(
         action = deps.route(ctx.user_input, ctx.project_state)
         yield ActionEvent(action=action)
 
+        if action.command == "/init" and action.action_type == "run_command":
+            async for event in _maybe_run_init_brief_or_block(ctx, deps, cfg):
+                yield event
+            if _init_turn_handled(ctx.user_input, ctx.project_root, ctx.project_state):
+                return
+
         check = validate_command_available(
             action.command,
             ctx.project_root,
@@ -136,8 +147,12 @@ async def _engine_loop(
                 if action.command == "/init":
                     async for event in _run_init_command(ctx, cfg):
                         yield event
-                elif action.command == "/大纲":
-                    async for event in _run_outline_command(ctx, deps, cfg):
+                elif action.command in {"/大纲", "/目录"}:
+                    skill = deps.skill_registry.get(action.command)
+                    if skill is None:
+                        msg = f"未注册 skill: {action.command}"
+                        raise ValueError(msg)
+                    async for event in skill.run(ctx, deps, cfg):
                         yield event
                 else:
                     if not cfg.fast_mode:
@@ -180,38 +195,113 @@ async def _engine_loop(
         yield Done(reason="aborted", payload={"error": str(exc)})
 
 
-async def _run_outline_command(
+def _init_turn_handled(
+    user_input: str,
+    project_root: Path | None,
+    project_state: str,
+) -> bool:
+    """Return True when ``/init`` was fully handled before state-matrix checks."""
+
+    if should_run_init_brief(
+        user_input,
+        project_root=project_root,
+        project_state=project_state,
+    ):
+        return True
+
+    rest = extract_init_brief_text(user_input)
+    return project_root is None and bool(rest) and looks_like_creative_brief(rest)
+
+
+async def _maybe_run_init_brief_or_block(
     ctx: EngineContext,
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done]:
-    """Dispatch ``/大纲 <创意>`` to :class:`StoryConsultant` and stream the outline."""
+    """Handle REPL ``/init <brief>`` on a bound S1 project, or steer S0 users."""
+
+    if not should_run_init_brief(
+        ctx.user_input,
+        project_root=ctx.project_root,
+        project_state=ctx.project_state,
+    ):
+        rest = extract_init_brief_text(ctx.user_input)
+        if ctx.project_root is None and rest and looks_like_creative_brief(rest):
+            msg = (
+                "看起来你在描述故事创意。请先执行 /init <项目名> 创建并绑定项目，"
+                "再输入 /init <故事梗概> 填写创意。"
+            )
+            yield TextChunk(text=f"{msg}\n")
+            yield Done(
+                reason="aborted",
+                payload={"command": "/init", "error": msg},
+            )
+        return
+
+    brief = extract_init_brief_text(ctx.user_input)
+    if not brief:
+        msg = "用法：/init <故事梗概>，或 /init --brief <故事梗概>"
+        yield TextChunk(text=f"{msg}\n")
+        yield Done(reason="aborted", payload={"command": "/init", "error": msg})
+        return
+
+    if ctx.project_root is None:
+        msg = "请先执行 /init <项目名> 创建并绑定项目，再输入故事创意。"
+        yield TextChunk(text=f"{msg}\n")
+        yield Done(reason="aborted", payload={"command": "/init", "error": msg})
+        return
+
+    state = detect_state(ctx.project_root)
+    if state != ProjectState.INITIALIZED:
+        description = state.value
+        msg = (
+            f"/init 创意访谈仅在 S1（初始化）可用；当前为 {description}。"
+            "可直接编辑 创意/核心创意.md。"
+        )
+        yield TextChunk(text=f"{msg}\n")
+        yield Done(
+            reason="aborted",
+            payload={
+                "command": "/init",
+                "project_state": state.value,
+                "error": msg,
+            },
+        )
+        return
+
+    async for event in _run_init_brief_command(ctx, deps, cfg, brief):
+        yield event
+
+
+async def _run_init_brief_command(
+    ctx: EngineContext,
+    deps: EngineDeps,
+    cfg: EngineConfig,
+    brief: str,
+) -> AsyncIterator[TextChunk | Done]:
+    """Expand a creative brief into ``创意/核心创意.md`` and ``AGENT.md``."""
+
+    if ctx.project_root is None:
+        msg = "未绑定项目，无法写入创意。"
+        yield TextChunk(text=f"{msg}\n")
+        yield Done(reason="aborted", payload={"command": "/init", "error": msg})
+        return
+
     if not cfg.fast_mode:
-        yield TextChunk(text="[engine] /大纲 → StoryConsultant.draft_outline\n")
-    # ``removeprefix`` (3.9+) replaces the previous ``[len("/大纲"):]`` slice
-    # (arch-optimizer M3): the slice misbehaves when ``ctx.user_input`` is
-    # exactly ``"/大纲"`` (returns the whole string, no leading space) and
-    # makes the multi-space / repeated-prefix edge case silently
-    # mis-parse. ``removeprefix`` is the canonical, defensive form.
-    idea = ctx.user_input.removeprefix("/大纲").strip()
-    outline = deps.story_consultant.draft_outline(idea)
-    outline_path = _write_outline(ctx.project_root, outline)
+        yield TextChunk(text="[engine] /init → apply_init_brief\n")
 
-    yield TextChunk(text=f"标题: {outline.title}\n")
-    yield TextChunk(text=f"前提: {outline.premise}\n")
-    for chapter in outline.chapters:
-        yield TextChunk(text=f"- {chapter}\n")
-    root = ctx.project_root or outline_path.parent.parent
-    yield TextChunk(text=f"已写入: {outline_path.relative_to(root).as_posix()}\n")
-
+    result = apply_init_brief(ctx.project_root, brief, deps.story_consultant)
+    yield TextChunk(
+        text=f"已写入 创意/核心创意.md（来源: {result.source}）\n"
+        "已更新 AGENT.md 基本要求\n"
+    )
     yield Done(
         reason="answered",
         payload={
-            "answer": outline.title,
-            "outline": True,
-            "chapter_count": len(outline.chapters),
-            "outline_path": str(outline_path),
-            "project_state": ProjectState.HAS_OUTLINE.value,
+            "command": "/init",
+            "init_brief": True,
+            "source": result.source,
+            "project_state": ProjectState.INITIALIZED.value,
         },
     )
 
@@ -232,7 +322,7 @@ async def _run_init_command(
         yield Done(reason="aborted", payload={"command": "/init", "error": msg})
         return
 
-    workspace = create_workspace(name, Path("novels"))
+    workspace = create_workspace(name, Path("."))
     yield TextChunk(text=f"已初始化项目: {workspace.root}\n")
     yield Done(
         reason="answered",
@@ -241,38 +331,6 @@ async def _run_init_command(
             "project_root": str(workspace.root.resolve()),
             "project_state": ProjectState.INITIALIZED.value,
         },
-    )
-
-
-def _write_outline(project_root: Path | None, outline: OutlineResult) -> Path:
-    """Persist an outline result under the current project."""
-
-    if project_root is None:
-        # Per arch-optimizer m23 (2026-07-07): ``ToolError`` is for
-        # tool-layer failures; "no project bound" is engine setup
-        # invalid. ``ValueError`` falls through to the generic
-        # ``except Exception`` arm with a "引擎异常:" prefix that
-        # more accurately describes the failure.
-        msg = "未绑定项目，无法写入大纲。请先执行 /init <项目名>。"
-        raise ValueError(msg)
-
-    root = project_root.resolve()
-    outline_dir = root / "outline"
-    outline_dir.mkdir(parents=True, exist_ok=True)
-    target = outline_dir / "大纲.md"
-    target.write_text(_format_outline(outline), encoding="utf-8")
-    refresh_agent_file(root)
-    return target
-
-
-def _format_outline(outline: OutlineResult) -> str:
-    chapters = "\n".join(f"- {chapter}" for chapter in outline.chapters)
-    return (
-        f"# {outline.title}\n\n"
-        "## 前提\n\n"
-        f"{outline.premise}\n\n"
-        "## 四幕大纲\n\n"
-        f"{chapters}\n"
     )
 
 

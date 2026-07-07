@@ -203,6 +203,86 @@ def test_production_deps_has_router() -> None:
     assert action.action_type == "run_command"
 
 
+def test_engine_init_defaults_to_current_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    deps = production_deps()
+
+    events = _consume(run_engine(_ctx("/init 引擎测试"), deps))
+
+    assert (tmp_path / "引擎测试").is_dir()
+    assert not (tmp_path / "novels" / "引擎测试").exists()
+    done_events = [event for event in events if isinstance(event, Done)]
+    assert done_events[-1].payload is not None
+    assert done_events[-1].payload["project_root"] == str((tmp_path / "引擎测试").resolve())
+
+
+def test_engine_init_brief_at_s1_writes_core_idea(tmp_path: Path) -> None:
+    """Bound S1 project: ``/init <故事梗概>`` runs the creative brief flow."""
+
+    deps = production_deps()
+    workspace = create_workspace("创意项目", tmp_path)
+    brief = (
+        "林远穿越到了他写的游戏中。但他写的游戏是一个充满温馨故事的城市，"
+        "然而他穿越到的这个世界是一个充满杀戮和罪恶的世界。"
+    )
+
+    events = _consume(run_engine(_workspace_ctx(f"/init {brief}", workspace.root), deps))
+
+    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
+    done_events = [e for e in events if isinstance(e, Done)]
+
+    assert "已写入 创意/核心创意.md" in text_blob
+    assert (workspace.root / "创意" / "核心创意.md").is_file()
+    assert "## 基本要求" in (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert done_events[-1].reason == "answered"
+    assert done_events[-1].payload is not None
+    assert done_events[-1].payload.get("init_brief") is True
+
+
+def test_engine_init_brief_blocks_creative_text_at_s0(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """S0 + long creative pitch should steer user instead of creating a folder."""
+
+    monkeypatch.chdir(tmp_path)
+    deps = production_deps()
+    brief = (
+        "林远穿越到了他写的游戏中。但他写的游戏是一个充满温馨故事的城市，"
+        "然而他穿越到的这个世界是一个充满杀戮和罪恶的世界。"
+    )
+
+    events = _consume(run_engine(_ctx(f"/init {brief}"), deps))
+
+    assert not any(path.is_dir() for path in tmp_path.iterdir())
+    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
+    done_events = [e for e in events if isinstance(e, Done)]
+
+    assert "请先执行 /init <项目名>" in text_blob
+    assert done_events[-1].reason == "aborted"
+
+
+def test_engine_init_blocks_init_command_after_outline_state(tmp_path: Path) -> None:
+    deps = production_deps()
+    workspace = create_workspace("创意项目", tmp_path)
+    (workspace.root / "outline" / "大纲.md").write_text("大纲", encoding="utf-8")
+
+    events = _consume(
+        run_engine(_workspace_ctx("/init 新的故事创意", workspace.root), deps)
+    )
+
+    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
+    done_events = [e for e in events if isinstance(e, Done)]
+
+    assert "当前不可用" in text_blob
+    assert "S2" in text_blob
+    assert done_events[-1].reason == "aborted"
+    assert not (workspace.root / "创意" / "核心创意.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # Wiring integration (Phase 2)
 # ---------------------------------------------------------------------------
@@ -223,7 +303,7 @@ def test_engine_runs_outline_via_story_consultant(tmp_path: Path) -> None:
 
     assert any(isinstance(e, ActionEvent) and e.action.action_type == "run_command" for e in action_events)
     assert any(isinstance(e, ActionEvent) and e.action.command == "/大纲" for e in action_events)
-    assert "StoryConsultant" in text_blob
+    assert "StoryConsultant" in text_blob or "outline skill" in text_blob
     assert "双主角女将军从冷宫到朝堂" in text_blob
     assert "第一幕" in text_blob
     assert "第四幕" in text_blob
@@ -237,17 +317,41 @@ def test_engine_runs_outline_via_story_consultant(tmp_path: Path) -> None:
     assert answered[0].payload.get("project_state") == "S2"
 
 
-def test_write_outline_raises_value_error_when_project_root_missing() -> None:
-    """``_write_outline`` must raise ``ValueError`` (not ``ToolError``) when no project is bound.
+def test_engine_runs_toc_after_outline(tmp_path: Path) -> None:
+    """``/目录`` must read the outline and write ``outline/toc.md``."""
 
-    Per arch-optimizer m23 (2026-07-07): ``ToolError`` is a tool-layer
-    exception — using it for engine-setup failures (no project bound)
-    confused the user-facing error message ("工具错误:" vs "引擎异常:").
-    ``ValueError`` falls through the generic ``except Exception`` arm
-    with the more accurate "引擎异常:" prefix.
-    """
-    from writer.engine.loop import _write_outline
+    deps = production_deps()
+    workspace = create_workspace("toc-test", tmp_path)
+    (workspace.root / "outline" / "大纲.md").write_text(
+        "# 测试书名\n\n## 四幕大纲\n\n"
+        "- 第一幕：开端\n"
+        "- 第二幕：冲突\n"
+        "- 第三幕：转折\n"
+        "- 第四幕：终局\n",
+        encoding="utf-8",
+    )
+
+    events = _consume(
+        run_engine(_workspace_ctx("/目录", workspace.root), deps)
+    )
+
+    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
+    done_events = [e for e in events if isinstance(e, Done)]
+    answered = [e for e in done_events if e.reason == "answered"]
+
+    assert "toc skill" in text_blob or "StoryConsultant" in text_blob
+    assert (workspace.root / "outline" / "toc.md").is_file()
+    assert answered, "expected Done(reason='answered')"
+    assert answered[0].payload is not None
+    assert answered[0].payload.get("toc") is True
+    assert answered[0].payload.get("project_state") == "S3"
+
+
+def test_write_outline_raises_value_error_when_project_root_missing() -> None:
+    """Outline skill must raise ``ValueError`` when no project is bound."""
+
     from writer.roles.story_consultant import OutlineResult
+    from writer.skills.outline import _write_outline
 
     with pytest.raises(ValueError, match="未绑定项目"):
         _write_outline(
@@ -303,6 +407,7 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
     from writer.routing import RuleBasedIntentRouter
+    from writer.skills import built_skill_registry
     from writer.tools import ToolRuntime, built_tool_registry
     from writer.tools.errors import WorkflowNotFoundError
 
@@ -311,6 +416,7 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+        skill_registry=built_skill_registry(),
         _workflows={},
     )
 
@@ -358,6 +464,7 @@ def test_engine_emits_error_event_on_router_failure() -> None:
     from writer.engine import ErrorEvent
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
+    from writer.skills import built_skill_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -365,6 +472,7 @@ def test_engine_emits_error_event_on_router_failure() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+        skill_registry=built_skill_registry(),
     )
 
     events = _consume(run_engine(_ctx("anything"), deps))
@@ -378,6 +486,7 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
     from writer.engine import Interrupt
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
+    from writer.skills import built_skill_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -385,6 +494,7 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+        skill_registry=built_skill_registry(),
     )
 
     events = _consume(run_engine(_ctx("模糊输入"), deps))
@@ -402,6 +512,7 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
     from writer.engine.config import EngineConfig
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
+    from writer.skills import built_skill_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -409,6 +520,7 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+        skill_registry=built_skill_registry(),
     )
 
     cfg = EngineConfig(session_id="x", fast_mode=True)
@@ -433,6 +545,7 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
     from writer.engine import ToolCall, ToolResult
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
+    from writer.skills import built_skill_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -440,6 +553,7 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+        skill_registry=built_skill_registry(),
     )
 
     events = _consume(run_engine(_ctx("查一下 F003"), deps))
@@ -459,6 +573,7 @@ def test_engine_handles_tool_not_found_error() -> None:
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
     from writer.routing import AgentAction
+    from writer.skills import built_skill_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     class _CallUnknownTool:
@@ -473,6 +588,7 @@ def test_engine_handles_tool_not_found_error() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
+        skill_registry=built_skill_registry(),
     )
 
     events = _consume(run_engine(_ctx("anything"), deps))

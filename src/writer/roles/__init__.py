@@ -29,13 +29,15 @@ selected by ``production_deps`` based on the project's ``AGENT.md``
 
 from writer.roles.history_consultant import HistoryConsultant
 from writer.roles.romance_consultant import RomanceConsultant
-from writer.roles.story_consultant import OutlineResult, StoryConsultant
+from writer.roles.story_consultant import InitBriefResult, OutlineResult, StoryConsultant, TocResult
 from writer.roles.xuanhuan_consultant import XuanhuanConsultant
 
 __all__ = [
+    "InitBriefResult",
     "HistoryConsultant",
     "OutlineResult",
     "RomanceConsultant",
     "StoryConsultant",
+    "TocResult",
     "XuanhuanConsultant",
 ]

@@ -104,6 +104,43 @@ def test_build_prompt_session_supports_no_history() -> None:
     assert not isinstance(session.history, FileHistory)
 
 
+def test_repl_completer_filters_by_prefix() -> None:
+    """Slash commands should narrow as the user types (e.g. /ini → /init only)."""
+    from prompt_toolkit.document import Document
+
+    session = build_prompt_session(history_file=NO_HISTORY)
+    assert session.completer is not None
+
+    def completions_for(text: str) -> list[str]:
+        doc = Document(text, len(text))
+        return [c.text for c in session.completer.get_completions(doc, None)]
+
+    all_slash = completions_for("/")
+    assert "/init" in all_slash
+    assert len(all_slash) >= len(REPL_COMMANDS)
+
+    assert completions_for("/ini") == ["/init"]
+    assert completions_for("/大") == ["/大纲"]
+
+
+def test_repl_completer_replaces_partial_command_not_double_slash() -> None:
+    """Selecting a completion must replace the typed prefix, not append after '/'."""
+    from prompt_toolkit.document import Document
+
+    session = build_prompt_session(history_file=NO_HISTORY)
+    assert session.completer is not None
+
+    doc = Document("/", 1)
+    completion = next(session.completer.get_completions(doc, None))
+    assert completion.text == "/init"
+    assert completion.start_position == -1
+
+    doc_ini = Document("/ini", 4)
+    completion_ini = next(session.completer.get_completions(doc_ini, None))
+    assert completion_ini.text == "/init"
+    assert completion_ini.start_position == -4
+
+
 def test_repl_command_aliases_present() -> None:
     """Every documented REPL command should be reachable via its slash form."""
     command_names = {cmd for cmd, _ in REPL_COMMANDS}
@@ -164,7 +201,7 @@ def test_repl_pending_interrupt_visible_in_next_turn() -> None:
 
 
 # ---------------------------------------------------------------------------
-# doctor / new_project subcommands + _run_engine event rendering + REPL EOF
+# doctor / init subcommands + _run_engine event rendering + REPL EOF
 # ---------------------------------------------------------------------------
 
 
@@ -184,42 +221,37 @@ def test_doctor_command_renders_settings_table() -> None:
     assert ("已配置" in result.stdout) or ("未配置" in result.stdout)
 
 
-def test_new_project_creates_workspace_and_lists_files(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["new", "我的项目", "--dir", str(tmp_path)])
+def test_init_subcommand_with_brief_writes_core_idea(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "init",
+            "创意测试",
+            "--dir",
+            str(tmp_path),
+            "--genre",
+            "其他",
+            "--brief",
+            "程序员穿越唐朝",
+        ],
+    )
+
+    assert result.exit_code == 0
+    project_root = tmp_path / "创意测试"
+    assert (project_root / "创意" / "核心创意.md").is_file()
+    assert "## 基本要求" in (project_root / "AGENT.md").read_text(encoding="utf-8")
+
+
+def test_init_subcommand_creates_workspace_and_lists_files(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["init", "我的项目", "--dir", str(tmp_path), "--genre", "其他"],
+    )
 
     assert result.exit_code == 0
     assert "已创建小说项目" in result.stdout
     assert "README.md" in result.stdout
     assert "manuscript" in result.stdout or "outline" in result.stdout
-
-
-def test_new_project_respects_force_flag(tmp_path: Path) -> None:
-    # Pre-create the workspace
-    pre = runner.invoke(app, ["new", "force-test", "--dir", str(tmp_path)])
-    assert pre.exit_code == 0
-
-    # Re-run with --force should succeed (exit 0)
-    result = runner.invoke(app, ["new", "force-test", "--dir", str(tmp_path), "--force"])
-
-    assert result.exit_code == 0
-    assert "已创建小说项目" in result.stdout
-
-
-def test_new_project_exits_1_when_dir_exists(tmp_path: Path) -> None:
-    pre = runner.invoke(app, ["new", "dup-test", "--dir", str(tmp_path)])
-    assert pre.exit_code == 0
-
-    result = runner.invoke(app, ["new", "dup-test", "--dir", str(tmp_path)])
-
-    assert result.exit_code == 1
-    assert "错误" in result.stdout
-
-
-def test_new_project_exits_1_on_invalid_name(tmp_path: Path) -> None:
-    result = runner.invoke(app, ["new", "   ", "--dir", str(tmp_path)])
-
-    assert result.exit_code == 1
-    assert "错误" in result.stdout
 
 
 def test_run_engine_renders_tool_call_event(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -399,6 +431,19 @@ def test_init_subcommand_with_genre_flag_creates_genre_files(
     assert "题材: 历史" in (project_root / "AGENT.md").read_text(encoding="utf-8")
 
 
+def test_init_subcommand_defaults_to_current_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["init", "贞观", "--genre", "历史"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "贞观" / "史实" / "年表.md").is_file()
+    assert not (tmp_path / "novels" / "贞观").exists()
+
+
 def test_init_subcommand_short_genre_flag_alias(tmp_path: Path) -> None:
     """`-g` short option is equivalent to `--genre`."""
 
@@ -450,6 +495,31 @@ def test_init_subcommand_force_flag_still_works(tmp_path: Path) -> None:
     assert (project_root / "伏笔" / "foreshadow.md").is_file()
 
 
+def test_init_subcommand_exits_1_when_dir_exists(tmp_path: Path) -> None:
+    runner.invoke(
+        app,
+        ["init", "dup-test", "--dir", str(tmp_path), "--genre", "其他"],
+    )
+
+    result = runner.invoke(
+        app,
+        ["init", "dup-test", "--dir", str(tmp_path), "--genre", "其他"],
+    )
+
+    assert result.exit_code == 1
+    assert "错误" in result.stdout
+
+
+def test_init_subcommand_exits_1_on_invalid_name(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        ["init", "   ", "--dir", str(tmp_path), "--genre", "其他"],
+    )
+
+    assert result.exit_code == 1
+    assert "错误" in result.stdout
+
+
 def test_repl_init_with_flags_creates_workspace_and_binds_session(
     tmp_path: Path,
 ) -> None:
@@ -463,6 +533,19 @@ def test_repl_init_with_flags_creates_workspace_and_binds_session(
     assert (project_root / "人设" / "男主.md").is_file()
 
 
+def test_repl_init_with_flags_defaults_to_current_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, input="/init --name 双生 --genre 言情\n/退出\n")
+
+    assert result.exit_code == 0
+    assert (tmp_path / "双生" / "人设" / "男主.md").is_file()
+    assert not (tmp_path / "novels" / "双生").exists()
+
+
 def test_repl_init_alone_falls_through_to_engine(tmp_path: Path) -> None:
     """Plain ``/init`` (no flags) should NOT enter our argv parser
     and instead fall through to the engine's command_pending branch."""
@@ -470,3 +553,54 @@ def test_repl_init_alone_falls_through_to_engine(tmp_path: Path) -> None:
     result = runner.invoke(app, input="/init\n/退出\n")
 
     assert result.exit_code == 0
+
+
+def test_repl_auto_binds_after_typer_init_and_runs_outline_toc(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``writer init`` + REPL should auto-bind and complete init→大纲→目录."""
+
+    monkeypatch.chdir(tmp_path)
+
+    init_result = runner.invoke(
+        app,
+        ["init", "闭环测试", "--genre", "其他"],
+    )
+    assert init_result.exit_code == 0
+
+    cli_input = (
+        "/状态\n"
+        "/大纲 一个穿越到唐朝的程序员\n"
+        "/状态\n"
+        "/目录\n"
+        "/状态\n"
+        "/退出\n"
+    )
+    repl_result = runner.invoke(app, input=cli_input)
+
+    assert repl_result.exit_code == 0
+    assert "已自动绑定项目" in repl_result.stdout
+    assert "project_state=S1" in repl_result.stdout
+    assert "project_state=S2" in repl_result.stdout
+    assert "project_state=S3" in repl_result.stdout
+    assert "✓ answered" in repl_result.stdout
+
+    project_root = tmp_path / "闭环测试"
+    assert (project_root / "outline" / "大纲.md").is_file()
+    assert (project_root / "outline" / "toc.md").is_file()
+
+
+def test_build_prompt_session_falls_back_when_home_is_unwritable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from writer.cli.main import NO_HISTORY, build_prompt_session
+
+    monkeypatch.setenv("HOME", "/nonexistent-home-writer-test")
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+
+    session = build_prompt_session()
+    assert session is not None
+
+    session_no_history = build_prompt_session(NO_HISTORY)
+    assert session_no_history is not None

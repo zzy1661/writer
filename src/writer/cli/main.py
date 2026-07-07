@@ -1,6 +1,8 @@
 import asyncio
+import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 from typing import Annotated
 
@@ -13,7 +15,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from writer import __version__
-from writer.config import get_settings
+from writer.config import get_settings, load_env_file, load_project_settings, refresh_settings
 from writer.engine import (
     ActionEvent,
     Done,
@@ -25,7 +27,19 @@ from writer.engine import (
     ToolResult,
     run_engine,
 )
-from writer.project import STATE_DESCRIPTIONS, ProjectState, create_workspace, inspect_project
+from writer.engine.deps import production_deps
+from writer.project import (
+    STATE_DESCRIPTIONS,
+    ProjectState,
+    create_new_workspace,
+    create_workspace,
+    discover_project_root,
+    inspect_project,
+    normalize_genres,
+    prompt_genres,
+    safe_cwd,
+)
+from writer.project.init_brief import apply_init_brief
 from writer.session import EngineSession, compose_pending_input
 
 app = typer.Typer(
@@ -55,11 +69,16 @@ REPL_COMMANDS = [
 ]
 
 REPL_PROMPT = "writer> "
-HISTORY_DIR = Path.home() / ".config" / "writer"
+try:
+    _DEFAULT_HISTORY_DIR = Path.home() / ".config" / "writer"
+except RuntimeError:
+    _DEFAULT_HISTORY_DIR = Path(tempfile.gettempdir()) / "writer"
+HISTORY_DIR = _DEFAULT_HISTORY_DIR
 HISTORY_FILE = HISTORY_DIR / "history"
 
-# 支持中文的补全词匹配模式
-WORD_PATTERN = re.compile(r"^[\w\u4e00-\u9fff]+$")
+# Slash 命令补全词：必须包含前导 ``/``，否则 ``/`` 会被当成词边界，
+# ``word_before_cursor`` 恒为空 → 不过滤前缀，且选中后出现 ``//命令``。
+SLASH_CMD_PATTERN = re.compile(r"[/\w\u4e00-\u9fff]+")
 
 
 def version_callback(value: bool) -> None:
@@ -152,7 +171,7 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
             # Interactive prompt — show the canonical labels as a hint;
             # actual prompt is free-text per project decision.
             console.print(
-                f"可用题材（输入后回车；其它值视为 other）：{', '.join(_INIT_PROMPT_GENRES)}"
+                f"可用题材（输入后回车；其它值视为 other）：{', '.join(_init_prompt_genre_labels())}"
             )
             picked = typer.prompt("请选择小说题材", default="其他")
             genre_arg: str | None = picked
@@ -254,6 +273,44 @@ async def _run_engine(
 NO_HISTORY: object = object()
 
 
+def _resolve_history_file(
+    history_file: Path | None | object = None,
+) -> Path | None:
+    """Return a writable REPL history path, or ``None`` to disable history.
+
+    Preference order:
+
+    1. Explicit ``history_file`` argument (tests / callers)
+    2. ``$XDG_CONFIG_HOME/writer/history``
+    3. ``~/.config/writer/history``
+    4. ``$TMPDIR`` / system temp (PyInstaller / sandbox fallback)
+    5. ``./.writer/history`` in the current working directory
+    """
+
+    if history_file is NO_HISTORY:
+        return None
+    if isinstance(history_file, Path):
+        candidates = [history_file]
+    else:
+        candidates = []
+        xdg_config = os.environ.get("XDG_CONFIG_HOME", "").strip()
+        if xdg_config:
+            candidates.append(Path(xdg_config) / "writer" / "history")
+        candidates.append(HISTORY_FILE)
+        candidates.append(Path(tempfile.gettempdir()) / "writer-repl-history")
+        cwd = safe_cwd()
+        if cwd is not None:
+            candidates.append(cwd / ".writer" / "history")
+
+    for candidate in candidates:
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+        return candidate
+    return None
+
+
 def build_prompt_session(
     history_file: Path | None | object = None,
 ) -> PromptSession[str]:
@@ -262,23 +319,35 @@ def build_prompt_session(
     Pass ``history_file=NO_HISTORY`` to disable history entirely (useful in
     tests). Passing ``None`` (the default) uses the user-level history file.
     """
-    if history_file is NO_HISTORY:
-        history: FileHistory | None = None
-    else:
-        history_path = (
-            history_file if isinstance(history_file, Path) else HISTORY_FILE
-        )
-        history_path.parent.mkdir(parents=True, exist_ok=True)
-        history = FileHistory(str(history_path))
+    history_path = _resolve_history_file(history_file)
+    history: FileHistory | None = None
+    if history_path is not None:
+        try:
+            history = FileHistory(str(history_path))
+        except OSError:
+            history = None
 
     completion_words = [cmd for cmd, _ in REPL_COMMANDS] + ["exit", "quit"]
-    completer = WordCompleter(completion_words, ignore_case=True, pattern=WORD_PATTERN)
+    completer = WordCompleter(
+        completion_words, ignore_case=True, pattern=SLASH_CMD_PATTERN
+    )
 
     return PromptSession(
         history=history,
         completer=completer,
         complete_while_typing=True,
     )
+
+
+def _build_repl_prompt_session() -> PromptSession[str] | None:
+    """Build a prompt session for interactive REPL, or fall back to plain input."""
+
+    if not sys.stdin.isatty():
+        return None
+    try:
+        return build_prompt_session()
+    except OSError:
+        return None
 
 
 def _read_line(session: PromptSession[str] | None, prompt: str) -> str:
@@ -297,12 +366,29 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
     """Start the interactive writer command loop."""
     print_welcome()
 
+    load_env_file(safe_cwd())
+    discovered = discover_project_root()
+    if discovered is not None:
+        load_project_settings(discovered)
+    refresh_settings()
+
     if prompt_session is None:
-        prompt_session = build_prompt_session() if sys.stdin.isatty() else None
+        prompt_session = _build_repl_prompt_session()
 
     # One EngineSession for the lifetime of the REPL — owns session_id,
     # deps, turn history, and pending Interrupt state.
     engine_session = EngineSession()
+    if discovered is not None:
+        engine_session.set_project_root(discovered)
+        console.print(
+            f"[dim]已自动绑定项目: {discovered} "
+            f"({STATE_DESCRIPTIONS[ProjectState(engine_session.project_state)]})[/dim]"
+        )
+    elif safe_cwd() is None:
+        console.print(
+            "[yellow]警告：当前 shell 的工作目录已失效（可能被移动或删除）。"
+            "请先 [bold]cd[/bold] 到一个有效目录，或使用 [bold]/init <项目名>[/bold] 重新初始化。[/yellow]"
+        )
 
     while True:
         try:
@@ -344,87 +430,22 @@ def doctor() -> None:
     console.print(table)
 
 
-@app.command("new")
-def new_project(
-    name: Annotated[str, typer.Argument(help="小说项目名称")],
-    directory: Annotated[
-        Path,
-        typer.Option("--dir", "-d", help="项目创建到哪个目录下"),
-    ] = Path("novels"),
-    force: Annotated[
-        bool,
-        typer.Option("--force", help="允许覆盖缺失的初始化文件"),
-    ] = False,
-    genre: Annotated[
-        str | None,
-        typer.Option(
-            "--genre",
-            "-g",
-            help="小说题材（历史 / 言情 / 玄幻，其他值视为 other 兜底）",
-        ),
-    ] = None,
-) -> None:
-    """创建一个小说项目工作区。"""
-    resolved_genre = _resolve_genre_for_init(genre)
-    try:
-        workspace = create_workspace(
-            name, directory, force=force, genre=resolved_genre
-        )
-    except (FileExistsError, ValueError) as exc:
-        console.print(f"[red]错误：{exc}[/red]")
-        raise typer.Exit(code=1) from exc
+def _init_prompt_genre_labels() -> list[str]:
+    from writer.project.genre import GENRE_OPTIONS
 
-    console.print(f"[green]已创建小说项目：[/green]{workspace.root}")
-    console.print(f"题材：{resolved_genre}")
-    for path in workspace.created_files:
-        console.print(f"  - {path}")
-
-
-# Four genre options shown in the interactive prompt when ``--genre``
-# is missing. Selecting ``其他`` triggers a free-text follow-up prompt;
-# anything the user types there is then treated as the ``other`` bucket.
-_INIT_PROMPT_GENRES = ["历史", "言情", "玄幻", "其他"]
+    return list(GENRE_OPTIONS)
 
 
 def _normalize_cli_genre(raw: str) -> str:
-    """Map a CLI-side genre string (Chinese label or alias) to a canonical key.
+    """Map a CLI-side genre string to a canonical key (legacy single-genre helper)."""
 
-    Returns ``"other"`` for empty input, whitespace, or any value outside
-    the alias table — including user-typed custom strings like ``"都市悬疑"``
-    or ``"科幻"`` (per ``fea-genre-aware-init`` decision: free input allowed,
-    falls through to the four-act fallback).
-    """
-    key = (raw or "").strip().lower()
-    if not key:
-        return "other"
-    aliases = {
-        "历史": "历史",
-        "history": "历史",
-        "historical": "历史",
-        "言情": "言情",
-        "romance": "言情",
-        "玄幻": "玄幻",
-        "xuanhuan": "玄幻",
-        "fantasy": "玄幻",
-        "其他": "other",
-        "other": "other",
-    }
-    return aliases.get(key, "other")
+    from writer.project.genre import normalize_genre_token
 
-
-def _resolve_genre_for_init(raw: str | None) -> str:
-    """Resolve the final genre string used by ``create_workspace``.
-
-    ``raw`` is what the user passed (or what the REPL parser extracted).
-    The REPL side supplies a non-null string already; the Typer side
-    uses Typer's interactive prompt machinery to gather it. Either way,
-    this function normalises to the same canonical key.
-    """
-    return _normalize_cli_genre(raw or "other")
+    return normalize_genre_token(raw)
 
 
 def _parse_repl_init_argv(text: str) -> tuple[str, Path, bool, str | None]:
-    """Parse ``"/init --name 双生 --dir novels --genre 言情"`` style input.
+    """Parse ``"/init --name 双生 --dir . --genre 言情"`` style input.
 
     Returns ``(name, directory, force, genre)``. Raises ``ValueError`` on
     missing/empty ``--name``. The REPL form does not support positional
@@ -437,7 +458,7 @@ def _parse_repl_init_argv(text: str) -> tuple[str, Path, bool, str | None]:
     rest = text[len("/init"):].strip()
     parser = ArgumentParser(prog="init", add_help=False)
     parser.add_argument("--name", "-n", required=True, dest="name")
-    parser.add_argument("--dir", "-d", default="novels", dest="directory")
+    parser.add_argument("--dir", "-d", default=".", dest="directory")
     parser.add_argument("--genre", "-g", default=None, dest="genre")
     parser.add_argument(
         "--force", action="store_true", default=False, dest="force"
@@ -460,16 +481,25 @@ def init_project(
     *,
     force: bool = False,
     genre: str | None = None,
+    genres: list[str] | None = None,
+    brief: str | None = None,
+    skip_brief: bool = False,
 ) -> str:
     """Shared backend for the Typer ``init`` subcommand and the REPL ``/init``.
 
-    Returns the canonical genre used (never raises — surfaces errors via
-    ``console.print`` and exit codes so the REPL driver doesn't crash).
+    Returns the canonical genre label used (for session binding).
     """
-    resolved_genre = _normalize_cli_genre(genre or "other")
+    genre_list = normalize_genres(genres if genres is not None else ([genre] if genre else ["other"]))
+    from writer.project.genre import format_genre_line, primary_genre
+
+    resolved_genre = format_genre_line(genre_list) or primary_genre(genre_list)
     try:
         workspace = create_workspace(
-            name, directory, force=force, genre=resolved_genre
+            name,
+            directory,
+            force=force,
+            genres=genre_list,
+            with_ideas_dir=True,
         )
     except (FileExistsError, ValueError) as exc:
         console.print(f"[red]错误：{exc}[/red]")
@@ -479,7 +509,41 @@ def init_project(
     console.print(f"题材：{resolved_genre}")
     for path in workspace.created_files:
         console.print(f"  - {path}")
+
+    _maybe_apply_init_brief(workspace.root, brief=brief, skip_brief=skip_brief)
+
+    console.print(
+        "[dim]提示：在同一目录执行 `uv run writer` 进入 REPL 时会自动绑定此项目。[/dim]"
+    )
     return resolved_genre
+
+
+def _maybe_apply_init_brief(
+    project_root: Path,
+    *,
+    brief: str | None,
+    skip_brief: bool,
+) -> None:
+    if skip_brief:
+        return
+
+    user_brief = brief
+    if user_brief is None and sys.stdin.isatty():
+        console.print(
+            "\n[cyan]请用自然语言描述你的小说创意与基本要求[/cyan]"
+            "（直接回车跳过）："
+        )
+        user_brief = typer.prompt("", default="", show_default=False)
+
+    if not user_brief or not user_brief.strip():
+        return
+
+    load_project_settings(project_root)
+    refresh_settings()
+    deps = production_deps(project_root=project_root)
+    result = apply_init_brief(project_root, user_brief.strip(), deps.story_consultant)
+    console.print(f"[green]已写入 创意/核心创意.md[/green]（来源: {result.source}）")
+    console.print("[green]已更新 AGENT.md 基本要求[/green]")
 
 
 @app.command("init")
@@ -488,7 +552,7 @@ def init_project_cmd(
     directory: Annotated[
         Path,
         typer.Option("--dir", "-d", help="项目创建到哪个目录下"),
-    ] = Path("novels"),
+    ] = Path("."),
     force: Annotated[
         bool,
         typer.Option("--force", help="允许覆盖缺失的初始化文件"),
@@ -502,14 +566,19 @@ def init_project_cmd(
             prompt=False,
         ),
     ] = None,
+    brief: Annotated[
+        str | None,
+        typer.Option("--brief", "-b", help="初始化后写入的核心创意描述"),
+    ] = None,
+    skip_brief: Annotated[
+        bool,
+        typer.Option("--skip-brief", help="跳过初始化后的创意访谈"),
+    ] = False,
 ) -> None:
     """创建一个小说项目工作区（题材感知版）。"""
     if genre is None:
-        # Interactive prompt — show the canonical labels as a hint; the
-        # actual ``typer.prompt`` is free-text per the project decision
-        # ("``其他`` 允许自由输入；任何非白名单值都落到 other 兜底").
         console.print(
-            f"可用题材（输入后回车；其它值视为 other）：{', '.join(_INIT_PROMPT_GENRES)}"
+            f"可用题材（输入后回车；其它值视为 other）：{', '.join(_init_prompt_genre_labels())}"
         )
         picked = typer.prompt(
             "请选择小说题材",
@@ -517,7 +586,60 @@ def init_project_cmd(
         )
     else:
         picked = genre
-    init_project(name, directory, force=force, genre=picked)
+    init_project(
+        name,
+        directory,
+        force=force,
+        genre=picked,
+        brief=brief,
+        skip_brief=skip_brief,
+    )
+
+
+@app.command("new")
+def new_project_cmd(
+    name: Annotated[str, typer.Argument(help="小说书名（目录名）")],
+    directory: Annotated[
+        Path,
+        typer.Option("--dir", "-d", help="项目创建到哪个目录下"),
+    ] = Path("."),
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="允许覆盖缺失的初始化文件"),
+    ] = False,
+    genre: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--genre",
+            "-g",
+            help="小说题材，可重复指定或逗号分隔（历史 / 言情 / 玄幻 / …）",
+        ),
+    ] = None,
+) -> None:
+    """创建带 ``.writer/`` 元数据与 ``创意/`` 目录的新书项目。"""
+    selected = normalize_genres(genre) if genre else prompt_genres(console)
+
+    try:
+        workspace = create_new_workspace(
+            name,
+            directory,
+            force=force,
+            genres=selected,
+        )
+    except (FileExistsError, ValueError) as exc:
+        console.print(f"[red]错误：{exc}[/red]")
+        raise typer.Exit(code=1) from exc
+
+    from writer.project.genre import format_genre_line
+
+    label = format_genre_line(selected) or "other"
+    console.print(f"[green]已创建新书项目：[/green]{workspace.root}")
+    console.print(f"题材：{label}")
+    for path in workspace.created_files:
+        console.print(f"  - {path}")
+    console.print(
+        "[dim]项目 LLM 配置位于 .writer/config（优先级高于 .env）。[/dim]"
+    )
 
 
 @app.command()
@@ -534,9 +656,11 @@ def outline(
     # direct ``StoryConsultant(settings)`` call is negligible for a CLI
     # subcommand invoked once per process.
     from writer.engine.deps import production_deps
+    from writer.project import discover_project_root
 
-    deps = production_deps()
-    result = deps.story_consultant.draft_outline(idea)
+    project_root = discover_project_root()
+    deps = production_deps(project_root=project_root)
+    result = deps.story_consultant.draft_outline(idea, project_root=project_root)
 
     console.print(f"[bold]{result.title}[/bold]")
     console.print(result.premise)

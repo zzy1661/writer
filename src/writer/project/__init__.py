@@ -1,34 +1,57 @@
 """Novel project workspace and state helpers."""
 
+from writer.project.genre import (
+    GENRE_OPTIONS,
+    format_genre_line,
+    normalize_genre_token,
+    normalize_genres,
+    primary_genre,
+    prompt_genres,
+)
 from writer.project.state import (
     COMMAND_ALLOWED,
     STATE_DESCRIPTIONS,
     CommandCheck,
     ProjectSnapshot,
     ProjectState,
+    append_agent_requirements,
     count_chapters,
     detect_state,
+    discover_project_root,
+    find_outline_path,
     inspect_project,
     read_genre_from_agent,
     refresh_agent_file,
     render_agent_file,
+    safe_cwd,
     validate_command_available,
 )
-from writer.project.workspace import NovelWorkspace, create_workspace
+from writer.project.workspace import NovelWorkspace, create_new_workspace, create_workspace
 
 __all__ = [
     "COMMAND_ALLOWED",
     "CommandCheck",
+    "GENRE_OPTIONS",
     "NovelWorkspace",
     "ProjectSnapshot",
     "ProjectState",
     "STATE_DESCRIPTIONS",
+    "append_agent_requirements",
     "count_chapters",
+    "create_new_workspace",
     "create_workspace",
     "detect_state",
+    "discover_project_root",
+    "find_outline_path",
+    "format_genre_line",
     "inspect_project",
+    "normalize_genre_token",
+    "normalize_genres",
+    "primary_genre",
+    "prompt_genres",
     "read_genre_from_agent",
     "refresh_agent_file",
     "render_agent_file",
+    "safe_cwd",
     "validate_command_available",
 ]

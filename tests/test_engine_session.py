@@ -13,6 +13,7 @@ from writer.engine.deps import EngineDeps
 from writer.roles import HistoryConsultant, StoryConsultant, XuanhuanConsultant
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
+from writer.skills import built_skill_registry
 from writer.tools import ToolRuntime, built_tool_registry
 
 # ---------------------------------------------------------------------------
@@ -286,6 +287,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             self.tool_runtime = ToolRuntime(
                 project_root=Path("/__no_project__").resolve()
             )
+            self.skill_registry = built_skill_registry()
 
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)

@@ -1,9 +1,18 @@
-"""Skill implementations (placeholder).
+"""Skill implementations.
 
-Skills are composable, reusable behaviors that augment engine or workflow
-execution — Claude Code §十二's ``HookDesigner`` family is the planned
-first landing site (per 备忘 17). Concrete skill modules will appear here
-once their contracts are finalized.
+Skills are composable, reusable behaviors invoked by the engine for
+specific slash commands (``/大纲``, ``/目录``, …).
 """
 
-__all__: list[str] = []
+from writer.skills.outline import OutlineSkill
+from writer.skills.protocol import Skill
+from writer.skills.registry import SkillRegistry, built_skill_registry
+from writer.skills.toc import TocSkill
+
+__all__ = [
+    "OutlineSkill",
+    "Skill",
+    "SkillRegistry",
+    "TocSkill",
+    "built_skill_registry",
+]

@@ -22,7 +22,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from writer.project.genre import format_genre_line, normalize_genres, primary_genre
 from writer.project.state import ProjectState, render_agent_file
+
+_WRITER_CONFIG_TEMPLATE = """\
+# 项目级 LLM 配置（优先级高于 .env）
+WRITER_MODEL=gpt-4o-mini
+WRITER_API_KEY=
+WRITER_BASE_URL=https://api.openai.com/v1
+WRITER_TEMPERATURE=0.7
+"""
 
 
 @dataclass(frozen=True)
@@ -65,15 +74,19 @@ def create_workspace(
     *,
     force: bool = False,
     genre: str = "other",
+    genres: list[str] | None = None,
+    with_ideas_dir: bool = False,
+    with_writer_meta: bool = False,
 ) -> NovelWorkspace:
     project_name = _normalize_name(name)
-    canonical_genre = _normalize_genre(genre)
+    genre_list = normalize_genres(genres if genres is not None else [genre])
+    canonical_genre = primary_genre(genre_list)
     root = base_dir / project_name
 
     if root.exists() and not force:
         msg = (
             f"项目目录已存在: {root}。"
-            f"如要覆盖请重新执行 `writer new {project_name} --force`，"
+            f"如要覆盖请重新执行 `writer init {project_name} --force`，"
             f"或先手动删除/重命名该目录。"
         )
         raise FileExistsError(msg)
@@ -85,6 +98,8 @@ def create_workspace(
         root / "world",
         root / "notes",
     ]
+    if with_ideas_dir:
+        directories.append(root / "创意")
     for directory in directories:
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -92,7 +107,7 @@ def create_workspace(
         root / "AGENT.md": render_agent_file(
             project_name,
             ProjectState.INITIALIZED,
-            genre=canonical_genre,
+            genre=format_genre_line(genre_list) or canonical_genre,
         ),
         root / "README.md": f"# {project_name}\n\n长篇小说项目工作区。\n",
         root / "outline" / "premise.md": "# 一句话创意\n\n",
@@ -108,10 +123,54 @@ def create_workspace(
             path.write_text(content, encoding="utf-8")
             created_files.append(path)
 
+    if with_ideas_dir:
+        ideas_stub = root / "创意" / "README.md"
+        if force or not ideas_stub.exists():
+            ideas_stub.write_text("# 创意库\n\n存放故事创意、灵感与核心设定。\n", encoding="utf-8")
+            created_files.append(ideas_stub)
+
     # Genre-specific scaffolding layered on top of the base layout.
     created_files.extend(_genre_scaffolding(root, canonical_genre))
 
+    if with_writer_meta:
+        created_files.extend(_writer_meta_scaffolding(root, force=force))
+
     return NovelWorkspace(root=root, created_files=created_files)
+
+
+def create_new_workspace(
+    name: str,
+    base_dir: Path,
+    *,
+    force: bool = False,
+    genres: list[str] | None = None,
+) -> NovelWorkspace:
+    """Create a novel project with ``创意/`` and ``.writer/`` metadata."""
+
+    return create_workspace(
+        name,
+        base_dir,
+        force=force,
+        genres=genres,
+        with_ideas_dir=True,
+        with_writer_meta=True,
+    )
+
+
+def _writer_meta_scaffolding(root: Path, *, force: bool = False) -> list[Path]:
+    writer_root = root / ".writer"
+    targets = {
+        writer_root / "skills" / ".gitkeep": "",
+        writer_root / "agents" / ".gitkeep": "",
+        writer_root / "config": _WRITER_CONFIG_TEMPLATE,
+    }
+    created: list[Path] = []
+    for path, content in targets.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if force or not path.exists():
+            path.write_text(content, encoding="utf-8")
+            created.append(path)
+    return created
 
 
 def _genre_scaffolding(root: Path, canonical_genre: str) -> list[Path]:
@@ -164,7 +223,7 @@ def _normalize_name(name: str) -> str:
     if not normalized:
         msg = (
             "项目名称不能为空。"
-            "请传入至少一个非空白字符，例如 `writer new 我的小说`。"
+            "请传入至少一个非空白字符，例如 `writer init 我的小说`。"
         )
         raise ValueError(msg)
     return normalized
@@ -172,5 +231,6 @@ def _normalize_name(name: str) -> str:
 
 __all__ = [
     "NovelWorkspace",
+    "create_new_workspace",
     "create_workspace",
 ]

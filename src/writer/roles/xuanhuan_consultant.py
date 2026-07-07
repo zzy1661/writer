@@ -12,6 +12,8 @@ without an LLM.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from writer.config import Settings
 from writer.roles.story_consultant import OutlineResult, StoryConsultant
 
@@ -22,7 +24,13 @@ class XuanhuanConsultant(StoryConsultant):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
 
-    def draft_outline(self, idea: str) -> OutlineResult:
+    def draft_outline(
+        self,
+        idea: str,
+        *,
+        project_root: Path | None = None,
+    ) -> OutlineResult:
+        del project_root
         normalized_idea = idea.strip()
         title = self._build_working_title(normalized_idea)
 

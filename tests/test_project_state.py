@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from writer.project import (
     ProjectState,
     create_workspace,
     detect_state,
+    discover_project_root,
     inspect_project,
     refresh_agent_file,
     validate_command_available,
@@ -88,3 +91,34 @@ def test_validate_command_allows_readonly_commands_after_init(tmp_path: Path) ->
 
     assert check.ok is True
     assert check.state == ProjectState.INITIALIZED
+
+
+def test_discover_project_root_returns_cwd_when_agent_exists(tmp_path: Path) -> None:
+    workspace = create_workspace("根目录项目", tmp_path)
+
+    assert discover_project_root(workspace.root) == workspace.root.resolve()
+
+
+def test_discover_project_root_returns_single_child_project(tmp_path: Path) -> None:
+    workspace = create_workspace("子目录项目", tmp_path)
+
+    assert discover_project_root(tmp_path) == workspace.root.resolve()
+
+
+def test_discover_project_root_returns_none_when_cwd_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_cwd() -> Path:
+        msg = "No such file or directory"
+        raise FileNotFoundError(2, msg)
+
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: broken_cwd()))
+
+    assert discover_project_root() is None
+
+
+def test_discover_project_root_returns_none_when_ambiguous(tmp_path: Path) -> None:
+    create_workspace("项目A", tmp_path)
+    create_workspace("项目B", tmp_path)
+
+    assert discover_project_root(tmp_path) is None

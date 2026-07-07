@@ -94,7 +94,10 @@ COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
 }
 
 COMMAND_HINTS: dict[str, str] = {
-    "/init": "当前已经绑定项目；如需新项目，请先退出当前 REPL 或另开目录。",
+    "/init": (
+        "当前已经绑定项目。填写故事创意请直接输入 /init <故事梗概>；"
+        "如需新建项目，请先退出当前 REPL 或另开目录。"
+    ),
     "/大纲": "请先执行 /init <项目名> 创建项目。",
     "/目录": "请先用 /大纲 生成并落盘大纲。",
     "/创作": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
@@ -105,6 +108,60 @@ COMMAND_HINTS: dict[str, str] = {
     "/搜索": "请先执行 /init <项目名> 创建项目。",
     "/字数统计": "请先执行 /init <项目名> 创建项目。",
 }
+
+
+def safe_cwd() -> Path | None:
+    """Return the current working directory, or ``None`` when it is unavailable."""
+
+    try:
+        return Path.cwd()
+    except OSError:
+        return None
+
+
+def find_outline_path(project_root: Path) -> Path | None:
+    """Return the first non-empty outline file under ``project_root``."""
+
+    return _first_existing_nonempty(project_root.resolve(), _OUTLINE_PATHS)
+
+
+def discover_project_root(start: Path | None = None) -> Path | None:
+    """Find a novel project root near ``start`` (default: cwd).
+
+    Returns ``start`` when it contains ``AGENT.md``. Otherwise, when
+    exactly one immediate child directory contains ``AGENT.md``, returns
+    that child. Ambiguous or missing layouts return ``None``.
+    """
+
+    if start is None:
+        start = safe_cwd()
+        if start is None:
+            return None
+
+    try:
+        base = start.resolve()
+    except OSError:
+        return None
+
+    if not base.is_dir():
+        return None
+
+    if (base / "AGENT.md").is_file():
+        return base
+
+    try:
+        children = base.iterdir()
+    except OSError:
+        return None
+
+    candidates = sorted(
+        child
+        for child in children
+        if child.is_dir() and (child / "AGENT.md").is_file()
+    )
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
 
 
 def detect_state(project_root: Path | None) -> ProjectState:
@@ -227,9 +284,28 @@ def render_agent_file(
             "- characters/: 人物设定\n",
             "- world/: 世界观设定\n",
             "- notes/: 写作笔记\n",
+            "- 创意/: 故事创意与核心设定\n",
         ]
     )
     return "".join(lines)
+
+
+def append_agent_requirements(agent_md: Path, requirements: str) -> None:
+    """Append or replace the ``## 基本要求`` section in ``AGENT.md``."""
+
+    section = "## 基本要求\n\n" + requirements.strip() + "\n"
+    try:
+        existing = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        existing = ""
+
+    marker = "## 基本要求"
+    if marker in existing:
+        before, _, _after = existing.partition(marker)
+        updated = before.rstrip() + "\n\n" + section
+    else:
+        updated = existing.rstrip() + "\n\n" + section
+    agent_md.write_text(updated, encoding="utf-8")
 
 
 def refresh_agent_file(project_root: Path) -> None:
@@ -314,11 +390,15 @@ __all__ = [
     "ProjectSnapshot",
     "ProjectState",
     "STATE_DESCRIPTIONS",
+    "append_agent_requirements",
     "count_chapters",
     "detect_state",
+    "discover_project_root",
+    "find_outline_path",
     "inspect_project",
     "read_genre_from_agent",
     "refresh_agent_file",
     "render_agent_file",
+    "safe_cwd",
     "validate_command_available",
 ]

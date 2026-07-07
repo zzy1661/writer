@@ -20,7 +20,7 @@ cp .env.example .env
 # CLI 入口
 uv run writer --help
 uv run writer doctor           # 检查配置
-uv run writer new 我的小说       # 创建小说项目目录
+uv run writer init 我的小说      # 创建小说项目目录
 uv run writer outline 一句话创意  # 生成最小大纲占位输出
 
 # 测试
@@ -71,7 +71,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 | `writer.skills`    | L3 技能占位（`HookDesigner` 等未来落地）                                                                                        | `skills/__init__.py`                                                       |
 | `writer.agent`     | **兼容层**——re-export 旧的 `WriterCommandAgent` / `NovelAgent` 别名，最终会移除                                                 | `agent/__init__.py`                                                        |
 | `writer.config`    | pydantic-settings，`WRITER_*` 环境变量                                                                                          | `config/settings.py`                                                       |
-| `writer.project`   | `writer new` 创建的小说项目目录（`manuscript/` `outline/` `characters/` `world/` `notes/`）                                     | `project/workspace.py`                                                     |
+| `writer.project`   | `writer init` 创建的小说项目目录（`manuscript/` `outline/` `characters/` `world/` `notes/`）                                    | `project/workspace.py`                                                     |
 
 ### 关键设计约束
 
