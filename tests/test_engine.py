@@ -50,9 +50,22 @@ def test_router_classifies_tool_query() -> None:
     action = RuleBasedIntentRouter().route("查一下 F003 伏笔出现位置", "S2")
 
     assert action.action_type == "call_tool"
-    assert action.tool_name == "foreshadow_query"
+    assert action.tool_name == "foreshadow_search"
     assert action.role == "story_consultant"
-    assert action.arguments == {"query": "查一下 F003 伏笔出现位置"}
+    # Rule extracts the F\d+ id and passes the original text as keyword
+    # (sub-string fallback) so descriptive language still narrows results.
+    assert action.arguments == {
+        "id": "F003",
+        "keyword": "查一下 F003 伏笔出现位置",
+    }
+
+
+def test_router_foreshadow_query_without_id_uses_keyword_only() -> None:
+    action = RuleBasedIntentRouter().route("列出所有伏笔", "S2")
+
+    assert action.action_type == "call_tool"
+    assert action.tool_name == "foreshadow_search"
+    assert action.arguments == {"keyword": "列出所有伏笔"}
 
 
 def test_router_classifies_read_file_command() -> None:
@@ -173,7 +186,7 @@ def test_engine_yields_done_for_tool() -> None:
 
     from writer.engine import ErrorEvent, ToolCall, ToolResult
 
-    # LLM router 可能把伏笔查询路由到 foreshadow_query / lookup_foreshadowing /
+    # LLM router 可能把伏笔查询路由到 foreshadow_search / lookup_foreshadowing /
     # 其它等价的工具名；锁定具体名字会让测试脆弱。改为断言:
     # 1) 至少发出一个 ActionEvent(router 接住了意图)
     # 2) 至少发出一个 ToolCall 或 ErrorEvent(实际尝试调工具，失败也算)
@@ -571,10 +584,10 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
 
     events = _consume(run_engine(_ctx("查一下 F003"), deps))
 
-    assert any(isinstance(e, ToolCall) and e.name == "foreshadow_query" for e in events)
+    assert any(isinstance(e, ToolCall) and e.name == "foreshadow_search" for e in events)
     tool_results = [e for e in events if isinstance(e, ToolResult)]
     assert tool_results, "expected ToolResult event"
-    assert tool_results[0].name == "foreshadow_query"
+    assert tool_results[0].name == "foreshadow_search"
     assert tool_results[0].output  # non-empty result
     assert any(isinstance(e, Done) and e.reason == "tool_completed" for e in events)
 

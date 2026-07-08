@@ -25,7 +25,6 @@ dependencies = [
     "tomli-w>=1.0.0",
     "markdown-it-py>=3.0.0",
     "mdit-py-plugins>=0.4.0",
-    "faiss-cpu>=1.8.0",
     "tiktoken>=0.7.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",

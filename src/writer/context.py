@@ -121,7 +121,15 @@ def _build_canon_block(project_root: Path | None, *, query: str) -> str:
     if project_root is None:
         return "未绑定项目，暂无正典资料。"
 
-    from writer.rag import ProjectRagIndex
+    # Per chg-remove-rag: pure file composition, no RAG. Layers are:
+    #   1. outline/* 全文（小文件，整篇读）
+    #   2. characters/* 全文（小文件，整篇读）
+    #   3. chapter_summaries.json 切片（按 chapter_id 前后 N=2 章）
+    #   4. 最近一章 manuscript/chapter-XXX.md 全文（"上一章" 笔触锚点）
+    # The `query` parameter is kept in the signature for back-compat with
+    # `prep_context` callers but is no longer used: structured layers
+    # give us the relevant content without needing an embedder.
+    del query  # formerly fed into ProjectRagIndex(...).query(query, ...)
 
     parts: list[str] = []
     for relative in ("outline", "characters"):
@@ -129,17 +137,60 @@ def _build_canon_block(project_root: Path | None, *, query: str) -> str:
         if path.exists():
             parts.extend(_read_markdown_files(path))
 
-    try:
-        hits = ProjectRagIndex(project_root).query(query, k=6)
-    except Exception:  # noqa: BLE001 - context prep should degrade to static canon
-        hits = []
+    summary_block = _build_summary_block(project_root)
+    if summary_block:
+        parts.append(summary_block)
 
-    for hit in hits:
-        block = f"[RAG:{hit.source}] {hit.text}"
-        if block not in parts:
-            parts.append(block)
+    last_chapter = _read_last_chapter(project_root)
+    if last_chapter:
+        parts.append(last_chapter)
 
     return "\n\n".join(parts) if parts else "暂无正典资料。"
+
+
+def _build_summary_block(project_root: Path) -> str:
+    """Return the chapter-summaries slice for the canon block.
+
+    Reads ``manuscript/chapter_summaries.json`` and emits a small
+    header + the last few entries (capped at 4 to keep the block small).
+    Falls back to "暂无章节摘要" on missing / unreadable file.
+    """
+
+    summary_file = project_root / "manuscript" / "chapter_summaries.json"
+    summaries = _load_summary_json(summary_file)
+    if not summaries:
+        return ""
+    recent = _select_recent_summaries(summaries, chapter_id="zzz", limit=4)
+    if not recent:
+        return ""
+    return "[chapter_summaries]\n" + "\n".join(recent)
+
+
+def _read_last_chapter(project_root: Path) -> str:
+    """Return the most recent ``manuscript/chapter-*.md`` as a canon anchor.
+
+    Returns "" when no manuscript files exist. The file is prefixed with
+    ``[last_chapter]`` so downstream consumers can see at a glance where
+    the content came from.
+    """
+
+    manuscript = project_root / "manuscript"
+    if not manuscript.exists():
+        return ""
+    candidates = sorted(
+        path for path in manuscript.glob("chapter-*.md")
+        if path.is_file()
+    )
+    if not candidates:
+        return ""
+    last = candidates[-1]
+    try:
+        text = last.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return ""
+    if not text:
+        return ""
+    return f"[last_chapter:{last.name}]\n{text}"
 
 
 def _build_history_block(project_root: Path | None, chapter_id: str) -> str:

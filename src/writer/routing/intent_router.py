@@ -21,6 +21,7 @@ it from :mod:`writer.routing`.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
@@ -137,8 +138,8 @@ class RuleBasedIntentRouter:
             return AgentAction(
                 action_type="call_tool",
                 role="story_consultant",
-                tool_name="foreshadow_query",
-                arguments={"query": text},
+                tool_name="foreshadow_search",
+                arguments=_parse_foreshadow_args(text),
             )
         if text.startswith("/"):
             return AgentAction(
@@ -177,6 +178,29 @@ def _command_argument(text: str, command: str) -> str:
     """Return the text after a slash command, stripped of surrounding space."""
 
     return text.removeprefix(command).strip()
+
+
+# Pattern for ledger entry ids (matches the schema in
+# ``tools/builtin/foreshadow_ledger.py``). The rule extracts the first
+# id-looking token and routes the query with ``id=...``; the remainder
+# of the text becomes ``keyword=...`` so the substring filter still
+# catches descriptive text the user typed alongside the id.
+_FID_PATTERN = re.compile(r"\bF\d+\b")
+
+
+def _parse_foreshadow_args(text: str) -> dict[str, Any]:
+    """Best-effort split of a free-form foreshadow query into tool args.
+
+    Used by :class:`RuleBasedIntentRouter` so the router emits
+    structured args (``id`` / ``keyword``) instead of the legacy
+    free-form ``query`` string the old RAG-based tool consumed.
+    """
+
+    stripped = text.strip()
+    match = _FID_PATTERN.search(stripped)
+    if match is None:
+        return {"keyword": stripped}
+    return {"id": match.group(0), "keyword": stripped}
 
 
 __all__ = [

@@ -14,7 +14,7 @@ from langchain_core.tools import BaseTool
 
 from writer.tools import (
     ChapterLocate,
-    ForeshadowQuery,
+    ForeshadowSearch,
     ProjectSearch,
     SafeListDir,
     SafeReadFile,
@@ -191,17 +191,12 @@ def test_chapter_locate_returns_handle_json() -> None:
     assert parsed["project_root"] == str(runtime.project_root)
 
 
-def test_foreshadow_query_uses_project_rag(tmp_path: Path) -> None:
+def test_foreshadow_search_returns_friendly_message_without_ledger(tmp_path: Path) -> None:
+    """No 伏笔.yaml → '暂无伏笔' message; no exception, no RAG recall."""
     runtime = ToolRuntime(project_root=tmp_path)
-    chapter = tmp_path / "manuscript" / "chapter-01.md"
-    chapter.parent.mkdir()
-    chapter.write_text("第一章\n\nF003 玉簪真实来历被藏在旧匣子里。", encoding="utf-8")
-
-    result = ForeshadowQuery().run(runtime, query="玉簪来历")
-
-    assert "F003" in result.output
-    assert "manuscript/chapter-01.md" in result.output
-    assert result.metadata["rag_matched"] >= 1
+    result = ForeshadowSearch().run(runtime, keyword="F003")
+    assert "暂无伏笔" in result.output
+    assert result.metadata.get("matched") == 0
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +224,7 @@ def test_built_tool_registry_includes_core_tools() -> None:
         "wordcount",
         "project_search",
         "chapter_locate",
-        "foreshadow_query",
+        "foreshadow_search",
     }
     assert expected <= set(registry.names())
 

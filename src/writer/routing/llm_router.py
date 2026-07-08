@@ -113,7 +113,7 @@ def _normalize_action(action: AgentAction) -> AgentAction:
     elif action.tool_name == "wordcount":
         updates.setdefault("command", action.command or "/字数统计")
         updates.setdefault("role", action.role or "story_consultant")
-    elif action.tool_name == "foreshadow_query":
+    elif action.tool_name == "foreshadow_search":
         updates.setdefault("role", action.role or "story_consultant")
 
     return action.model_copy(update=updates) if updates else action

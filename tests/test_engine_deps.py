@@ -41,7 +41,7 @@ def test_production_deps_exposes_tool_registry() -> None:
 
     assert isinstance(deps.tool_registry, ToolRegistry)
     # built_tool_registry() registers at least these tools
-    assert "foreshadow_query" in deps.tool_registry
+    assert "foreshadow_search" in deps.tool_registry
     assert "chapter_locate" in deps.tool_registry
     assert "safe_read_file" in deps.tool_registry
 

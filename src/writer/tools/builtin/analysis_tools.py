@@ -4,6 +4,13 @@ Wordcount uses the same heuristic as 备忘 13's reference code: count
 non-whitespace code points. That's roughly the right figure for Chinese
 prose, where each character ≈ 1 字; for mixed Chinese+English we still
 get a serviceable estimate.
+
+``ProjectSearch`` is a Claude Code-style Grep analog: line-level
+substring match across the project tree, no embeddings, no RAG
+fallback. The RAG fallback was removed in ``chg-remove-rag`` because
+the placeholder ``HashEmbeddings`` had near-zero recall on real
+queries; structured ledgers + chapter summaries now cover the gaps
+that RAG was meant to fill.
 """
 
 from __future__ import annotations
@@ -11,7 +18,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from writer.rag import ProjectRagIndex, format_hits
 from writer.tools.protocol import ToolResult
 
 if TYPE_CHECKING:
@@ -64,7 +70,7 @@ class Wordcount:
 
 
 class ProjectSearch:
-    """Search project text with exact matches plus project-level RAG."""
+    """Search project text via line-level substring match (Grep analog)."""
 
     name = "project_search"
     description = "在项目目录内搜索关键词;返回匹配文件、行号和片段。"
@@ -90,6 +96,15 @@ class ProjectSearch:
                 content = file.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
+            except (PermissionError, OSError) as exc:
+                # Mirror arch-optimizer M6 (2026-07-07) decision: surface
+                # I/O errors as a ToolResult rather than aborting the
+                # turn. The previous code bubbled these to the engine's
+                # outer ``except Exception`` branch.
+                exact_lines.append(
+                    f"<io error: {file.relative_to(runtime.project_root).as_posix()}: {exc}>"
+                )
+                continue
 
             for line_no, line in enumerate(content.splitlines(), start=1):
                 if keyword not in line:
@@ -98,30 +113,27 @@ class ProjectSearch:
                 snippet = line.strip()
                 exact_lines.append(f"{relative.as_posix()}:{line_no}: {snippet}")
                 if len(exact_lines) >= limit:
-                    output = "\n".join(exact_lines)
                     return ToolResult(
-                        output=output,
+                        output="\n".join(exact_lines),
                         truncated=True,
                         metadata={
                             "matched": len(exact_lines),
                             "query": keyword,
-                            "rag_matched": 0,
+                            "truncated": True,
                         },
                     )
 
-        rag_hits = ProjectRagIndex(runtime.project_root).query(keyword, k=5)
-        sections: list[str] = []
-        if exact_lines:
-            sections.append("关键词命中:\n" + "\n".join(exact_lines))
-        if rag_hits:
-            sections.append("RAG 召回:\n" + format_hits(rag_hits))
-        output = "\n\n".join(sections) if sections else f"未找到关键词：{keyword}"
+        output = (
+            "\n".join(exact_lines)
+            if exact_lines
+            else f"未找到关键词：{keyword}"
+        )
         return ToolResult(
             output=output,
             metadata={
                 "matched": len(exact_lines),
                 "query": keyword,
-                "rag_matched": len(rag_hits),
+                "truncated": False,
             },
         )
 

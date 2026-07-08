@@ -15,7 +15,7 @@ Public entry points:
 from writer.tools import builtin
 from writer.tools.builtin import (
     ChapterLocate,
-    ForeshadowQuery,
+    ForeshadowSearch,
     ProjectSearch,
     SafeListDir,
     SafeReadFile,
@@ -37,7 +37,7 @@ from writer.tools.runtime import ToolRuntime
 
 __all__ = [
     "ChapterLocate",
-    "ForeshadowQuery",
+    "ForeshadowSearch",
     "ProjectSearch",
     "SafeListDir",
     "SafeReadFile",
