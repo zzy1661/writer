@@ -22,7 +22,6 @@ import importlib.resources
 import importlib.util
 import logging
 import re
-import sys
 from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -116,7 +115,10 @@ def discover_shipped_directives() -> list[SkillDirective]:
         return directives
 
     try:
-        sub_iter = sorted(p for p in root.iterdir() if p.is_dir())
+        sub_iter = sorted(
+            (p for p in root.iterdir() if p.is_dir()),
+            key=lambda p: p.name,
+        )
     except (OSError, NotImplementedError) as exc:
         log.warning(
             "Cannot iterate shipped directives: %s: %s; "

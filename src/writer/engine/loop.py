@@ -68,6 +68,7 @@ from writer.project.init_brief import (
     should_run_init_brief,
 )
 from writer.routing import AgentAction
+from writer.skills import SkillDirective
 from writer.skills.errors import SkillError
 from writer.tools.errors import ToolError
 
@@ -163,7 +164,7 @@ async def _engine_loop(
                             f"({directive.command})\n",
                             cfg,
                         )
-                    async for event in _run_directive(directive, ctx, deps, cfg):
+                    async for event in _run_directive(directive, ctx, deps, cfg):  # type: ignore[assignment]
                         yield event
                 else:
                     if not cfg.fast_mode:
@@ -191,7 +192,7 @@ async def _engine_loop(
                         yield event
 
             case "start_workflow":
-                async for event in _run_workflow(action.workflow or "", ctx, deps, cfg):
+                async for event in _run_workflow(action.workflow or "", ctx, deps, cfg):  # type: ignore[assignment]
                     yield event
 
             case "ask_user":
@@ -449,7 +450,7 @@ async def _run_workflow(
 
 
 async def _run_directive(
-    directive: object,
+    directive: SkillDirective,
     ctx: EngineContext,
     deps: EngineDeps,
     cfg: EngineConfig,

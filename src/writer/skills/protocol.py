@@ -60,7 +60,7 @@ class SkillDirective:
 
     command: str
     description: str
-    requires_states: frozenset["ProjectState"]
+    requires_states: frozenset[ProjectState]
     body: str
     references: dict[str, str] = field(default_factory=dict)
     scripts: list[str] = field(default_factory=list)

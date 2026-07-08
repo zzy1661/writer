@@ -16,16 +16,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
-
 from writer.skills import (
-    SkillDirective,
     discover_directives,
     discover_shipped_directives,
     resolve_references,
-)
-from writer.skills.directive_discovery import (
-    discover_entry_point_directives,
 )
 
 if TYPE_CHECKING:

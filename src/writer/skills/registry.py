@@ -34,10 +34,6 @@ from writer.skills.errors import SkillError
 from writer.skills.protocol import SkillDirective
 
 if TYPE_CHECKING:
-    from writer.engine.config import EngineConfig
-    from writer.engine.context import EngineContext
-    from writer.engine.deps import EngineDeps
-    from writer.engine.events import Done, TextChunk
     from writer.project.state import ProjectState
 
 log = logging.getLogger(__name__)
@@ -127,7 +123,7 @@ class DirectiveRegistry:
 
         return [(cmd, self._by_command[cmd].description) for cmd in self.commands()]
 
-    def state_matrix(self) -> dict[str, frozenset["ProjectState"]]:
+    def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
         """Return ``{command: requires_states}`` for every registered directive.
 
         Powers :func:`writer.project.validate_command_available` so the

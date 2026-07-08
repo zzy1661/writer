@@ -27,8 +27,8 @@ from writer.skills.directive_discovery import (
 from writer.skills.errors import SkillError
 from writer.skills.protocol import SkillDirective
 from writer.skills.registry import (
-    DirectiveRegistry,
     ENTRY_POINT_GROUP,
+    DirectiveRegistry,
     built_directive_registry,
     discover_entry_point_directives,
 )

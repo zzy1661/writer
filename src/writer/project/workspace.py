@@ -233,7 +233,10 @@ def _seed_directives(
         return []
 
     try:
-        sub_iter = sorted(p for p in shipped_root.iterdir() if p.is_dir())
+        sub_iter = sorted(
+            (p for p in shipped_root.iterdir() if p.is_dir()),
+            key=lambda p: p.name,
+        )
     except (OSError, NotImplementedError) as exc:
         import logging
 

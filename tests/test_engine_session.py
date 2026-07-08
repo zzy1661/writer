@@ -322,6 +322,14 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             self.directive_registry = new_registry
             return self
 
+        def rebind_skill_registry(
+            self, new_registry: DirectiveRegistry
+        ) -> EngineDeps:
+            # Back-compat alias kept for the older name; the Protocol
+            # declares both methods so existing callers still work.
+            self.directive_registry = new_registry
+            return self
+
     # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.
     stub = PlainDeps()
     assert isinstance(stub, EngineDeps)

@@ -13,12 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from writer.project import ProjectState
 from writer.skills import (
     DirectiveRegistry,
     SkillDirective,
     built_directive_registry,
 )
-from writer.project import ProjectState
 
 
 def _directive(
@@ -26,12 +26,11 @@ def _directive(
     description: str = "test",
     requires=None,
 ) -> SkillDirective:
-    if requires is None:
-        requires_states = frozenset({ProjectState.INITIALIZED})
-    else:
-        # Bypass the default — ``requires or default`` would mask an
-        # explicitly empty frozenset because empty frozenset is falsy.
-        requires_states = requires
+    # Bypass the default — ``requires or default`` would mask an
+    # explicitly empty frozenset because empty frozenset is falsy.
+    requires_states = (
+        frozenset({ProjectState.INITIALIZED}) if requires is None else requires
+    )
     return SkillDirective(
         command=command,
         description=description,
@@ -142,12 +141,16 @@ def test_registry_state_matrix_derives_from_metadata() -> None:
 
 
 def test_registry_rejects_directive_with_empty_command() -> None:
-    with pytest.raises(Exception):  # SkillError
+    from writer.skills.errors import SkillError
+
+    with pytest.raises(SkillError):
         DirectiveRegistry(directives=[_directive(command="")])
 
 
 def test_registry_rejects_directive_with_empty_description() -> None:
-    with pytest.raises(Exception):  # SkillError
+    from writer.skills.errors import SkillError
+
+    with pytest.raises(SkillError):
         DirectiveRegistry(directives=[_directive(description="")])
 
 

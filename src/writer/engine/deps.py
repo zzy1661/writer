@@ -156,7 +156,7 @@ class EngineDeps(Protocol):
         ...
 
     def rebind_skill_registry(
-        self, new_registry: "DirectiveRegistry"
+        self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
         """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
@@ -179,7 +179,7 @@ class EngineDeps(Protocol):
         ...
 
     def rebind_directive_registry(
-        self, new_registry: "DirectiveRegistry"
+        self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
         """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
