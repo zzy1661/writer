@@ -1,45 +1,37 @@
-"""Skill registry — maps slash commands to skill implementations.
+"""Directive registry — lookup table for command-bound directives.
 
-The registry exposes four metadata surfaces so the rest of the system
-does not need to know skill class internals:
+Renamed from ``SkillRegistry`` per chg-markdown-skills Decision 3.
+The internal dict value type changed from ``Skill`` to ``SkillDirective``;
+the public surface (``get`` / ``commands`` / ``help_entries`` /
+``state_matrix``) is shape-compatible with the prior registry so
+downstream callers (REPL help / tab completion / state-machine gating)
+do not need to change their call sites — only the type names.
 
-* :meth:`get` — invoke by slash command (engine loop hot path).
-* :meth:`commands` — sorted list of slash commands (REPL tab completion).
-* :meth:`help_entries` — ``[(command, description), …]`` for
-  ``/帮助`` rendering.
-* :meth:`state_matrix` — ``{command: frozenset[ProjectState]}`` used by
-  :func:`writer.project.validate_command_available` to detect
-  unavailable commands.
+Discovery happens in three layers (Replace semantics — later wins on
+command collision):
 
-Third-party plugins extend the registry by adding an ``[project
-.entry-points."writer.skills"]`` section to their ``pyproject.toml``:
+1. :func:`writer.skills.directive_discovery.discover_shipped_directives`
+   — the 4 built-in directives in ``writer/skills/_shipped/``.
+2. :func:`writer.skills.directive_discovery.discover_directives` — only
+   when ``project_root`` is provided.
+3. :func:`discover_entry_point_directives` — Python entry-point plugins
+   under ``[project.entry-points."writer.directives"]``.
 
-.. code-block:: toml
-
-   [project.entry-points."writer.skills"]
-   my_skill = "my_pkg.my_skill:MySkill"
-
-``MySkill`` may be either a class (instantiated with no args) or a
-pre-built instance. Discovery failures (ImportError, missing class,
-bad signature) are logged at WARNING and skipped — they never block
-startup, mirroring the design choice from
-:func:`writer.tools.registry.built_tool_registry`.
+See :func:`built_directive_registry` for the composition.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
-from importlib import metadata
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from writer.skills.continue_writing import ContinueWritingSkill
+from writer.skills.directive_discovery import (
+    discover_entry_point_directives,
+    discover_shipped_directives,
+)
 from writer.skills.errors import SkillError
-from writer.skills.outline import OutlineSkill
-from writer.skills.protocol import Skill
-from writer.skills.revise import ReviseSkill
-from writer.skills.toc import TocSkill
+from writer.skills.protocol import SkillDirective
 
 if TYPE_CHECKING:
     from writer.engine.config import EngineConfig
@@ -51,214 +43,146 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-ENTRY_POINT_GROUP = "writer.skills"
+#: Entry-point group name for third-party directive plugins.
+ENTRY_POINT_GROUP = "writer.directives"
 
 
-# Built-in skills shipped with the agent. Order matters only for the
-# fall-through default-arg case in :class:`SkillRegistry` (later
-# registrations win on command collision, which mirrors entry-point
-# overrides being last). The defaults here stay synchronous and
-# instance-class based so test fixtures can reconstruct the same
-# registry without poking at module globals.
-BUILTIN_SKILLS: list[Skill] = [
-    OutlineSkill(),
-    TocSkill(),
-    ContinueWritingSkill(),
-    ReviseSkill(),
-]
-
-
-def _validate_skill(skill: Skill) -> None:
-    """Enforce the Skill metadata contract at registration time.
+def _validate(directive: SkillDirective) -> None:
+    """Enforce the directive metadata contract at registration time.
 
     Catching problems early keeps a typo (``description = 123``) from
-    surviving until the first ``/帮助`` call, where it would surface as a
-    confusing render glitch.
+    surviving until the first ``/帮助`` call, where it would surface
+    as a confusing render glitch.
     """
 
-    command = getattr(skill, "command", None)
-    description = getattr(skill, "description", None)
-    requires_states = getattr(skill, "requires_states", None)
-
-    if not isinstance(command, str) or not command.startswith("/"):
+    if not isinstance(directive.command, str) or not directive.command.startswith("/"):
         msg = (
-            f"Skill {skill!r} missing a valid `command` "
+            f"Directive {directive!r} has invalid `command` "
             "(must be a non-empty str starting with '/')"
         )
         raise SkillError(msg)
-    if not isinstance(description, str) or not description.strip():
-        msg = f"Skill {command!r} missing a non-empty `description`"
+    if not isinstance(directive.description, str) or not directive.description.strip():
+        msg = f"Directive {directive.command!r} missing non-empty `description`"
         raise SkillError(msg)
-    if not isinstance(requires_states, frozenset) or not requires_states:
+    if (
+        not isinstance(directive.requires_states, frozenset)
+        or not directive.requires_states
+    ):
         msg = (
-            f"Skill {command!r} has invalid `requires_states` "
+            f"Directive {directive.command!r} has invalid `requires_states` "
             "(must be a non-empty frozenset[ProjectState])"
         )
         raise SkillError(msg)
 
 
-class SkillRegistry:
-    """Lookup table for command-bound skills.
+class DirectiveRegistry:
+    """Lookup table for command-bound directives.
 
     Duplicate commands are resolved with **last-write-wins** semantics:
-    when the same ``command`` appears more than once in the input
-    list, the later entry replaces the earlier one. This Replace
-    semantics is intentional — it lets the project-level layer
-    (see :func:`discover_project_skills`) override the built-in layer,
-    and the entry-point layer override both, with no special casing
-    in the caller.
+    when the same ``command`` appears more than once across layers
+    (shipped / project / entry-point), the later layer replaces the
+    earlier one. This Replace semantics lets users override any shipped
+    directive by adding a same-named project directive.
 
-    Per-skill validation still raises :class:`SkillError` (via
-    :func:`_validate_skill`) — a malformed skill is always a hard
-    error and will abort registry construction.
+    Per-directive validation still raises :class:`SkillError` (via
+    :func:`_validate`) — a malformed directive is always a hard error
+    and will abort registry construction.
     """
 
     def __init__(
         self,
-        skills: list[Skill] | None = None,
+        directives: list[SkillDirective] | None = None,
         *,
-        extra_skills: list[Skill] | None = None,
+        extra_directives: list[SkillDirective] | None = None,
     ) -> None:
-        items: list[Skill] = list(skills) if skills is not None else list(BUILTIN_SKILLS)
-        if extra_skills:
-            items.extend(extra_skills)
+        items: list[SkillDirective] = (
+            list(directives) if directives is not None else []
+        )
+        if extra_directives:
+            items.extend(extra_directives)
 
-        seen: dict[str, Skill] = {}
-        for skill in items:
-            _validate_skill(skill)
-            # Last-write-wins: the same ``command`` appearing more than
-            # once is the supported way to layer overrides (built-in →
-            # project → plugin). Per chg-project-skills design Decision 8.
-            seen[skill.command] = skill
+        seen: dict[str, SkillDirective] = {}
+        for directive in items:
+            _validate(directive)
+            seen[directive.command] = directive
 
-        self._by_command: dict[str, Skill] = seen
+        self._by_command: dict[str, SkillDirective] = seen
 
     # ----- introspection ----------------------------------------------------
 
-    def get(self, command: str) -> Skill | None:
+    def get(self, command: str) -> SkillDirective | None:
         return self._by_command.get(command)
 
     def commands(self) -> list[str]:
-        """Return sorted slash commands.
-
-        Sort order is stable across runs (alphabetical on bytes), which
-        keeps REPL tab completion deterministic across machines.
-        """
+        """Return sorted slash commands (stable across runs)."""
 
         return sorted(self._by_command)
 
     def help_entries(self) -> list[tuple[str, str]]:
         """Return ``[(command, description), …]`` in registry order.
 
-        Sorted by ``commands()`` so ``/帮助`` rendering stays stable
-        regardless of insertion order. Used by
-        :func:`writer.cli.main.print_repl_help`.
+        Sorted by :meth:`commands` so ``/帮助`` rendering stays stable
+        regardless of insertion order.
         """
 
         return [(cmd, self._by_command[cmd].description) for cmd in self.commands()]
 
-    def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
-        """Return ``{command: requires_states}`` for every registered skill.
+    def state_matrix(self) -> dict[str, frozenset["ProjectState"]]:
+        """Return ``{command: requires_states}`` for every registered directive.
 
         Powers :func:`writer.project.validate_command_available` so the
-        state matrix for skill-driven commands is fully derived from
-        skill metadata — adding a skill updates its availability map
-        automatically.
+        state matrix for directive-driven commands is fully derived from
+        directive metadata — adding a directive updates its availability
+        map automatically.
         """
 
         return {cmd: self._by_command[cmd].requires_states for cmd in self.commands()}
 
     # ----- execution --------------------------------------------------------
 
-    def run(
-        self,
-        command: str,
-        ctx: EngineContext,
-        deps: EngineDeps,
-        cfg: EngineConfig,
-    ) -> AsyncIterator[TextChunk | Done]:
-        skill = self.get(command)
-        if skill is None:
-            msg = f"未注册 skill: {command}"
-            raise SkillError(msg)
-        return skill.run(ctx, deps, cfg)
+    def get_body_with_references(
+        self, command: str
+    ) -> tuple[str, list[tuple[str, str]]] | None:
+        """Return ``(body, resolved_references)`` for ``command``.
+
+        ``resolved_references`` is the list of ``(relpath, content)``
+        pairs matched by ``@reference path`` mentions in the body, in
+        the order they appear. Returns ``None`` if the command is not
+        registered.
+
+        Imported lazily to avoid a circular import between registry and
+        directive_discovery at module load time.
+        """
+
+        directive = self.get(command)
+        if directive is None:
+            return None
+        # Local import: directive_discovery imports from this module's
+        # level, so we resolve references at call time to avoid the cycle.
+        from writer.skills.directive_discovery import resolve_references  # noqa: PLC0415
+
+        return directive.body, resolve_references(directive.body, directive.references)
 
 
-def discover_entry_point_skills() -> list[Skill]:
-    """Discover skills registered as ``[project.entry-points."writer.skills"]``.
-
-    Each entry point may resolve to either:
-
-    * a ``Skill`` class — instantiated with no arguments;
-    * a pre-built ``Skill`` instance — used as-is.
-
-    Anything that fails to resolve (missing distribution, ImportError,
-    bad attribute, unexpected type, ``SkillError`` from validators) is
-    logged at WARNING and skipped so a broken plugin never blocks the
-    REPL from starting.
-    """
-
-    discovered: list[Skill] = []
-    try:
-        entries = metadata.entry_points(group=ENTRY_POINT_GROUP)
-    except Exception:  # noqa: BLE001 — entry-points API can raise in odd envs
-        log.warning("Skill entry_points discovery failed; continuing without plugins")
-        return discovered
-
-    for entry in entries:
-        try:
-            target = entry.load()
-        except Exception:  # noqa: BLE001 — misbehaving plugins must not crash startup
-            log.warning(
-                "Failed to import skill entry point %s=%s; skipping",
-                entry.name,
-                entry.value,
-            )
-            continue
-
-        try:
-            if isinstance(target, type):
-                instance: Skill = target()  # type: ignore[abstract]
-            elif isinstance(target, Skill):
-                instance = target
-            else:
-                log.warning(
-                    "Skill entry point %s did not resolve to a Skill "
-                    "(got %s); skipping",
-                    entry.name,
-                    type(target).__name__,
-                )
-                continue
-        except Exception:  # noqa: BLE001 — constructor failures must not crash startup
-            log.warning(
-                "Skill entry point %s constructor raised; skipping",
-                entry.name,
-            )
-            continue
-
-        try:
-            _validate_skill(instance)
-        except SkillError as exc:
-            log.warning("Skill entry point %s rejected: %s", entry.name, exc)
-            continue
-
-        discovered.append(instance)
-    return discovered
+__all__ = [
+    "DirectiveRegistry",
+    "ENTRY_POINT_GROUP",
+    "built_directive_registry",
+]
 
 
-def built_skill_registry(
+def built_directive_registry(
     project_root: Path | None = None,
-) -> SkillRegistry:
-    """Built-in skills + project-level skills + entry-point skills.
+) -> DirectiveRegistry:
+    """Built-in directives + project-level directives + entry-point directives.
 
     Layers (Replace semantics — later wins on command collision):
 
-    1. :data:`BUILTIN_SKILLS` — the four shipped skills.
-    2. :func:`writer.skills.loader.discover_project_skills` (only when
-       ``project_root`` is provided) — project-level overrides at
-       ``<project_root>/.writer/skills/``.
-    3. :func:`discover_entry_point_skills` — Python entry-point
-       plugins registered under ``[project.entry-points."writer.skills"]``.
+    1. :func:`discover_shipped_directives` — the 4 shipped directives.
+    2. :func:`discover_directives(project_root)` — only when
+       ``project_root`` is provided.
+    3. :func:`discover_entry_point_directives` — Python entry-point
+       plugins.
 
     The ``project_root=None`` path preserves the legacy behavior (no
     project layer; back-compat for tests and callers that do not have
@@ -270,24 +194,18 @@ def built_skill_registry(
     project, no plugins) is still valid.
     """
 
-    items: list[Skill] = list(BUILTIN_SKILLS)
+    items: list[SkillDirective] = list(discover_shipped_directives())
 
     if project_root is not None:
-        from writer.skills.loader import discover_project_skills  # noqa: PLC0415
+        from writer.skills.directive_discovery import discover_directives  # noqa: PLC0415
 
-        items.extend(discover_project_skills(project_root))
+        items.extend(discover_directives(project_root))
 
-    items.extend(discover_entry_point_skills())
+    items.extend(discover_entry_point_directives())
 
-    if len(items) == len(BUILTIN_SKILLS):
-        return SkillRegistry()
-    return SkillRegistry(skills=items)
-
-
-__all__ = [
-    "BUILTIN_SKILLS",
-    "ENTRY_POINT_GROUP",
-    "SkillRegistry",
-    "built_skill_registry",
-    "discover_entry_point_skills",
-]
+    if len(items) == 0:
+        # No built-ins AND no project AND no plugins. This should not
+        # happen in production (the shipped layer always provides 4),
+        # but we tolerate it for tests + bootstrap.
+        return DirectiveRegistry()
+    return DirectiveRegistry(directives=items)

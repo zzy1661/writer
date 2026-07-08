@@ -13,7 +13,7 @@ from writer.engine.deps import EngineDeps
 from writer.roles import HistoryConsultant, StoryConsultant, XuanhuanConsultant
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
-from writer.skills import SkillRegistry, built_skill_registry
+from writer.skills import DirectiveRegistry, built_directive_registry
 from writer.tools import ToolRuntime, built_tool_registry
 
 # ---------------------------------------------------------------------------
@@ -287,7 +287,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             self.tool_runtime = ToolRuntime(
                 project_root=Path("/__no_project__").resolve()
             )
-            self.skill_registry = built_skill_registry()
+            self.directive_registry = built_directive_registry()
             # Required by the :class:`EngineDeps` Protocol since the
             # 2026-07-08 LLM tool-loop addition (``deps.tool_loop``).
             self.tool_loop = None
@@ -312,14 +312,14 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             self.story_consultant = new_consultant
             return self
 
-        def rebind_skill_registry(
-            self, new_registry: SkillRegistry
+        def rebind_directive_registry(
+            self, new_registry: DirectiveRegistry
         ) -> EngineDeps:
             # Added 2026-07-08 (chg-project-skills). The session's
             # ``set_project_root`` calls this after rebuilding the
             # registry; the stub mirrors the production wiring by
             # mutating in place.
-            self.skill_registry = new_registry
+            self.directive_registry = new_registry
             return self
 
     # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.

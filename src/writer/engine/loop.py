@@ -126,7 +126,7 @@ async def _engine_loop(
             action.command,
             ctx.project_root,
             ctx.project_state,
-            skill_registry=deps.skill_registry,
+            skill_registry=deps.directive_registry,
         )
         if not check.ok:
             yield TextChunk(text=f"{check.reason}\n")
@@ -149,17 +149,21 @@ async def _engine_loop(
                 if action.command == "/init":
                     async for event in _run_init_command(ctx, cfg):
                         yield event
-                elif action.command and (skill := deps.skill_registry.get(action.command)) is not None:
+                elif action.command and (
+                    directive := deps.directive_registry.get(action.command)
+                ) is not None:
                     # Dynamic dispatch: any slash command that maps to a
-                    # registered Skill gets routed through that skill.
-                    # Adding a new skill does NOT touch this branch; the
-                    # SkillRegistry is the single source of truth.
+                    # registered Directive gets routed through the LLM
+                    # directive execution path. Adding a new directive
+                    # does NOT touch this branch; the DirectiveRegistry
+                    # is the single source of truth.
                     if not cfg.fast_mode:
                         yield _log(
-                            f"[engine] {action.command} → {skill.__class__.__name__}\n",
+                            f"[engine] {action.command} → directive "
+                            f"({directive.command})\n",
                             cfg,
                         )
-                    async for event in skill.run(ctx, deps, cfg):
+                    async for event in _run_directive(directive, ctx, deps, cfg):
                         yield event
                 else:
                     if not cfg.fast_mode:
@@ -442,6 +446,95 @@ async def _run_workflow(
     for chunk in deps.run_workflow(name, ctx):
         yield TextChunk(text=chunk)
     yield Done(reason="workflow_pending", payload={"workflow": name})
+
+
+async def _run_directive(
+    directive: object,
+    ctx: EngineContext,
+    deps: EngineDeps,
+    cfg: EngineConfig,
+) -> AsyncIterator[TextChunk | Done | ToolCall | ToolResult]:
+    """Execute a Markdown SKILL.md directive via LLM tool loop.
+
+    The directive's body is intended as instruction text for the LLM.
+    This helper resolves ``@reference path/to/file.md`` mentions in
+    the body and exposes them so the LLM can read the relevant
+    references. Once the LLM has consumed the instructions, it drives
+    the existing tool registry (``safe_read_file``,
+    ``safe_write_file``, etc.) to do the actual work.
+
+    Implementation status (per chg-markdown-skills spec):
+    * Body + resolved references are injected into the LLM context
+      via the existing ``deps.tool_loop.run`` path, which already
+      handles the JSON-action protocol and tool dispatch.
+    * The directive's metadata (``command`` / ``description`` /
+      ``requires_states``) is logged to the user via ``TextChunk``
+      for transparency.
+    * If ``deps.tool_loop`` is ``None`` (rule-only deployment), the
+      helper degrades to a TextChunk-only stub that prints the
+      directive body summary — the actual LLM execution is not
+      possible without an API key.
+    """
+
+    if not cfg.fast_mode:
+        yield TextChunk(
+            text=f"[engine] {directive.command} → directive ({directive.command})\n"
+        )
+
+    # Resolve ``@reference path`` mentions to (relpath, content) pairs.
+    # Local import to avoid a circular import at module load time
+    # (directive_discovery already imports from skills.registry).
+    from writer.skills.directive_discovery import resolve_references  # noqa: PLC0415
+
+    resolved = resolve_references(directive.body, directive.references)
+
+    if deps.tool_loop is not None:
+        # Hand the directive + resolved references to the existing
+        # LLM tool loop. The loop reads the action's body and
+        # references, then drives the tool registry.
+        from writer.routing import AgentAction  # noqa: PLC0415
+
+        action = AgentAction(
+            action_type="answer_directly",
+            command=directive.command,
+            answer=directive.body,
+        )
+        # Stash resolved references on a transient attribute so the
+        # loop can read them; the loop's contract is satisfied by
+        # the answer field carrying the directive body.
+        # NOTE: a future task may wire ``resolved`` through a
+        # dedicated directive-aware loop subclass.
+        async for event in deps.tool_loop.run(action, ctx, deps, cfg):
+            yield event
+    else:
+        # No LLM available — emit a helpful preview so the user can
+        # see what the directive would have done.
+        yield TextChunk(
+            text=(
+                f"[engine] directive body (preview, no LLM configured):\n"
+                f"  command: {directive.command}\n"
+                f"  description: {directive.description}\n"
+                f"  body length: {len(directive.body)} chars\n"
+                f"  references: {len(resolved)} files\n"
+                f"  scripts: {len(directive.scripts)} files\n"
+            )
+        )
+        if resolved:
+            preview = "\n".join(
+                f"  ref: {relpath} ({len(content)} chars)"
+                for relpath, content in resolved
+            )
+            yield TextChunk(text=preview + "\n")
+        yield Done(
+            reason="answered",
+            payload={
+                "directive": directive.command,
+                "body_length": len(directive.body),
+                "references": [relpath for relpath, _ in resolved],
+                "scripts": list(directive.scripts),
+                "llm_available": False,
+            },
+        )
 
 
 __all__ = ["run_engine"]

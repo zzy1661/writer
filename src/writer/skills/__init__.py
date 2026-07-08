@@ -1,65 +1,46 @@
-"""Skill implementations.
+"""Directive system — pure Markdown SKILL.md paradigm.
 
-Skills are composable, reusable behaviors invoked by the engine for
-specific slash commands (``/大纲``, ``/目录``, ``/续写``, ``/改``, …).
+Every directive is a directory under ``<project_root>/.writer/skills/``
+(or ``src/writer/skills/_shipped/`` for built-ins) containing a
+``SKILL.md`` file plus optional ``references/`` and ``scripts/``
+subdirectories. Discovery happens via the ``directive_discovery``
+helpers; the engine reads the directive's body and ``@reference``'d
+files into the LLM context.
 
-Each skill declares four pieces of metadata on its class —
-``command``, ``description``, ``requires_states``, ``extra_instructions``
-— and an async ``run()`` method that the engine loop dispatches to. The
-:class:`writer.skills.registry.SkillRegistry` validates the metadata
-at construction time and exposes ``help_entries`` / ``state_matrix``
-/ ``commands`` so the CLI help text and the state machine can be
-derived without touching skill code.
+Public surface (per chg-markdown-skills):
 
-Skill discovery happens in three layers (Replace semantics — later
-wins):
-
-1. :data:`writer.skills.registry.BUILTIN_SKILLS` — the four shipped
-   skills, hardcoded in the package.
-2. :func:`writer.skills.loader.discover_project_skills` — project-level
-   overrides at ``<project_root>/.writer/skills/``; replaces built-ins
-   by command when present.
-3. :func:`writer.skills.registry.discover_entry_point_skills` — Python
-   entry points registered as ``writer.skills`` plugins; replaces both
-   built-ins and project skills by command when present.
+* :class:`SkillDirective` — frozen dataclass loaded from ``SKILL.md``.
+* :class:`DirectiveRegistry` — lookup table keyed by ``command``.
+* :func:`built_directive_registry` — factory assembling shipped +
+  project + entry-point layers (later wins on command collision).
+* :func:`discover_directives` — scan a project's skills directory.
+* :func:`discover_shipped_directives` — list the 4 shipped directives.
+* :func:`discover_entry_point_directives` — entry-point plugin hook.
+* :class:`SkillError` — domain exception (re-exported for back-compat).
 """
 
-from writer.skills.builtin_sources import (
-    BUILTIN_SKILL_SOURCES,
-    MIRROR_HEADER_TEMPLATE,
-    BuiltinSkillSource,
-    mirror_filename_for,
+from writer.skills.directive_discovery import (
+    discover_directives,
+    discover_shipped_directives,
+    resolve_references,
 )
-from writer.skills.continue_writing import ContinueWritingSkill
 from writer.skills.errors import SkillError
-from writer.skills.loader import discover_project_skills
-from writer.skills.outline import OutlineSkill
-from writer.skills.protocol import Skill
+from writer.skills.protocol import SkillDirective
 from writer.skills.registry import (
-    BUILTIN_SKILLS,
+    DirectiveRegistry,
     ENTRY_POINT_GROUP,
-    SkillRegistry,
-    built_skill_registry,
-    discover_entry_point_skills,
+    built_directive_registry,
+    discover_entry_point_directives,
 )
-from writer.skills.revise import ReviseSkill
-from writer.skills.toc import TocSkill
 
 __all__ = [
-    "BUILTIN_SKILLS",
-    "BUILTIN_SKILL_SOURCES",
-    "BuiltinSkillSource",
-    "ContinueWritingSkill",
+    "DirectiveRegistry",
     "ENTRY_POINT_GROUP",
-    "MIRROR_HEADER_TEMPLATE",
-    "OutlineSkill",
-    "ReviseSkill",
-    "Skill",
+    "SkillDirective",
     "SkillError",
-    "SkillRegistry",
-    "TocSkill",
-    "built_skill_registry",
-    "discover_entry_point_skills",
-    "discover_project_skills",
-    "mirror_filename_for",
+    "built_directive_registry",
+    "discover_directives",
+    "discover_entry_point_directives",
+    "discover_shipped_directives",
+    "resolve_references",
 ]

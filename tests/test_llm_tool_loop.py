@@ -26,7 +26,7 @@ from writer.engine.deps import _DefaultEngineDeps
 from writer.llm.agent import MAX_LOOP_STEPS, LLMToolLoop
 from writer.roles import StoryConsultant
 from writer.routing import AgentAction, IntentRouter
-from writer.skills import built_skill_registry
+from writer.skills import built_directive_registry
 from writer.tools import ToolRuntime, built_tool_registry
 from writer.tools.errors import ToolError, ToolNotFoundError
 
@@ -292,7 +292,7 @@ def _noop_deps() -> _DefaultEngineDeps:
         story_consultant=StoryConsultant(_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
         tool_loop=None,
     )
 
@@ -377,7 +377,7 @@ async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() ->
         story_consultant=StoryConsultant(settings),
         tool_registry=registry,
         tool_runtime=runtime,
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
         tool_loop=tool_loop,
     )
     ctx = _ctx()

@@ -41,7 +41,7 @@ from writer.project import (
 )
 from writer.project.init_brief import apply_init_brief
 from writer.session import EngineSession, compose_pending_input
-from writer.skills import SkillRegistry, built_skill_registry
+from writer.skills import DirectiveRegistry, built_directive_registry
 
 app = typer.Typer(
     name="writer",
@@ -54,13 +54,12 @@ EXIT_COMMANDS = {"/退出", "/quit", "/q", "exit", "quit"}
 HELP_COMMANDS = {"/帮助", "/help", "help"}
 
 # Static REPL commands that aren't owned by a Skill. /大纲, /目录, /续写,
-# /改 used to live here too — they are now served by the SkillRegistry
+# /改 used to live here too — they are now served by the DirectiveRegistry
 # (see ``build_repl_commands``).
 STATIC_REPL_COMMANDS = [
     ("/init", "初始化小说项目"),
     ("/创作", "创作指定章节或下一章"),
     ("/审核", "审核当前正文"),
-    ("/搜索", "搜索项目文本"),
     ("/字数统计", "统计项目或文件字数"),
     ("/状态", "查看当前项目状态"),
     ("/帮助", "显示帮助"),
@@ -71,19 +70,19 @@ STATIC_REPL_COMMANDS = [
 # compatibility with existing tests / completion behaviour. Derived from
 # the default skill registry at import time so the list still includes
 # every currently-registered Skill command.
-REPL_COMMANDS: list[tuple[str, str]] = list(STATIC_REPL_COMMANDS) + built_skill_registry().help_entries()
+REPL_COMMANDS: list[tuple[str, str]] = list(STATIC_REPL_COMMANDS) + built_directive_registry().help_entries()
 
 
-def build_repl_commands(skill_registry: SkillRegistry) -> list[tuple[str, str]]:
+def build_repl_commands(directive_registry: DirectiveRegistry) -> list[tuple[str, str]]:
     """Return the full ``/帮助`` table: static commands + skills.
 
     Static commands (init / 状态 / 帮助 / 退出, plus the not-yet-Skill
     /创作 /审核 / 查看 / 搜索 / 字数统计) come first so the help table
     stays stable across Skill additions. Skills follow in alphabetical
-    order (driven by :meth:`SkillRegistry.commands`).
+    order (driven by :meth:`DirectiveRegistry.commands`).
     """
 
-    return list(STATIC_REPL_COMMANDS) + skill_registry.help_entries()
+    return list(STATIC_REPL_COMMANDS) + directive_registry.help_entries()
 
 
 REPL_PROMPT = "writer> "
@@ -118,21 +117,21 @@ def print_welcome() -> None:
     )
 
 
-def print_repl_help(skill_registry: SkillRegistry | None = None) -> None:
+def print_repl_help(directive_registry: DirectiveRegistry | None = None) -> None:
     """Render the first-pass command list used inside the REPL.
 
-    When ``skill_registry`` is provided, draws the help entries from it
+    When ``directive_registry`` is provided, draws the help entries from it
     so a plugin that registers a new skill is automatically reflected
     in ``/帮助`` without restarting the process.
     """
 
-    if skill_registry is None:
-        skill_registry = built_skill_registry()
+    if directive_registry is None:
+        directive_registry = built_directive_registry()
     table = Table(title="可用命令")
     table.add_column("命令", style="cyan", no_wrap=True)
     table.add_column("说明")
 
-    for command, description in build_repl_commands(skill_registry):
+    for command, description in build_repl_commands(directive_registry):
         table.add_row(command, description)
 
     console.print(table)
@@ -354,17 +353,17 @@ def _resolve_history_file(
 def build_prompt_session(
     history_file: Path | None | object = None,
     *,
-    skill_registry: SkillRegistry | None = None,
+    directive_registry: DirectiveRegistry | None = None,
 ) -> PromptSession[str]:
     """Construct a prompt session with persistent history + tab completion.
 
     Pass ``history_file=NO_HISTORY`` to disable history entirely (useful in
     tests). Passing ``None`` (the default) uses the user-level history file.
 
-    ``skill_registry`` is consulted for the completion word list so a
+    ``directive_registry`` is consulted for the completion word list so a
     plugin can register new slash commands and they'll show up in
     tab-completion without rebuilding the session. When omitted, the
-    default :func:`writer.skills.built_skill_registry` is used — keeping
+    default :func:`writer.skills.built_directive_registry` is used — keeping
     the original zero-arg call sites (``build_prompt_session()`` in
     :func:`_build_repl_prompt_session` and tests) working unchanged.
     """
@@ -376,10 +375,10 @@ def build_prompt_session(
         except OSError:
             history = None
 
-    if skill_registry is None:
-        skill_registry = built_skill_registry()
+    if directive_registry is None:
+        directive_registry = built_directive_registry()
     completion_words = (
-        [cmd for cmd, _ in build_repl_commands(skill_registry)] + ["exit", "quit"]
+        [cmd for cmd, _ in build_repl_commands(directive_registry)] + ["exit", "quit"]
     )
     completer = WordCompleter(
         completion_words, ignore_case=True, pattern=SLASH_CMD_PATTERN
@@ -440,16 +439,16 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
             "请先 [bold]cd[/bold] 到一个有效目录，或使用 [bold]/init <项目名>[/bold] 重新初始化。[/yellow]"
         )
 
-    # ``skill_registry`` lives on ``engine_session.deps`` (see
-    # ``EngineDeps.skill_registry``); passing it through to the prompt
+    # ``directive_registry`` lives on ``engine_session.deps`` (see
+    # ``EngineDeps.directive_registry``); passing it through to the prompt
     # session + ``/帮助`` renderer keeps the help table and tab
     # completion in sync with whatever skills are registered for this
     # REPL run — including entry-point plugins discovered at import
     # time.
-    skill_registry = engine_session.deps.skill_registry
+    directive_registry = engine_session.deps.directive_registry
 
     if prompt_session is None and sys.stdin.isatty():
-        prompt_session = build_prompt_session(skill_registry=skill_registry)
+        prompt_session = build_prompt_session(directive_registry=directive_registry)
 
     while True:
         try:

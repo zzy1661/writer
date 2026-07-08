@@ -177,54 +177,100 @@ def _writer_meta_scaffolding(root: Path, *, force: bool = False) -> list[Path]:
             path.write_text(content, encoding="utf-8")
             created.append(path)
 
-    created.extend(_seed_skill_mirrors(writer_root, force=force))
+    created.extend(_seed_directives(writer_root, force=force))
     return created
 
 
-def _seed_skill_mirrors(
+def _seed_directives(
     writer_root: Path, *, force: bool = False
 ) -> list[Path]:
-    """Mirror each built-in skill's Python source into
-    ``<writer_root>/skills/<mirror_filename>.py`` plus a companion
-    ``.md`` doc file.
+    """Copy the 4 shipped SKILL.md directive packages into the project.
 
-    Called by :func:`_writer_meta_scaffolding` when ``with_writer_meta=True``.
-    Per-skill failures (e.g. source module missing) are logged at WARNING
-    and skipped — a single broken skill MUST NOT prevent other skills
-    from being mirrored and MUST NOT prevent the workspace from being
-    created.
+    Each shipped directive lives under
+    ``writer.skills._shipped/<command>/`` (loaded via
+    :mod:`importlib.resources`). This helper copies the whole
+    directory tree — ``SKILL.md`` + ``references/*.md`` (and any
+    future ``scripts/*.py``) — into
+    ``<writer_root>/skills/<command>/``.
 
-    Files that already exist on disk are left untouched unless
-    ``force=True`` (matches the same convention as
-    :func:`create_workspace`).
+    After copying, the project's directory contains the same files as
+    the shipped source. The discovery layer treats shipped and
+    user-added directives identically — the user is free to edit,
+    delete, or extend.
+
+    Per-directive failures are logged at WARNING and skipped (so a
+    broken shipped copy does not block the rest). Files that already
+    exist on disk are left untouched unless ``force=True``.
+
+    Called by :func:`_writer_meta_scaffolding` only when
+    ``with_writer_meta=True`` (the ``create_new_workspace`` path).
+    The low-level :func:`create_workspace` does NOT seed directives.
     """
 
     skills_dir = writer_root / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
 
-    # Local import: importing writer.skills.builtin_sources at module
-    # load time would pull in the full writer.skills package, which
-    # imports the built-in skill classes; those classes import
-    # writer.roles which imports writer.project → circular. The
-    # builtin_sources module itself is a leaf with no further
-    # dependencies, so a function-local import is safe.
-    from writer.skills.builtin_sources import BUILTIN_SKILL_SOURCES  # noqa: PLC0415
+    # Local import: keeps the workspace module free of a top-level
+    # writer.skills dependency (avoids any future circular import
+    # risk).
+    try:
+        import importlib.resources as _resources
+    except ImportError:  # pragma: no cover — Python 3.12+ has it
+        return []
 
     created: list[Path] = []
-    for src in BUILTIN_SKILL_SOURCES:
-        for filename, content in _render_skill_mirror(src):
-            target = skills_dir / filename
+    try:
+        shipped_root = _resources.files("writer.skills._shipped")
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Cannot locate shipped directives package: %s: %s; "
+            "directive seeding skipped",
+            type(exc).__name__,
+            exc,
+        )
+        return []
+
+    try:
+        sub_iter = sorted(p for p in shipped_root.iterdir() if p.is_dir())
+    except (OSError, NotImplementedError) as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Cannot iterate shipped directives: %s: %s; "
+            "directive seeding skipped",
+            type(exc).__name__,
+            exc,
+        )
+        return []
+
+    for sub in sub_iter:
+        target_dir = skills_dir / sub.name
+        for src_path in _walk_traversable(sub):
+            rel = src_path.relative_to(sub).as_posix()
+            target = target_dir / rel
             if (not force) and target.exists():
                 continue
             try:
-                target.write_text(content, encoding="utf-8")
-            except OSError as exc:
-                # Project may be on a read-only mount; warn and keep going
-                # so the rest of the workspace can still be created.
+                content = src_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as exc:
                 import logging
 
                 logging.getLogger(__name__).warning(
-                    "Failed to write project skill mirror %s: %s; skipping",
+                    "Cannot read shipped directive file %s: %s; skipping",
+                    src_path,
+                    exc,
+                )
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                target.write_text(content, encoding="utf-8")
+            except OSError as exc:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Cannot write shipped directive file %s: %s; skipping",
                     target,
                     exc,
                 )
@@ -233,79 +279,32 @@ def _seed_skill_mirrors(
     return created
 
 
-def _render_skill_mirror(src: object) -> list[tuple[str, str]]:
-    """Return ``[(filename, content), ...]`` for one built-in skill source.
+def _walk_traversable(root) -> list:
+    """Walk a Traversable (``importlib.resources``) directory tree.
 
-    Produces two files: ``<mirror_filename>.py`` (1:1 copy of the
-    source module's text + a header explaining the project-level
-    override semantics) and ``<mirror_filename>.md`` (user-facing
-    doc with the title and body from the registry).
+    Returns every file (relative paths included as ``Traversable``
+    objects) under ``root``. Directories are yielded before their
+    files so callers can mkdir parent paths first.
     """
 
-    from writer.skills.builtin_sources import (  # noqa: PLC0415
-        MIRROR_HEADER_TEMPLATE,
-        BuiltinSkillSource,
-    )
+    out: list = []
+    try:
+        children = list(root.iterdir())
+    except (OSError, NotImplementedError):
+        return out
 
-
-    assert isinstance(src, BuiltinSkillSource)
-
-    source_path = _resolve_source_path(src)
-    source_text = (
-        source_path.read_text(encoding="utf-8")
-        if source_path is not None
-        else (
-            f'# Source module "{src.source_module}" not importable; the\n'
-            "# project-level skill below cannot mirror its real implementation.\n"
-            f"# Class: {src.class_name}\n\n"
-            "raise NotImplementedError(\n"
-            f'    "Source module {src.source_module!r} is not importable; "\n'
-            '    "please file a bug at the writer-agent issue tracker."\n'
-            ")\n"
-        )
-    )
-
-    header = MIRROR_HEADER_TEMPLATE.format(
-        command=src.command,
-        source_module_last=src.source_module.rsplit(".", 1)[-1],
-        class_name=src.class_name,
-        source_sha256=src.source_sha256,
-    )
-
-    py_content = header + source_text
-    md_content = f"# {src.doc_title}\n\n{src.doc_body}\n"
-
-    return [
-        (f"{src.mirror_filename}.py", py_content),
-        (f"{src.mirror_filename}.md", md_content),
-    ]
-
-
-def _resolve_source_path(src: object) -> Path | None:
-    """Locate the on-disk path of ``src.source_module`` for reading.
-
-    Walks ``sys.modules`` to find the module object and then reads
-    its ``__file__`` attribute. Returns ``None`` when the module is
-    not importable in the current Python process (so the caller can
-    fall back to a placeholder body).
-    """
-
-    import importlib
-    import sys
-
-    from writer.skills.builtin_sources import BuiltinSkillSource  # noqa: PLC0415
-
-    assert isinstance(src, BuiltinSkillSource)
-    module = sys.modules.get(src.source_module)
-    if module is None:
+    # Sort for deterministic seeding order.
+    children.sort(key=lambda p: p.name)
+    for child in children:
         try:
-            module = importlib.import_module(src.source_module)
-        except Exception:
-            return None
-    file_attr = getattr(module, "__file__", None)
-    if not file_attr:
-        return None
-    return Path(file_attr)
+            if child.is_dir():
+                out.extend(_walk_traversable(child))
+            else:
+                out.append(child)
+        except (OSError, NotImplementedError):
+            # Some Traversables cannot answer ``is_dir()``; treat as file
+            out.append(child)
+    return out
 
 
 def _genre_scaffolding(root: Path, canonical_genre: str) -> list[Path]:

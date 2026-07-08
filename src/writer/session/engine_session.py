@@ -80,8 +80,8 @@ class EngineSession:
                 # so we refresh ``project_genre`` here and pass it down.
                 self.refresh_project_genre()
             # ``production_deps`` is responsible for also wiring
-            # ``skill_registry`` with the bound project (per
-            # chg-project-skills) so the very first ``/大纲`` etc.
+            # ``directive_registry`` with the bound project (per
+            # chg-markdown-skills) so the very first ``/大纲`` etc.
             # lookup sees the project-level overrides. We do NOT
             # post-hoc rebuild here — the session's
             # ``set_project_root`` handles later project changes.
@@ -106,7 +106,7 @@ class EngineSession:
         runs ``/init 历史`` then ``/init 玄幻`` would keep the
         HistoryConsultant in deps and serve stale outlines.
 
-        ``skill_registry`` is also rebuilt (per ``chg-project-skills``)
+        ``directive_registry`` is also rebuilt (per ``chg-markdown-skills``)
         so the new project's ``.writer/skills/`` overrides become
         visible on the next REPL turn.
 
@@ -123,7 +123,7 @@ class EngineSession:
 
         from writer.config import get_settings
         from writer.engine.deps import _consultant_for_genre
-        from writer.skills import built_skill_registry
+        from writer.skills import built_directive_registry
         from writer.tools import ToolRuntime
 
         if new_root is not None:
@@ -147,14 +147,14 @@ class EngineSession:
         )
         self.deps = self.deps.rebind_story_consultant(new_consultant)
 
-        # Rebuild the skill registry so the new project's
+        # Rebuild the directive registry so the new project's
         # ``.writer/skills/`` overrides take effect on the next turn.
-        # ``built_skill_registry`` is invoked with the resolved
-        # sentinel (not ``None``) for S0 so any future S0 skill stub
-        # can rely on a real path; in practice the sentinel is not a
-        # directory so ``discover_project_skills`` returns ``[]``.
-        new_registry = built_skill_registry(project_root=resolved)
-        self.deps = self.deps.rebind_skill_registry(new_registry)
+        # ``built_directive_registry`` is invoked with the resolved
+        # sentinel (not ``None``) for S0 so any future S0 directive
+        # stub can rely on a real path; in practice the sentinel is
+        # not a directory so ``discover_directives`` returns ``[]``.
+        new_registry = built_directive_registry(project_root=resolved)
+        self.deps = self.deps.rebind_directive_registry(new_registry)
 
     def refresh_project_state(self) -> str:
         """Refresh ``project_state`` from files on disk and return it."""

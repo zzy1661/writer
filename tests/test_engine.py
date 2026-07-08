@@ -68,15 +68,6 @@ def test_router_foreshadow_query_without_id_uses_keyword_only() -> None:
     assert action.arguments == {"keyword": "列出所有伏笔"}
 
 
-def test_router_classifies_search_command() -> None:
-    action = RuleBasedIntentRouter().route("/搜索 玉簪", "S2")
-
-    assert action.action_type == "call_tool"
-    assert action.command == "/搜索"
-    assert action.tool_name == "project_search"
-    assert action.arguments == {"query": "玉簪", "path": "."}
-
-
 def test_router_classifies_wordcount_command() -> None:
     action = RuleBasedIntentRouter().route("/字数统计 manuscript", "S2")
 
@@ -303,8 +294,14 @@ def test_engine_init_blocks_init_command_after_outline_state(tmp_path: Path) -> 
 # ---------------------------------------------------------------------------
 
 
-def test_engine_runs_outline_via_story_consultant(tmp_path: Path) -> None:
-    """``/大纲 <创意>`` must stream the outline from StoryConsultant and yield ``answered``."""
+def test_engine_dispatches_outline_directive(tmp_path: Path) -> None:
+    """``/大纲`` routes to the shipped ``/大纲`` Markdown directive (chg-markdown-skills).
+
+    With no LLM configured the engine emits a TextChunk preview describing
+    the directive and yields Done(reason="answered"). The directive body
+    must surface somewhere in the streamed events so the user can see
+    what the LLM would have done.
+    """
     deps = production_deps()
     workspace = create_workspace("outline-test", tmp_path)
 
@@ -312,37 +309,40 @@ def test_engine_runs_outline_via_story_consultant(tmp_path: Path) -> None:
         run_engine(_workspace_ctx("/大纲 双主角女将军从冷宫到朝堂", workspace.root), deps)
     )
 
-    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
     action_events = [e for e in events if isinstance(e, ActionEvent)]
     done_events = [e for e in events if isinstance(e, Done)]
+    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
 
-    # 路由 + skill 调度是确定性的(可锁);正文内容由 LLM 生成(不锁具体字符串)
-    assert any(isinstance(e, ActionEvent) and e.action.action_type == "run_command" for e in action_events)
-    assert any(isinstance(e, ActionEvent) and e.action.command == "/大纲" for e in action_events)
-    assert "StoryConsultant" in text_blob or "outline skill" in text_blob
-    assert "双主角女将军从冷宫到朝堂" in text_blob
-    # LLM 可能返回四幕 / 六幕 / 卷一 / Chapter 1… 只锁输入关键字进了输出
-    assert (workspace.root / "outline" / "大纲.md").is_file()
-
+    assert any(
+        isinstance(e, ActionEvent) and e.action.action_type == "run_command"
+        for e in action_events
+    )
+    assert any(
+        isinstance(e, ActionEvent) and e.action.command == "/大纲"
+        for e in action_events
+    )
+    # Log line confirms directive dispatch
+    assert "→ directive" in text_blob
+    # Preview surfaces directive metadata
+    assert "大纲" in text_blob
     answered = [e for e in done_events if e.reason == "answered"]
     assert answered, "expected at least one Done(reason='answered')"
-    assert answered[0].payload is not None
-    assert answered[0].payload.get("outline") is True
-    # chapter_count 由 LLM 返回的 chapters 长度决定,允许 ≥1
-    chapter_count = answered[0].payload.get("chapter_count")
-    assert isinstance(chapter_count, int) and chapter_count >= 1
-    assert answered[0].payload.get("project_state") == "S2"
+    assert answered[0].payload.get("directive") == "/大纲"
 
 
-def test_engine_runs_toc_after_outline(tmp_path: Path) -> None:
-    """``/目录`` must read the outline and write ``outline/toc.md``."""
+def test_engine_dispatches_toc_directive(tmp_path: Path) -> None:
+    """``/目录`` routes to the shipped ``/目录`` Markdown directive.
 
+    Verifies the engine's directive dispatch path picks up the right
+    directive based on the action's command and emits the expected
+    log line + Done(reason="answered") event.
+    """
     deps = production_deps()
     workspace = create_workspace("toc-test", tmp_path)
     (workspace.root / "outline" / "大纲.md").write_text(
         "# 测试书名\n\n## 四幕大纲\n\n"
         "- 第一幕：开端\n"
-        "- 第二幕：冲突\n"
+        "- 第二幕：对抗\n"
         "- 第三幕：转折\n"
         "- 第四幕：终局\n",
         encoding="utf-8",
@@ -354,31 +354,12 @@ def test_engine_runs_toc_after_outline(tmp_path: Path) -> None:
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
     done_events = [e for e in events if isinstance(e, Done)]
+
+    # Log line confirms directive dispatch
+    assert "→ directive" in text_blob
     answered = [e for e in done_events if e.reason == "answered"]
-
-    assert "toc skill" in text_blob or "StoryConsultant" in text_blob
-    assert (workspace.root / "outline" / "toc.md").is_file()
     assert answered, "expected Done(reason='answered')"
-    assert answered[0].payload is not None
-    assert answered[0].payload.get("toc") is True
-    assert answered[0].payload.get("project_state") == "S3"
-
-
-def test_write_outline_raises_value_error_when_project_root_missing() -> None:
-    """Outline skill must raise ``ValueError`` when no project is bound."""
-
-    from writer.roles.story_consultant import OutlineResult
-    from writer.skills.outline import _write_outline
-
-    with pytest.raises(ValueError, match="未绑定项目"):
-        _write_outline(
-            None,
-            OutlineResult(
-                title="测试",
-                premise="测试 premise",
-                chapters=["第一幕", "第二幕", "第三幕", "第四幕"],
-            ),
-        )
+    assert answered[0].payload.get("directive") == "/目录"
 
 
 def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
@@ -424,7 +405,7 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
     from writer.routing import RuleBasedIntentRouter
-    from writer.skills import built_skill_registry
+    from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
     from writer.tools.errors import WorkflowNotFoundError
 
@@ -433,7 +414,7 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
         _workflows={},
     )
 
@@ -481,7 +462,7 @@ def test_engine_emits_error_event_on_router_failure() -> None:
     from writer.engine import ErrorEvent
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
-    from writer.skills import built_skill_registry
+    from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -489,7 +470,7 @@ def test_engine_emits_error_event_on_router_failure() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
     )
 
     events = _consume(run_engine(_ctx("anything"), deps))
@@ -503,7 +484,7 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
     from writer.engine import Interrupt
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
-    from writer.skills import built_skill_registry
+    from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -511,7 +492,7 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
     )
 
     events = _consume(run_engine(_ctx("模糊输入"), deps))
@@ -529,7 +510,7 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
     from writer.engine.config import EngineConfig
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
-    from writer.skills import built_skill_registry
+    from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -537,7 +518,7 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
     )
 
     cfg = EngineConfig(session_id="x", fast_mode=True)
@@ -562,7 +543,7 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
     from writer.engine import ToolCall, ToolResult
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
-    from writer.skills import built_skill_registry
+    from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
@@ -570,7 +551,7 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
     )
 
     events = _consume(run_engine(_ctx("查一下 F003"), deps))
@@ -590,7 +571,7 @@ def test_engine_handles_tool_not_found_error() -> None:
     from writer.engine.deps import _DefaultEngineDeps
     from writer.roles import StoryConsultant
     from writer.routing import AgentAction
-    from writer.skills import built_skill_registry
+    from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     class _CallUnknownTool:
@@ -605,7 +586,7 @@ def test_engine_handles_tool_not_found_error() -> None:
         story_consultant=StoryConsultant(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
-        skill_registry=built_skill_registry(),
+        directive_registry=built_directive_registry(),
     )
 
     events = _consume(run_engine(_ctx("anything"), deps))

@@ -27,7 +27,7 @@ from writer.routing import (
     LlmIntentRouter,
     RuleBasedIntentRouter,
 )
-from writer.skills import SkillRegistry, built_skill_registry
+from writer.skills import DirectiveRegistry, built_directive_registry
 from writer.tools import ToolRegistry, ToolRuntime, built_tool_registry
 from writer.tools.errors import WorkflowNotFoundError
 from writer.workflows import WORKFLOWS, WorkflowStub
@@ -91,6 +91,10 @@ class EngineDeps(Protocol):
       via ``_run_tool`` with zero LLM calls; populated when the API
       key is configured. Forward-referenced as a string to keep the
       engine package free of direct ``writer.llm.*`` imports.
+    * :attr:`directive_registry` — :class:`writer.skills.DirectiveRegistry`
+      mapping slash commands to :class:`writer.skills.SkillDirective`
+      (Markdown SKILL.md directives). Rebuilt on project change via
+      :meth:`rebind_directive_registry` (per ``chg-markdown-skills``).
 
     Future expansion points (intentionally not declared yet):
     * ``workflow_starter``: richer async workflow entrypoint
@@ -103,7 +107,7 @@ class EngineDeps(Protocol):
     story_consultant: StoryConsultant
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
-    skill_registry: SkillRegistry
+    directive_registry: DirectiveRegistry
     tool_loop: LLMToolLoop | None
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -152,19 +156,43 @@ class EngineDeps(Protocol):
         ...
 
     def rebind_skill_registry(
-        self, new_registry: SkillRegistry
+        self, new_registry: "DirectiveRegistry"
     ) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the skill registry swapped.
+        """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
         Symmetric to :meth:`rebind_tool_runtime` and
         :meth:`rebind_story_consultant`. Called by
         :meth:`writer.session.EngineSession.set_project_root` after
         the new project's ``.writer/skills/`` has been scanned — the
         registry MUST be rebuilt on project change so project-level
-        skill overrides (per ``chg-project-skills``) take effect on the
-        next REPL turn.
+        directive overrides (per ``chg-markdown-skills``) take effect
+        on the next REPL turn.
+
+        Kept as an alias of :meth:`rebind_directive_registry` for
+        back-compat with downstream code that still uses the older
+        name.
 
         Added 2026-07-08 alongside the project-skills capability.
+        Renamed to :meth:`rebind_directive_registry` on 2026-07-09
+        (chg-markdown-skills).
+        """
+        ...
+
+    def rebind_directive_registry(
+        self, new_registry: "DirectiveRegistry"
+    ) -> EngineDeps:
+        """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
+
+        Symmetric to :meth:`rebind_tool_runtime` and
+        :meth:`rebind_story_consultant`. Called by
+        :meth:`writer.session.EngineSession.set_project_root` after
+        the new project's ``.writer/skills/`` has been scanned — the
+        registry MUST be rebuilt on project change so project-level
+        directive overrides (per ``chg-markdown-skills``) take effect
+        on the next REPL turn.
+
+        Added 2026-07-09 (chg-markdown-skills). The prior
+        :meth:`rebind_skill_registry` is preserved as an alias.
         """
         ...
 
@@ -182,7 +210,7 @@ class _DefaultEngineDeps:
     story_consultant: StoryConsultant
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
-    skill_registry: SkillRegistry
+    directive_registry: DirectiveRegistry
     tool_loop: LLMToolLoop | None = None
     _workflows: dict[str, WorkflowStub] = field(default_factory=dict)
 
@@ -216,14 +244,22 @@ class _DefaultEngineDeps:
         return replace(self, story_consultant=new_consultant)
 
     def rebind_skill_registry(
-        self, new_registry: SkillRegistry
+        self, new_registry: DirectiveRegistry
+    ) -> EngineDeps:
+        # Back-compat alias: per chg-markdown-skills the canonical name
+        # is ``rebind_directive_registry`` but older test stubs may
+        # still call the older name.
+        return replace(self, directive_registry=new_registry)
+
+    def rebind_directive_registry(
+        self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
         # Symmetric to ``rebind_tool_runtime`` / ``rebind_story_consultant``;
         # uses ``dataclasses.replace`` to keep the production wiring
-        # effectively immutable. Per chg-project-skills: project-level
-        # skills live in the project directory, so this MUST be called
-        # whenever the bound project changes.
-        return replace(self, skill_registry=new_registry)
+        # effectively immutable. Per chg-markdown-skills: project-level
+        # directives live in the project directory, so this MUST be
+        # called whenever the bound project changes.
+        return replace(self, directive_registry=new_registry)
 
 
 def _select_router(
@@ -314,7 +350,7 @@ def production_deps(
         story_consultant=_consultant_for_genre(resolved, genre),
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
-        skill_registry=built_skill_registry(project_root=root),
+        directive_registry=built_directive_registry(project_root=root),
         tool_loop=tool_loop,
         _workflows=dict(WORKFLOWS),
     )
