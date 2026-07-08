@@ -84,15 +84,6 @@ def test_validate_command_blocks_write_in_s0() -> None:
     assert "请先生成章节目录" in check.reason
 
 
-def test_validate_command_allows_readonly_commands_after_init(tmp_path: Path) -> None:
-    workspace = create_workspace("状态测试", tmp_path)
-
-    check = validate_command_available("/查看", workspace.root)
-
-    assert check.ok is True
-    assert check.state == ProjectState.INITIALIZED
-
-
 def test_discover_project_root_returns_cwd_when_agent_exists(tmp_path: Path) -> None:
     workspace = create_workspace("根目录项目", tmp_path)
 

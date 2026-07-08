@@ -68,15 +68,6 @@ def test_router_foreshadow_query_without_id_uses_keyword_only() -> None:
     assert action.arguments == {"keyword": "列出所有伏笔"}
 
 
-def test_router_classifies_read_file_command() -> None:
-    action = RuleBasedIntentRouter().route("/查看 outline/大纲.md", "S2")
-
-    assert action.action_type == "call_tool"
-    assert action.command == "/查看"
-    assert action.tool_name == "safe_read_file"
-    assert action.arguments == {"path": "outline/大纲.md"}
-
-
 def test_router_classifies_search_command() -> None:
     action = RuleBasedIntentRouter().route("/搜索 玉簪", "S2")
 

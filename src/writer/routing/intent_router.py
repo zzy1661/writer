@@ -90,16 +90,6 @@ class RuleBasedIntentRouter:
 
         text = user_input.strip()
 
-        if text.startswith("/查看"):
-            path = _command_argument(text, "/查看") or "."
-            tool_name = "safe_list_dir" if path in {".", "./"} or path.endswith("/") else "safe_read_file"
-            return AgentAction(
-                action_type="call_tool",
-                command="/查看",
-                role="story_consultant",
-                tool_name=tool_name,
-                arguments={"path": path},
-            )
         if text.startswith("/搜索"):
             query = _command_argument(text, "/搜索")
             return AgentAction(
