@@ -71,13 +71,6 @@ COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
     "/init": {ProjectState.UNINITIALIZED},
     "/创作": {ProjectState.HAS_TOC, ProjectState.WRITING},
     "/审核": {ProjectState.WRITING, ProjectState.FINISHED},
-    "/搜索": {
-        ProjectState.INITIALIZED,
-        ProjectState.HAS_OUTLINE,
-        ProjectState.HAS_TOC,
-        ProjectState.WRITING,
-        ProjectState.FINISHED,
-    },
     "/字数统计": {
         ProjectState.INITIALIZED,
         ProjectState.HAS_OUTLINE,
@@ -94,7 +87,6 @@ COMMAND_HINTS: dict[str, str] = {
     ),
     "/创作": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
     "/审核": "请先写出至少一章正文。",
-    "/搜索": "请先执行 /init <项目名> 创建项目。",
     "/字数统计": "请先执行 /init <项目名> 创建项目。",
 }
 

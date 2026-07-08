@@ -107,9 +107,6 @@ def _normalize_action(action: AgentAction) -> AgentAction:
     elif action.tool_name in {"safe_read_file", "safe_list_dir"}:
         updates.setdefault("command", action.command or "")
         updates.setdefault("role", action.role or "story_consultant")
-    elif action.tool_name == "project_search":
-        updates.setdefault("command", action.command or "/搜索")
-        updates.setdefault("role", action.role or "story_consultant")
     elif action.tool_name == "wordcount":
         updates.setdefault("command", action.command or "/字数统计")
         updates.setdefault("role", action.role or "story_consultant")

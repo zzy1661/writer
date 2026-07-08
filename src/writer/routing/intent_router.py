@@ -90,15 +90,6 @@ class RuleBasedIntentRouter:
 
         text = user_input.strip()
 
-        if text.startswith("/搜索"):
-            query = _command_argument(text, "/搜索")
-            return AgentAction(
-                action_type="call_tool",
-                command="/搜索",
-                role="story_consultant",
-                tool_name="project_search",
-                arguments={"query": query, "path": "."},
-            )
         if text.startswith("/字数统计"):
             path = _command_argument(text, "/字数统计") or "."
             return AgentAction(
