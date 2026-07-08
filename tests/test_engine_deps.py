@@ -140,7 +140,9 @@ def test_production_deps_picks_history_consultant_for_genre_history(
     from writer.roles import HistoryConsultant
 
     root = _seed_genre(tmp_path, "历史")
-    deps = production_deps(_settings(with_key=False), project_root=root)
+    deps = production_deps(
+        _settings(with_key=False), project_root=root, genre="历史"
+    )
 
     assert isinstance(deps.story_consultant, HistoryConsultant)
 
@@ -151,7 +153,9 @@ def test_production_deps_picks_romance_consultant_for_genre_romance(
     from writer.roles import RomanceConsultant
 
     root = _seed_genre(tmp_path, "言情")
-    deps = production_deps(_settings(with_key=False), project_root=root)
+    deps = production_deps(
+        _settings(with_key=False), project_root=root, genre="言情"
+    )
 
     assert isinstance(deps.story_consultant, RomanceConsultant)
 
@@ -162,7 +166,9 @@ def test_production_deps_picks_xuanhuan_consultant_for_genre_xuanhuan(
     from writer.roles import XuanhuanConsultant
 
     root = _seed_genre(tmp_path, "玄幻")
-    deps = production_deps(_settings(with_key=False), project_root=root)
+    deps = production_deps(
+        _settings(with_key=False), project_root=root, genre="玄幻"
+    )
 
     assert isinstance(deps.story_consultant, XuanhuanConsultant)
 
@@ -181,7 +187,9 @@ def test_production_deps_falls_back_to_story_consultant_without_genre(
         "# novel\n\n## 当前状态\n\n- state: S1\n", encoding="utf-8"
     )
 
-    deps = production_deps(_settings(with_key=False), project_root=root)
+    deps = production_deps(
+        _settings(with_key=False), project_root=root, genre="other"
+    )
 
     assert isinstance(deps.story_consultant, StoryConsultant)
 
@@ -189,7 +197,9 @@ def test_production_deps_falls_back_to_story_consultant_without_genre(
 def test_production_deps_falls_back_when_project_root_is_none() -> None:
     from writer.roles import StoryConsultant
 
-    deps = production_deps(_settings(with_key=False), project_root=None)
+    deps = production_deps(
+        _settings(with_key=False), project_root=None, genre="other"
+    )
 
     assert isinstance(deps.story_consultant, StoryConsultant)
 
@@ -198,6 +208,8 @@ def test_production_deps_falls_back_for_unknown_genre_label(tmp_path: Path) -> N
     from writer.roles import StoryConsultant
 
     root = _seed_genre(tmp_path, "都市悬疑")
-    deps = production_deps(_settings(with_key=False), project_root=root)
+    deps = production_deps(
+        _settings(with_key=False), project_root=root, genre="都市悬疑"
+    )
 
     assert isinstance(deps.story_consultant, StoryConsultant)

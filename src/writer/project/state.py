@@ -315,7 +315,7 @@ def render_agent_file(
 
     When ``genre`` is a known genre (not ``"other"``), a ``题材: <genre>``
     line is included directly below the state line so downstream code
-    (``EngineSession._read_genre_from_agent``, ``production_deps`` etc.)
+    (``EngineSession.refresh_project_genre`` and CLI ``init_project``)
     can pick it up via simple regex. The default ``"other"`` skips the
     line to keep legacy ``AGENT.md`` content unchanged.
     """

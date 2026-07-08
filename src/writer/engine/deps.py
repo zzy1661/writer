@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 # Sentinel project_root used when no project is initialized (S0 path).
 # Tools that need file access will fail their safe_path check; tools that
-# don't (foreshadow_query, chapter_locate, wordcount) still work.
+# don't (foreshadow_search, chapter_locate, wordcount) still work.
 _NO_PROJECT_ROOT = Path("/__no_project__")
 
 
@@ -58,10 +58,9 @@ def _consultant_for_genre(
     """Pure factory — pick a Consultant subclass by canonical genre key.
 
     No filesystem IO. Falls back to :class:`StoryConsultant` for unknown,
-    empty, or ``"other"`` values. Used by both ``production_deps`` (via
-    :func:`_select_consultant`) and :meth:`writer.session.EngineSession
-    .set_project_root` (after :meth:`refresh_project_genre` has read the
-    AGENT.md ``题材:`` line).
+    empty, or ``"other"`` values. Used by both ``production_deps`` and
+    :meth:`writer.session.EngineSession.set_project_root` (after
+    :meth:`refresh_project_genre` has read the AGENT.md ``题材:`` line).
 
     Added 2026-07-07 to fix arch-optimizer M1: ``EngineSession`` needs
     to rebuild its consultant when the bound project changes genre,
@@ -71,31 +70,6 @@ def _consultant_for_genre(
     canonical = (genre or "").strip()
     consultant_cls = _GENRE_CONSULTANT.get(canonical, StoryConsultant)
     return consultant_cls(settings)
-
-
-def _select_consultant(
-    settings: Settings, project_root: Path | None
-) -> StoryConsultant:
-    """Pick a Consultant subclass based on the ``题材:`` line in AGENT.md.
-
-    Falls back to :class:`StoryConsultant` whenever ``project_root`` is
-    ``None``, the AGENT.md is missing, or the genre is unknown / "other".
-    Genre detection is intentionally a one-shot read at construction
-    time; mid-project genre changes are out of scope (per the
-    ``fea-genre-aware-init`` non-goals).
-
-    Note (2026-07-07): the IO lives here for backward compat with
-    ``production_deps`` callers that don't know the genre yet. New code
-    should call :func:`_consultant_for_genre` directly with an already-
-    read genre string (per M2 / sprint candidate).
-    """
-    if project_root is None:
-        return _consultant_for_genre(settings, "other")
-
-    from writer.project import read_genre_from_agent
-
-    raw_genre = read_genre_from_agent(project_root / "AGENT.md")
-    return _consultant_for_genre(settings, raw_genre)
 
 
 @runtime_checkable
@@ -251,8 +225,18 @@ def production_deps(
     *,
     project_root: Path | None = None,
     primary_router: IntentRouter | None = None,
+    genre: str = "other",
 ) -> EngineDeps:
     """Default dependency wiring used by the REPL and tests.
+
+    Pure factory: no filesystem IO behind the caller's back. The
+    ``genre`` argument MUST be supplied by the caller — the session
+    layer (``EngineSession.__post_init__``) and the CLI
+    (``init_project``) are the only two sites that know the project's
+    genre, and they read ``AGENT.md`` themselves before delegating
+    here. Defaults to ``"other"`` so the simple / S0 paths (tests that
+    only care about the deps surface, etc.) keep working without a
+    genre lookup.
 
     Tests can pass an explicit :class:`writer.config.Settings` to avoid
     the global settings lookup; production callers (REPL, CLI) leave it
@@ -263,11 +247,17 @@ def production_deps(
         project_root: Optional override for the tool runtime's root. When
             ``None`` (the S0 path), a sentinel root is used so
             ``safe_path`` still rejects escapes; path-free tools
-            (``foreshadow_query`` etc.) keep working.
+            (``foreshadow_search`` etc.) keep working.
         primary_router: Optional override for the rule router used as
             the primary in the ``CompositeRouter`` (when API key is
             set) or as the bare router (when not). Defaults to a fresh
             :class:`RuleBasedIntentRouter`. Added 2026-07-05 per M5.
+        genre: Canonical genre key for picking the Consultant subclass
+            (one of ``"历史" / "言情 / "玄幻"``, everything else
+            falls through to :class:`StoryConsultant`). Added 2026-07-08
+            to make ``production_deps`` a pure factory (M2 of the
+            genre-aware init sprint). Callers that have not yet read
+            ``AGENT.md`` should pass ``"other"``.
     """
 
     resolved = settings if settings is not None else get_settings()
@@ -290,7 +280,7 @@ def production_deps(
         )
     return _DefaultEngineDeps(
         router=_select_router(resolved, primary=primary_router),
-        story_consultant=_select_consultant(resolved, project_root),
+        story_consultant=_consultant_for_genre(resolved, genre),
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
         skill_registry=built_skill_registry(),

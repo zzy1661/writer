@@ -74,7 +74,15 @@ class EngineSession:
         if self.deps is None:
             from writer.engine.deps import production_deps
 
-            self.deps = production_deps(project_root=self.project_root)
+            if self.project_root is not None:
+                # Production-deps is now a pure factory (M2 2026-07-08) —
+                # it no longer reads AGENT.md behind the caller's back,
+                # so we refresh ``project_genre`` here and pass it down.
+                self.refresh_project_genre()
+            self.deps = production_deps(
+                project_root=self.project_root,
+                genre=self.project_genre,
+            )
 
     # ------------------------------------------------------------------
     # project_root + deps management

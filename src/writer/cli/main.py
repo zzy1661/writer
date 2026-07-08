@@ -572,7 +572,9 @@ def init_project(
     for path in workspace.created_files:
         console.print(f"  - {path}")
 
-    _maybe_apply_init_brief(workspace.root, brief=brief, skip_brief=skip_brief)
+    _maybe_apply_init_brief(
+        workspace.root, brief=brief, skip_brief=skip_brief, genre=resolved_genre
+    )
 
     console.print(
         "[dim]提示：在同一目录执行 `uv run writer` 进入 REPL 时会自动绑定此项目。[/dim]"
@@ -585,6 +587,7 @@ def _maybe_apply_init_brief(
     *,
     brief: str | None,
     skip_brief: bool,
+    genre: str,
 ) -> None:
     if skip_brief:
         return
@@ -602,7 +605,7 @@ def _maybe_apply_init_brief(
 
     load_project_settings(project_root)
     refresh_settings()
-    deps = production_deps(project_root=project_root)
+    deps = production_deps(project_root=project_root, genre=genre)
     result = apply_init_brief(project_root, user_brief.strip(), deps.story_consultant)
     console.print(f"[green]已写入 创意/核心创意.md[/green]（来源: {result.source}）")
     console.print("[green]已更新 AGENT.md 基本要求[/green]")

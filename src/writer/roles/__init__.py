@@ -23,8 +23,9 @@ Current roles:
 All four roles share the :class:`OutlineResult` shape, so callers
 (``EngineDeps.story_consultant``, ``cli outline``, ``/大纲`` engine
 loop) only depend on the parent contract — the concrete subclass is
-selected by ``production_deps`` based on the project's ``AGENT.md``
-``题材:`` line.
+selected by the caller of ``production_deps`` (typically
+``EngineSession.__post_init__``) based on a genre string read from
+the project's ``AGENT.md`` ``题材:`` line.
 """
 
 from writer.roles.history_consultant import HistoryConsultant
