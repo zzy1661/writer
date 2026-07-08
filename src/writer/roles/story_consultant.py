@@ -11,6 +11,14 @@ When an API key is configured, the default consultant asks the configured
 LLM for a structured outline. Without a key (or if the provider fails), it
 falls back to the deterministic four-act outline so the CLI remains usable
 offline.
+
+Genre dispatch lives on the ``GENRE`` class attribute. Subclasses
+(``HistoryConsultant`` / ``RomanceConsultant`` / ``XuanhuanConsultant``)
+override ``GENRE`` only; the parent's
+:meth:`StoryConsultant._draft_outline_with_llm` looks the prompt up via
+``self._prompt_registry.require(PromptKey(role="outline", genre=self.GENRE))``
+so each genre gets the matching identity fragment without re-implementing
+the dispatch logic.
 """
 
 from __future__ import annotations
@@ -18,19 +26,24 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import ClassVar
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from writer.config import Settings
 from writer.llm import get_llm
 from writer.llm.structured import invoke_structured_json
 from writer.project.ideas import (
-    OUTLINE_SYSTEM_PROMPT,
     IdeasContext,
     build_outline_user_message,
     load_ideas_context,
+)
+from writer.prompts import (
+    FALLBACK_OUTLINE_CHAPTERS,
+    PromptKey,
+    PromptRegistry,
+    builtin_prompt_registry,
 )
 
 log = logging.getLogger(__name__)
@@ -80,16 +93,27 @@ class InitBriefResult:
 
 
 class StoryConsultant:
-    """Screenwriting consultant — drafts four-act outlines from a premise."""
+    """Screenwriting consultant — drafts four-act outlines from a premise.
+
+    Subclasses set ``GENRE`` to dispatch the prompt lookup
+    (e.g. ``HistoryConsultant.GENRE = "历史"``). The parent's
+    ``_draft_outline_with_llm`` looks up
+    ``PromptKey(role="outline", genre=self.GENRE)`` so a single
+    implementation drives all four genres.
+    """
+
+    GENRE: ClassVar[str] = "other"
 
     def __init__(
         self,
         settings: Settings,
         *,
         llm: BaseChatModel | None = None,
+        prompt_registry: PromptRegistry | None = None,
     ) -> None:
         self._settings = settings
         self._llm = llm
+        self._prompt_registry = prompt_registry or builtin_prompt_registry()
 
     def draft_outline(
         self,
@@ -148,26 +172,9 @@ class StoryConsultant:
 
     def _process_init_brief_with_llm(self, brief: str) -> InitBriefResult:
         llm = self._llm or get_llm(self._settings)
-        payload = invoke_structured_json(
-            llm,
-            [
-                SystemMessage(
-                    content=(
-                        "你是长篇中文网文的编剧顾问。用户刚创建小说项目，"
-                        "请从自然语言描述中提炼核心创意与写作基本要求。"
-                    )
-                ),
-                HumanMessage(
-                    content=(
-                        f"用户描述:\n{brief}\n"
-                        "请返回 JSON: core_idea 为 Markdown 格式的核心创意扩写"
-                        "（含标题、故事核、主角目标、核心冲突）; requirements 为"
-                        "项目基本要求清单（Markdown 列表，含篇幅、风格、禁忌等）。"
-                    )
-                ),
-            ],
-            _InitBriefPayload,
-        )
+        bundle = self._prompt_registry.require(PromptKey(role="init_brief"))
+        messages = bundle.template.format_messages(brief=brief)
+        payload = invoke_structured_json(llm, messages, _InitBriefPayload)
         core = payload.core_idea.strip()
         reqs = payload.requirements.strip()
         if not core.startswith("#"):
@@ -184,33 +191,27 @@ class StoryConsultant:
             premise = ideas.core_idea
         title = self._build_working_title(premise)
 
+        chapters = FALLBACK_OUTLINE_CHAPTERS.get(
+            self.GENRE, FALLBACK_OUTLINE_CHAPTERS["other"]
+        )
         return OutlineResult(
             title=title,
             premise=premise,
-            chapters=[
-                "第一幕：主角处境与核心欲望",
-                "第二幕：进入新世界并遭遇主要阻力",
-                "第三幕：代价升级，关系与秘密浮出水面",
-                "第四幕：失败后的反击与终局选择",
-            ],
+            chapters=chapters,
             source="fallback",
         )
 
     def _draft_outline_with_llm(self, idea: str, ideas: IdeasContext) -> OutlineResult:
         llm = self._llm or get_llm(self._settings)
-        payload = invoke_structured_json(
-            llm,
-            [
-                SystemMessage(content=OUTLINE_SYSTEM_PROMPT),
-                HumanMessage(
-                    content=build_outline_user_message(
-                        user_instruction=idea,
-                        ideas=ideas,
-                    )
-                ),
-            ],
-            _OutlinePayload,
+        bundle = self._prompt_registry.require(
+            PromptKey(role="outline", genre=self.GENRE)
         )
+        user_message = build_outline_user_message(
+            user_instruction=idea,
+            ideas=ideas,
+        )
+        messages = bundle.template.format_messages(user_message=user_message)
+        payload = invoke_structured_json(llm, messages, _OutlinePayload)
         chapters = [chapter.strip() for chapter in payload.chapters if chapter.strip()]
         if len(chapters) < 4:
             msg = "LLM 大纲章节少于 4 条"
@@ -246,25 +247,9 @@ class StoryConsultant:
 
     def _draft_toc_with_llm(self, outline_text: str) -> TocResult:
         llm = self._llm or get_llm(self._settings)
-        payload = invoke_structured_json(
-            llm,
-            [
-                SystemMessage(
-                    content=(
-                        "你是长篇中文网文的编剧顾问。你的任务是基于已有大纲，"
-                        "生成可执行的章节目录，而不是正文。"
-                    )
-                ),
-                HumanMessage(
-                    content=(
-                        f"大纲:\n{outline_text}\n"
-                        "请返回目录 JSON: title 为书名或工作名; chapters 为 8 到 24 条"
-                        "章节标题，按故事顺序排列，每条需体现冲突或推进。"
-                    )
-                ),
-            ],
-            _TocPayload,
-        )
+        bundle = self._prompt_registry.require(PromptKey(role="toc"))
+        messages = bundle.template.format_messages(outline_text=outline_text)
+        payload = invoke_structured_json(llm, messages, _TocPayload)
         chapters = [chapter.strip() for chapter in payload.chapters if chapter.strip()]
         if len(chapters) < 4:
             msg = "LLM 目录章节少于 4 条"

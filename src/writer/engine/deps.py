@@ -34,6 +34,7 @@ from writer.workflows import WORKFLOWS, WorkflowStub
 
 if TYPE_CHECKING:
     from writer.engine.context import EngineContext
+    from writer.llm.agent import LLMToolLoop
 
 # Sentinel project_root used when no project is initialized (S0 path).
 # Tools that need file access will fail their safe_path check; tools that
@@ -111,6 +112,11 @@ class EngineDeps(Protocol):
       resolving tool names to implementations (per 备忘 13).
     * :attr:`tool_runtime` — :class:`writer.tools.ToolRuntime` carrying
       per-session guards handed to every tool invocation.
+    * :attr:`tool_loop` — optional ReAct-style LLM tool loop. ``None``
+      in rule-only deployments (no API key) so the engine still works
+      via ``_run_tool`` with zero LLM calls; populated when the API
+      key is configured. Forward-referenced as a string to keep the
+      engine package free of direct ``writer.llm.*`` imports.
 
     Future expansion points (intentionally not declared yet):
     * ``workflow_starter``: richer async workflow entrypoint
@@ -124,6 +130,7 @@ class EngineDeps(Protocol):
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     skill_registry: SkillRegistry
+    tool_loop: LLMToolLoop | None
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
         ...
@@ -185,6 +192,7 @@ class _DefaultEngineDeps:
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     skill_registry: SkillRegistry
+    tool_loop: LLMToolLoop | None = None
     _workflows: dict[str, WorkflowStub] = field(default_factory=dict)
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -264,12 +272,29 @@ def production_deps(
 
     resolved = settings if settings is not None else get_settings()
     root = (project_root or _NO_PROJECT_ROOT).resolve()
+    tool_registry = built_tool_registry()
+    tool_runtime = ToolRuntime(project_root=root)
+    tool_loop: LLMToolLoop | None = None
+    if resolved.has_api_key:
+        # Lazy import so rule-only deployments (no API key) never load
+        # the LLM client stack — and so the engine package keeps no
+        # runtime dependency on ``writer.llm.agent``. The forward
+        # reference in :class:`EngineDeps.tool_loop` keeps mypy happy
+        # without importing the module at type-check time either.
+        from writer.llm.agent import LLMToolLoop
+
+        tool_loop = LLMToolLoop(
+            settings=resolved,
+            registry=tool_registry,
+            runtime=tool_runtime,
+        )
     return _DefaultEngineDeps(
         router=_select_router(resolved, primary=primary_router),
         story_consultant=_select_consultant(resolved, project_root),
-        tool_registry=built_tool_registry(),
-        tool_runtime=ToolRuntime(project_root=root),
+        tool_registry=tool_registry,
+        tool_runtime=tool_runtime,
         skill_registry=built_skill_registry(),
+        tool_loop=tool_loop,
         _workflows=dict(WORKFLOWS),
     )
 

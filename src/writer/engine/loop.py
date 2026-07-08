@@ -170,8 +170,21 @@ async def _engine_loop(
                     )
 
             case "call_tool":
-                async for event in _run_tool(action, deps, cfg):  # type: ignore[assignment]
-                    yield event
+                if deps.tool_loop is not None:
+                    # LLM-driven multi-step tool loop (ReAct-style).
+                    # The loop observes ``ToolResult`` events and may
+                    # continue calling tools until the model emits
+                    # ``answer_directly`` or the budget runs out. Rule-only
+                    # deployments (no API key) keep ``tool_loop = None``
+                    # and fall through to the synchronous ``_run_tool``
+                    # path — zero LLM cost for the common case.
+                    async for event in _run_tool_loop(  # type: ignore[assignment]
+                        action, ctx, deps, cfg
+                    ):
+                        yield event
+                else:
+                    async for event in _run_tool(action, deps, cfg):  # type: ignore[assignment]
+                        yield event
 
             case "start_workflow":
                 async for event in _run_workflow(action.workflow or "", ctx, deps, cfg):
@@ -384,6 +397,37 @@ async def _run_tool(
         reason="tool_completed",
         payload={"tool": name, "output": result.output},
     )
+
+
+async def _run_tool_loop(
+    action: AgentAction,
+    ctx: EngineContext,
+    deps: EngineDeps,
+    cfg: EngineConfig,
+) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
+    """Delegate to :class:`writer.llm.agent.LLMToolLoop` for multi-step calls.
+
+    Pre-condition: ``deps.tool_loop is not None`` (the engine's
+    ``case "call_tool"`` branch only routes here when that's true).
+
+    ``ToolError`` raised by the loop propagates upward so the outer
+    ``_engine_loop`` ``except ToolError`` arm produces the same
+    ``ErrorEvent + Done(aborted)`` UX as the synchronous ``_run_tool``
+    path — no exception-swallowing at this seam.
+    """
+
+    if deps.tool_loop is None:
+        # Defensive: should never reach here given the engine's
+        # ``case "call_tool"`` guard, but a clearly-worded error keeps
+        # the contract obvious to anyone touching this later.
+        msg = "_run_tool_loop called without deps.tool_loop"
+        raise RuntimeError(msg)
+    if not cfg.fast_mode:
+        yield _log(
+            f"[engine] 进入 LLM 工具循环(action={action.action_type})\n", cfg
+        )
+    async for event in deps.tool_loop.run(action, ctx, deps, cfg):
+        yield event
 
 
 async def _run_workflow(

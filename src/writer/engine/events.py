@@ -22,6 +22,7 @@ DoneReason = Literal[
     "ask_user",
     "aborted",
     "tool_completed",
+    "tool_loop_completed",
 ]
 
 

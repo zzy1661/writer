@@ -288,6 +288,9 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
                 project_root=Path("/__no_project__").resolve()
             )
             self.skill_registry = built_skill_registry()
+            # Required by the :class:`EngineDeps` Protocol since the
+            # 2026-07-08 LLM tool-loop addition (``deps.tool_loop``).
+            self.tool_loop = None
 
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)

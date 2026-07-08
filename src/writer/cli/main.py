@@ -291,6 +291,20 @@ async def _run_engine(
                         description = ""
                     label = f"{state_value}（{description}）" if description else state_value
                     console.print(f"[yellow]当前状态: {label}[/yellow]")
+                # Per LLM tool-loop addition (2026-07-08): when the LLM
+                # tool loop hits its ``MAX_LOOP_STEPS`` budget the engine
+                # yields ``Done(tool_loop_completed)`` with a payload
+                # carrying how many calls ran and the last tool output.
+                # Surface those so the user knows the loop exhausted its
+                # budget and has the data they need to ask a narrower
+                # follow-up.
+                if r == "tool_loop_completed" and payload is not None:
+                    calls = payload.get("tool_calls_made", 0)
+                    last = str(payload.get("last_output", ""))
+                    tail = last if len(last) <= 200 else last[:200] + "..."
+                    console.print(
+                        f"[dim]LLM 工具循环已结束（{calls} 次调用）；最近结果: {tail}[/dim]"
+                    )
                 session.record_turn(user_input, r)
                 session.clear_pending_interrupt()
             case ErrorEvent(message=m):

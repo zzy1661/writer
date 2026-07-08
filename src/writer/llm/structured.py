@@ -14,10 +14,11 @@ import re
 from collections.abc import Sequence
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage
 from pydantic import BaseModel, ValidationError
 
 from writer.config import Settings
+from writer.prompts.shared import json_contract_message as _json_contract_message
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
@@ -53,16 +54,6 @@ def invoke_structured_json[ModelT: BaseModel](
     except ValidationError as exc:
         msg = f"LLM JSON 未通过 {schema.__name__} 校验: {exc}"
         raise StructuredOutputError(msg) from exc
-
-
-def _json_contract_message(schema: type[BaseModel]) -> SystemMessage:
-    schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
-    return SystemMessage(
-        content=(
-            "你必须只输出一个合法 JSON 对象，不要输出 Markdown、解释、代码围栏或额外文本。\n"
-            f"JSON 必须符合这个 Pydantic schema: {schema_json}"
-        )
-    )
 
 
 def _message_content_to_text(content: object) -> str:

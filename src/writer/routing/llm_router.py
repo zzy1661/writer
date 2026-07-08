@@ -8,6 +8,10 @@ action; the engine loop handles execution.
 The constructor takes :class:`writer.config.Settings` and builds its own
 LLM via :func:`writer.llm.get_llm`. Tests inject a fake ``llm`` via the
 secondary constructor argument ``llm=...``.
+
+The prompt template lives in :mod:`writer.prompts.router`; the legacy
+``COMMAND_AGENT_PROMPT`` name is preserved as a re-export so existing
+callers and tests can keep using it.
 """
 
 from __future__ import annotations
@@ -15,7 +19,6 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import Runnable
 
 from writer.config import Settings
@@ -24,31 +27,12 @@ from writer.llm.structured import (
     invoke_structured_json,
     needs_json_prompt_structured_output,
 )
+from writer.prompts.router import COMMAND_AGENT_TEMPLATE
 from writer.routing.intent_router import AgentAction, IntentRouter
 
-COMMAND_AGENT_PROMPT = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            (
-                "你是 Writer Agent 的前台调度 Agent。\n"
-                "职责:把用户输入转成 AgentAction,不要直接动手。\n"
-                "边界:\n"
-                "- 不直接写文件。\n"
-                "- 不直接生成整章正文。\n"
-                "- 不直接修改 AGENT.md。\n"
-                "- 长任务(整章写作、章节审核) → start_workflow。\n"
-                "- 轻量查询(伏笔、字数、定位) → call_tool。\n"
-                "- 信息不足 → ask_user。\n"
-                "- 明确命令或闲聊 → answer_directly。\n"
-            ),
-        ),
-        (
-            "human",
-            "项目状态: {project_state}\n用户输入: {user_input}\n",
-        ),
-    ]
-)
+# Backward-compatible alias — earlier code imported COMMAND_AGENT_PROMPT
+# from this module. The template now lives in writer.prompts.router.
+COMMAND_AGENT_PROMPT = COMMAND_AGENT_TEMPLATE
 
 
 class LlmIntentRouter(IntentRouter):

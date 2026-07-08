@@ -1,51 +1,30 @@
 """History Consultant — a StoryConsultant specialized for historical fiction.
 
-Outputs an outline shaped like "narrative stage | 史实 anchor | 虚构 note".
-The chapter prefixes follow the convention documented in
-``fea-genre-aware-init/proposal.md`` so downstream ``/目录`` and ``/创作``
-can pattern-match on ``史实:`` / ``虚构:`` markers.
+Dispatches ``PromptKey(role="outline", genre="历史")`` through the parent
+:class:`writer.roles.StoryConsultant`, which fetches the history-aware
+system prompt from the centralised
+:mod:`writer.prompts.registry`. When the LLM is unavailable, the parent
+falls back to :data:`writer.prompts.FALLBACK_OUTLINE_CHAPTERS['历史']`
+— a five-stage outline with the ``史实:`` / ``虚构:`` markers that
+downstream ``/目录`` and ``/创作`` pattern-match on.
 
-Like the parent :class:`writer.roles.StoryConsultant`, this is a
-deterministic MVP — no network — so the CLI can be exercised end-to-end
-without an LLM. The class shape mirrors ``StoryConsultant`` so it can
+The class shape mirrors :class:`writer.roles.StoryConsultant` so it can
 slot into ``EngineDeps.story_consultant`` without ceremony.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from writer.config import Settings
-from writer.roles.story_consultant import OutlineResult, StoryConsultant
+from writer.roles.story_consultant import StoryConsultant
 
 
 class HistoryConsultant(StoryConsultant):
     """Outline consultant for historical fiction (历史 / 架空历史)."""
 
+    GENRE = "历史"
+
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
-
-    def draft_outline(
-        self,
-        idea: str,
-        *,
-        project_root: Path | None = None,
-    ) -> OutlineResult:
-        del project_root
-        normalized_idea = idea.strip()
-        title = self._build_working_title(normalized_idea)
-
-        return OutlineResult(
-            title=title,
-            premise=normalized_idea,
-            chapters=[
-                "前期铺垫: 史实: 朝代/年份与主角出身背景 | 虚构: 主角穿越或登场理由",
-                "第一转折: 史实: 重大历史事件锚点（元年/事变）| 虚构: 主角抉择如何介入",
-                "中盘深化: 史实: 派系/制度/地理细节 | 虚构: 主角隐藏身份的副作用",
-                "代价升级: 史实: 真实人物与权力交锋 | 虚构: 主角承担的风险与代价",
-                "终局落幕: 史实: 历史已知的结局 | 虚构: 主角的解释与后续命运",
-            ],
-        )
 
 
 __all__ = ["HistoryConsultant"]

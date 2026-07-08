@@ -5,6 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+# Re-export the outline system prompt from the centralised prompts
+# module so callers that previously did
+# ``from writer.project.ideas import OUTLINE_SYSTEM_PROMPT`` keep
+# working without modification. The local file stays focused on
+# project-layer concerns (filesystem layout, IdeasContext assembly).
+from writer.prompts.consultants import OUTLINE_TEMPLATE_STORY
+
 CORE_IDEA_FILENAME = "核心创意.md"
 _SKIP_FILENAMES = frozenset({CORE_IDEA_FILENAME, "README.md"})
 _TEXT_SUFFIXES = frozenset({".md", ".txt"})
@@ -89,11 +96,7 @@ def build_outline_user_message(*, user_instruction: str, ideas: IdeasContext) ->
     return "\n".join(sections)
 
 
-OUTLINE_SYSTEM_PROMPT = (
-    "你是长篇中文网文的编剧顾问。你的任务是基于项目的核心创意（及辅助素材），"
-    "生成可落地的大纲种子，而不是正文。"
-    "若提供了核心创意，大纲必须以其为叙事中心展开。"
-)
+OUTLINE_SYSTEM_PROMPT = OUTLINE_TEMPLATE_STORY
 
 
 __all__ = [

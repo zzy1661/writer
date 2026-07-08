@@ -8,10 +8,16 @@ raises ``ToolNotFoundError`` on lookup miss.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from writer.tools.errors import ToolNotFoundError
+from writer.tools.langchain_bridge import _build_args_schema
 from writer.tools.protocol import Tool, ToolResult
 from writer.tools.runtime import ToolRuntime
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 
 class ToolRegistry:
@@ -58,6 +64,27 @@ class ToolRegistry:
     def __contains__(self, name: object) -> bool:
         return isinstance(name, str) and name in self._tools
 
+    def describe(self) -> list[ToolDescriptor]:
+        """Return a snapshot of every registered tool's metadata.
+
+        Added 2026-07-08 for the LLM-driven tool loop: ``LLMToolLoop``
+        needs a deterministic, registry-side view of which tools exist
+        and what arguments they accept, without re-running the bridge
+        (which captures ``runtime`` in a closure). The args schema is
+        derived through the same ``_build_args_schema`` helper used by
+        :func:`writer.tools.langchain_bridge.to_langchain_tools` so the
+        two stay in sync.
+        """
+
+        return [
+            ToolDescriptor(
+                name=tool.name,
+                description=tool.description,
+                args_schema=_build_args_schema(tool),
+            )
+            for tool in self._tools.values()
+        ]
+
     def invoke(
         self, name: str, runtime: ToolRuntime, /, **kwargs: object
     ) -> ToolResult:
@@ -70,4 +97,20 @@ class ToolRegistry:
         return self.get(name).run(runtime, **kwargs)
 
 
-__all__ = ["ToolRegistry"]
+@dataclass(frozen=True)
+class ToolDescriptor:
+    """Public-facing snapshot of a tool's metadata.
+
+    Used by :meth:`ToolRegistry.describe` to feed the LLM-driven tool
+    loop. ``args_schema`` is the same Pydantic model that
+    :func:`writer.tools.langchain_bridge.to_langchain_tools` would
+    attach to the LangChain wrapper, so the schema's field names,
+    defaults, and types match what the loop eventually invokes.
+    """
+
+    name: str
+    description: str
+    args_schema: type[BaseModel] | None
+
+
+__all__ = ["ToolDescriptor", "ToolRegistry"]

@@ -61,6 +61,25 @@ class _JsonOnlyChat:
         )
 
 
+class _CallToolJsonChat:
+    """Fake ChatModel that always emits a ``call_tool`` JSON payload.
+
+    Used to exercise :func:`writer.routing.llm_router._normalize_action`
+    against a ``project_search`` invocation — the function should fill
+    in ``command="/搜索"`` and ``role="story_consultant"`` because the
+    model often omits them in its JSON.
+    """
+
+    def invoke(self, messages: object) -> AIMessage:
+        self.messages = messages
+        return AIMessage(
+            content=(
+                '{"action_type":"call_tool","tool_name":"project_search",'
+                '"arguments":{"query":"玉佩","path":"."}}'
+            )
+        )
+
+
 # ---------------------------------------------------------------------------
 # LlmIntentRouter
 # ---------------------------------------------------------------------------
@@ -101,6 +120,34 @@ def test_llm_router_uses_json_prompt_for_deepseek_compatible_output() -> None:
     assert action.command == "/创作"
     assert action.role == "story_consultant"
     assert action.workflow == "write_chapter"
+
+
+def test_llm_router_emits_call_tool_for_project_search() -> None:
+    """LLM JSON ``call_tool`` payload must be normalized to command + role.
+
+    Added 2026-07-08 for the LLM tool-loop change: the loop relies on
+    every ``call_tool`` action carrying the canonical slash command +
+    role so the engine's case-``call_tool`` dispatcher can fall back
+    to the synchronous ``_run_tool`` path on rule-only deployments
+    without losing the command metadata.
+    """
+    settings = Settings(
+        model="deepseek-v4-pro",
+        api_key=None,
+        base_url="https://api.deepseek.com",
+        temperature=0.0,
+    )
+    router = LlmIntentRouter(settings, llm=_CallToolJsonChat())  # type: ignore[arg-type]
+
+    action = router.route("玉佩出现在哪里", "S3")
+
+    assert action.action_type == "call_tool"
+    assert action.tool_name == "project_search"
+    # ``_normalize_action`` should backfill these from the tool_name
+    # because LLMs typically omit them in the JSON payload.
+    assert action.command == "/搜索"
+    assert action.role == "story_consultant"
+    assert action.arguments == {"query": "玉佩", "path": "."}
 
 
 def test_llm_router_falls_back_on_validation_error() -> None:
