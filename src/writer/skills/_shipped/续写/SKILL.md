@@ -26,7 +26,7 @@ requires_states: [WRITING]
 1. 用 `safe_read_file` 读取最近一篇草稿的当前内容。
 2. 调 `story_consultant.continue_chapter(...)` 拿到续写文本（参数：前文 + 当前章节大纲 + 角色 + 文风）。
 3. 用 `safe_read_file` 在草稿末尾检测 marker（如 `<!-- CONTINUATION -->`）或章节末尾标记。
-4. 调 `safe_write_file`（通过 Bash 调 `cat >> file.md` 或类似）追加续写文本。
+4. 调 `safe_write_file(path="manuscript/<current_chapter>.md", content=<续写段落>, mode="append")` 在当前草稿末尾追加续写文本。若新内容含章节完结标记（`<!-- CONTINUATION END -->`），改调 `mode="create"` 新建下一章文件。
 5. 更新 `chapter_summaries.json` 当前章节摘要。
 6. yield `TextChunk` 流式输出新增段落。
 7. yield `Done(reason="answered", payload={"chapter": <current>, "appended_chars": N})`。

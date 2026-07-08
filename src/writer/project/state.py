@@ -63,6 +63,13 @@ _MANUSCRIPT_DIRS = (
     Path("正文"),
 )
 
+#: Header for the state block inside ``AGENT.md``. Exposed so write tools
+#: (e.g. :class:`writer.tools.builtin.file_tools.SafeWriteFile`) can
+#: sanity-check that ``AGENT.md`` writes preserve the project's required
+#: structure without hard-coding the literal in two places
+#: (per ``chg-add-write-edit-glob`` D4).
+CURRENT_STATE_SECTION_HEADER = "## 当前状态"
+
 COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
     # NOTE: /大纲, /目录, /续写, /改 are intentionally absent — they are
     # Skill-backed commands whose availability is derived from the
@@ -309,7 +316,7 @@ def render_agent_file(
         "\n",
         "Writer Agent 项目状态文件。\n",
         "\n",
-        "## 当前状态\n",
+        f"{CURRENT_STATE_SECTION_HEADER}\n",
         "\n",
         f"- state: {state.value}\n",
         f"- label: {STATE_DESCRIPTIONS[state]}\n",

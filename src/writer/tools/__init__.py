@@ -17,8 +17,11 @@ from writer.tools.builtin import (
     ChapterLocate,
     ForeshadowSearch,
     ProjectSearch,
+    SafeEditFile,
+    SafeGlob,
     SafeListDir,
     SafeReadFile,
+    SafeWriteFile,
     Wordcount,
     built_tool_registry,
 )
@@ -33,14 +36,18 @@ from writer.tools.errors import (
 from writer.tools.langchain_bridge import to_langchain_tools
 from writer.tools.protocol import Tool, ToolResult
 from writer.tools.registry import ToolRegistry
-from writer.tools.runtime import ToolRuntime
+from writer.tools.runtime import DEFAULT_WRITE_WHITELIST, ToolRuntime
 
 __all__ = [
     "ChapterLocate",
+    "DEFAULT_WRITE_WHITELIST",
     "ForeshadowSearch",
     "ProjectSearch",
+    "SafeEditFile",
+    "SafeGlob",
     "SafeListDir",
     "SafeReadFile",
+    "SafeWriteFile",
     "Tool",
     "ToolDeniedError",
     "ToolError",

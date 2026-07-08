@@ -27,8 +27,9 @@ requires_states: [WRITING]
 2. 用 `safe_read_file` 读取 `outline/toc.md` 该章节的大纲摘要。
 3. 调 `story_consultant.revise_chapter(chapter_text, edit_instruction, project_root=ctx.project_root)` 拿到修订后文本或 diff。
 4. 根据用户偏好（默认 in-place rewrite）：
-   - in-place：用 `safe_write_file` 覆盖章节文件
-   - diff：写入 `manuscript/chapter-<chapter_id>.diff.md`
+   - in-place：先用 `safe_edit_file(old_string=<原段>, new_string=<新段>, dry_run=True)` 让用户在 TextChunk 里预览 diff；用户确认后改 `dry_run=False` 落盘。
+   - 完全重写：用 `safe_write_file(path="manuscript/chapter-<chapter_id>.md", content=<新全文>, mode="overwrite")`。
+   - diff 旁路：写入 `manuscript/chapter-<chapter_id>.diff.md`（用户显式选择时）。
 5. 更新 `chapter_summaries.json` 当前章节摘要。
 6. yield `TextChunk` 显示变更摘要（前 N 字 + 后 N 字 + 修改点列表）。
 7. yield `Done(reason="answered", payload={"chapter": <id>, "diff_lines": N, "output_path": ...})`。

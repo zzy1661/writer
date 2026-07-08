@@ -16,17 +16,21 @@ from writer.tools import (
     ChapterLocate,
     ForeshadowSearch,
     ProjectSearch,
+    SafeEditFile,
+    SafeGlob,
     SafeListDir,
     SafeReadFile,
+    SafeWriteFile,
     ToolDeniedError,
     ToolNotADirectoryError,
     ToolNotFoundError,
+    ToolOutputTooLargeError,
     ToolRegistry,
     Wordcount,
     built_tool_registry,
     to_langchain_tools,
 )
-from writer.tools.runtime import ToolRuntime
+from writer.tools.runtime import DEFAULT_WRITE_WHITELIST, ToolRuntime
 
 # ---------------------------------------------------------------------------
 # Runtime / path safety (per 备忘 07)
@@ -221,6 +225,9 @@ def test_built_tool_registry_includes_core_tools() -> None:
     expected = {
         "safe_read_file",
         "safe_list_dir",
+        "safe_write_file",
+        "safe_edit_file",
+        "safe_glob",
         "wordcount",
         "project_search",
         "chapter_locate",
@@ -242,3 +249,355 @@ def test_langchain_bridge_returns_base_tools(tmp_path: Path) -> None:
     target.write_text("hello", encoding="utf-8")
     read_tool = next(t for t in base_tools if t.name == "safe_read_file")
     assert read_tool.invoke({"path": "premise.md"}) == "hello"
+
+
+# ---------------------------------------------------------------------------
+# SafeWriteFile (per chg-add-write-edit-glob D1-D4)
+# ---------------------------------------------------------------------------
+
+
+def _seed_manuscript(tmp_path: Path) -> tuple[ToolRuntime, Path]:
+    """Return a runtime whose project_root has a manuscript/ directory."""
+
+    (tmp_path / "manuscript").mkdir(parents=True, exist_ok=True)
+    return ToolRuntime(project_root=tmp_path), tmp_path / "manuscript"
+
+
+def test_safe_write_file_creates_new_file(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+
+    result = SafeWriteFile().run(runtime, path="manuscript/ch1.md", content="hello\n")
+
+    assert result.metadata["mode"] == "create"
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "hello\n"
+    assert "backup_path" not in result.metadata  # create has no prior file to back up
+
+
+def test_safe_write_file_create_mode_refuses_existing(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("original", encoding="utf-8")
+
+    with pytest.raises(ToolDeniedError):
+        SafeWriteFile().run(runtime, path="manuscript/ch1.md", content="new")
+
+    # Original file unchanged
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "original"
+
+
+def test_safe_write_file_overwrite_creates_backup(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("original", encoding="utf-8")
+
+    result = SafeWriteFile().run(
+        runtime, path="manuscript/ch1.md", content="new", mode="overwrite"
+    )
+
+    assert result.metadata["mode"] == "overwrite"
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "new"
+    backup = Path(result.metadata["backup_path"])
+    assert backup.exists()
+    assert backup.read_text(encoding="utf-8") == "original"
+
+
+def test_safe_write_file_overwrite_no_backup_when_disabled(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("original", encoding="utf-8")
+
+    result = SafeWriteFile().run(
+        runtime,
+        path="manuscript/ch1.md",
+        content="new",
+        mode="overwrite",
+        backup=False,
+    )
+
+    assert "backup_path" not in result.metadata
+    assert not list((tmp_path / ".writer" / "backups").rglob("ch1.md.*"))
+
+
+def test_safe_write_file_append_skips_backup_and_atomic(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("line1\n", encoding="utf-8")
+
+    result = SafeWriteFile().run(
+        runtime,
+        path="manuscript/ch1.md",
+        content="line2\n",
+        mode="append",
+    )
+
+    assert result.metadata["mode"] == "append"
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "line1\nline2\n"
+    assert "backup_path" not in result.metadata
+    # No tmp leftovers
+    assert not list((ms_dir).glob("ch1.md.tmp.*"))
+
+
+def test_safe_write_file_rejects_outside_whitelist(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+
+    with pytest.raises(ToolDeniedError):
+        SafeWriteFile().run(runtime, path="secrets/api_key.txt", content="x")
+
+    # Even an existing file outside whitelist stays untouched
+    outside = tmp_path.parent / "tmp_outside.txt"
+    outside.write_text("orig", encoding="utf-8")
+    try:
+        with pytest.raises(ToolDeniedError):
+            SafeWriteFile().run(runtime, path=str(outside), content="x")
+        assert outside.read_text(encoding="utf-8") == "orig"
+    finally:
+        outside.unlink(missing_ok=True)
+
+
+def test_safe_write_file_rejects_oversize_content(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path, max_file_size=10)
+    (tmp_path / "manuscript").mkdir()
+
+    with pytest.raises(ToolOutputTooLargeError):
+        SafeWriteFile().run(
+            runtime,
+            path="manuscript/big.md",
+            content="x" * 100,
+        )
+
+
+# ---------------------------------------------------------------------------
+# AGENT.md guard (per chg-add-write-edit-glob D4)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_write_file_rejects_agent_md_with_mode_create(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+
+    with pytest.raises(ToolDeniedError, match="AGENT.md"):
+        SafeWriteFile().run(
+            runtime,
+            path="AGENT.md",
+            content="# x\n\n## 当前状态\n\n- state: S0\n",
+            mode="create",
+        )
+
+
+def test_safe_write_file_rejects_agent_md_with_mode_append(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    (tmp_path / "AGENT.md").write_text(
+        "# x\n\n## 当前状态\n\n- state: S0\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ToolDeniedError, match="AGENT.md"):
+        SafeWriteFile().run(
+            runtime,
+            path="AGENT.md",
+            content="## 补丁\n",
+            mode="append",
+        )
+
+
+def test_safe_write_file_agent_md_must_have_current_state_section(
+    tmp_path: Path,
+) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    (tmp_path / "AGENT.md").write_text(
+        "# existing\n\n## 当前状态\n\n- state: S0\n", encoding="utf-8"
+    )
+
+    with pytest.raises(ToolDeniedError, match="## 当前状态"):
+        SafeWriteFile().run(
+            runtime,
+            path="AGENT.md",
+            content="# 全新内容（无状态段）\n",
+            mode="overwrite",
+        )
+
+
+def test_safe_write_file_agent_md_preserves_genre_when_missing(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    (tmp_path / "AGENT.md").write_text(
+        "# novel\n\n## 当前状态\n\n- state: S2\n- 题材: 历史\n\n## 其他\n",
+        encoding="utf-8",
+    )
+
+    result = SafeWriteFile().run(
+        runtime,
+        path="AGENT.md",
+        content="# novel\n\n## 当前状态\n\n- state: S3\n\n## 其他\n",
+        mode="overwrite",
+    )
+
+    assert result.metadata.get("genre_guard_triggered") is True
+    assert result.metadata.get("preserved_genre") == "历史"
+    new_content = (tmp_path / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 题材: 历史" in new_content
+
+
+# ---------------------------------------------------------------------------
+# SafeEditFile (per chg-add-write-edit-glob D5)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_edit_file_replaces_unique_match(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("hello world", encoding="utf-8")
+
+    result = SafeEditFile().run(
+        runtime,
+        path="manuscript/ch1.md",
+        old_string="world",
+        new_string="earth",
+    )
+
+    assert result.metadata["replace_count"] == 1
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "hello earth"
+
+
+def test_safe_edit_file_replace_all_when_multiple_matches(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("foo foo foo", encoding="utf-8")
+
+    result = SafeEditFile().run(
+        runtime,
+        path="manuscript/ch1.md",
+        old_string="foo",
+        new_string="bar",
+        replace_all=True,
+    )
+
+    assert result.metadata["replace_count"] == 3
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "bar bar bar"
+
+
+def test_safe_edit_file_raises_when_old_string_ambiguous(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("foo foo foo", encoding="utf-8")
+
+    with pytest.raises(ToolDeniedError, match="3"):
+        SafeEditFile().run(
+            runtime,
+            path="manuscript/ch1.md",
+            old_string="foo",
+            new_string="bar",
+            replace_all=False,
+        )
+
+
+def test_safe_edit_file_raises_when_old_string_missing(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("hello world", encoding="utf-8")
+
+    with pytest.raises(ToolDeniedError, match="未找到"):
+        SafeEditFile().run(
+            runtime,
+            path="manuscript/ch1.md",
+            old_string="missing",
+            new_string="new",
+        )
+
+
+def test_safe_edit_file_dry_run_returns_diff_no_write(tmp_path: Path) -> None:
+    runtime, ms_dir = _seed_manuscript(tmp_path)
+    (ms_dir / "ch1.md").write_text("hello world", encoding="utf-8")
+
+    result = SafeEditFile().run(
+        runtime,
+        path="manuscript/ch1.md",
+        old_string="world",
+        new_string="earth",
+        dry_run=True,
+    )
+
+    assert result.metadata["dry_run"] is True
+    assert result.metadata["diff"]  # non-empty unified diff
+    # File on disk unchanged
+    assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "hello world"
+
+
+# ---------------------------------------------------------------------------
+# SafeGlob (per chg-add-write-edit-glob D6)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_glob_matches_md_recursively(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text("a", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.md").write_text("b", encoding="utf-8")
+
+    runtime = ToolRuntime(project_root=tmp_path)
+    result = SafeGlob().run(runtime, pattern="**/*.md")
+
+    assert result.metadata["count"] == 2
+    assert set(result.metadata["paths"]) == {"a.md", "sub/b.md"}
+
+
+def test_safe_glob_top_level_only(tmp_path: Path) -> None:
+    (tmp_path / "a.md").write_text("a", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.md").write_text("b", encoding="utf-8")
+
+    runtime = ToolRuntime(project_root=tmp_path)
+    result = SafeGlob().run(runtime, pattern="*.md")
+
+    assert result.metadata["count"] == 1
+    assert result.metadata["paths"] == ["a.md"]
+
+
+def test_safe_glob_skips_hidden(tmp_path: Path) -> None:
+    (tmp_path / ".hidden").write_text("h", encoding="utf-8")
+    (tmp_path / "visible.md").write_text("v", encoding="utf-8")
+
+    runtime = ToolRuntime(project_root=tmp_path)
+    result = SafeGlob().run(runtime, pattern="*")
+
+    assert "visible.md" in result.metadata["paths"]
+    assert ".hidden" not in result.metadata["paths"]
+
+
+def test_safe_glob_sort_by_mtime_returns_newest_first(tmp_path: Path) -> None:
+    import os
+    import time
+
+    old = tmp_path / "manuscript" / "ch1.md"
+    new = tmp_path / "manuscript" / "ch2.md"
+    old.parent.mkdir()
+    old.write_text("old", encoding="utf-8")
+    new.write_text("new", encoding="utf-8")
+    # Force mtime difference (avoid filesystem timestamp granularity)
+    t = time.time()
+    os.utime(old, (t - 100, t - 100))
+    os.utime(new, (t, t))
+
+    runtime = ToolRuntime(project_root=tmp_path)
+    result = SafeGlob().run(
+        runtime, pattern="manuscript/*.md", sort_by="mtime"
+    )
+
+    assert result.metadata["paths"] == ["manuscript/ch2.md", "manuscript/ch1.md"]
+
+
+# ---------------------------------------------------------------------------
+# ToolRuntime.allowed_write_paths (per chg-add-write-edit-glob D7)
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_default_whitelist_when_none(tmp_path: Path) -> None:
+    runtime = ToolRuntime(project_root=tmp_path)
+    assert runtime.allowed_write_paths == DEFAULT_WRITE_WHITELIST
+
+
+def test_runtime_explicit_frozenset_preserved(tmp_path: Path) -> None:
+    runtime = ToolRuntime(
+        project_root=tmp_path, allowed_write_paths=frozenset({"custom"})
+    )
+    assert runtime.allowed_write_paths == frozenset({"custom"})
+
+
+def test_empty_whitelist_blocks_all_writes(tmp_path: Path) -> None:
+    runtime = ToolRuntime(
+        project_root=tmp_path, allowed_write_paths=frozenset()
+    )
+    (tmp_path / "manuscript").mkdir()
+
+    with pytest.raises(ToolDeniedError):
+        SafeWriteFile().run(
+            runtime, path="manuscript/x.md", content="y"
+        )
