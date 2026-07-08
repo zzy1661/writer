@@ -1,5 +1,9 @@
 # LangGraph 多阶段编排与子代理隔离
 
+> **2026-07-09 重要修订**:本文档原描述基于 LangGraph `StateGraph` 的章节写作主图(`plan_outline` → `write_chapter` → `proofread` → `history_check` → `review_gate`)。截至 2026-07-09,LangGraph **未实装**——`_DefaultEngineDeps.run_workflow` 是同步 stub,真实 LangGraph 图待 `EngineDeps.workflow_starter` 扩展点落地。本节保留作为设计稿,标记"待实现"。
+>
+> 当下章节写作的实际路径是:**SKILL.md directive(`/大纲 /目录 /续写 /改`)+ LLM 工具循环 + builtin Tool**——LLM 自由组合 `safe_read_file` / `safe_write_file` / `safe_list_dir` / `project_search` / `foreshadow_search` 完成"读、改、查"循环。`MAX_LOOP_STEPS=5` 的 `LLMToolLoop`(`src/writer/llm/agent.py`)提供 ReAct 风格的预算控制。
+
 ## 业务背景
 
 设计文档中同时存在两套概念:Planner、Outliner、Writer、Reviewer 是流程阶段,编剧顾问、历史顾问、校对是执行角色。写一章时需要编剧生成,再经校对、历史检查和综合审核。
@@ -8,7 +12,7 @@
 
 如果把阶段和角色混在一起,流程会变得难以扩展。例如历史顾问只在历史题材加载,但它不是一个固定阶段的替代品;校对只关心语言问题,不应看到全部创作上下文。多 Agent 共享上下文还会增加 token 浪费和角色越权风险。
 
-## 解决方案
+## 解决方案(设计稿,待 LangGraph 落地)
 
 使用 LangGraph 状态图表达阶段,用角色 prompt 表达执行身份:
 
@@ -19,6 +23,8 @@
 - `review_gate`:综合审核汇聚各报告并决定是否回流。
 
 状态图控制流转,角色模板控制 LLM 行为。不同节点只读取自己需要的 `ContextPack` 子集。
+
+> LangGraph 落地路径:`EngineDeps.workflow_starter: WorkflowStarter`(当前未声明,等扩展)→ `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator → 在 `_engine_loop` 的 `start_workflow` 分支接进来,替换现在的 sync `_run_workflow` stub。LangGraph 自带 `MemorySaver` / `SqliteSaver` checkpoint 与 `interrupt` 协议,无需重新发明。
 
 ## 最小 demo / 伪代码
 

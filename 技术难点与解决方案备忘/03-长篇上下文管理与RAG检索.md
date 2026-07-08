@@ -1,14 +1,22 @@
-# 长篇上下文管理与 RAG 检索
+# 长篇上下文管理与上下文拼装
 
-## 业务背景
+> **2026-07-08 重要修订**:本文档原标题《长篇上下文管理与 RAG 检索》描述的是基于 FAISS + BM25 + 中文嵌入的混合检索方案。该方案已经在 [OpenSpec `chg-remove-rag`](../../openspec/changes/archive/2026-07-08-chg-remove-rag/) 落地过程中**整体删除**(归档路径 `openspec/changes/archive/2026-07-08-chg-remove-rag/`)。
+>
+> 删除原因:placeholder `HashEmbeddings` 在真实查询下召回接近零;结构化 ledger + 章节摘要已经覆盖 RAG 原本要填补的检索场景。本文档**不再代表项目当前实现**,仅作为历史设计留档。
+>
+> 后续如要补"长篇上下文管理"专题,请基于 `engine/context.py::_build_canon_block` 重写,把"金字塔记忆 + 动态 top-up"换成"4 层文件拼装 + 上下文预算裁剪"。
+
+## 历史背景(留档)
+
+### 业务背景(原文)
 
 项目目标是辅助生成 20-50 万字长篇小说。章节越多,人物、伏笔、世界观、过往剧情越难一次性放入模型上下文,但写作又必须遵循全书正典。
 
-## 技术难点
+### 技术难点(原文)
 
 长篇写作的上下文既要全面,又要受 token 限制。只喂近几章会遗忘远期伏笔和人物弧光;全量喂正文会超预算、成本高、噪声大。不同节点的需求也不同:写正文需要前文节奏,校对需要当前正文,历史顾问需要史实索引。
 
-## 解决方案
+### 历史解决方案(原文,已废弃)
 
 采用 `prep_context` 前置节点,主节点不直接检索。上下文由静态骨架 + 动态 RAG top-up 组成:
 
@@ -19,83 +27,48 @@
 
 索引按项目隔离,FAISS 存向量索引,BM25 负责关键词补召回。
 
-## 最小 demo / 伪代码
+---
 
-```python
-from dataclasses import dataclass
+## 当前实现(2026-07-08 起)
 
+### 上下文拼装 4 层
 
-@dataclass
-class ContextPack:
-    chapter_id: str
-    canon: list[str]
-    personas: list[str]
-    world: list[str]
-    foreshadows: list[str]
-    summaries: list[str]
+`writer/engine/context.py::_build_canon_block` 现在只做**纯文件拼装**,不再依赖任何向量索引:
 
+| 层 | 来源 | 何时拼入 |
+| --- | --- | --- |
+| 1. 整篇 outline | `outline/大纲.md`(若存在) | 每次 context pack |
+| 2. 整篇 characters | `characters/*.md` 同表 | 每次 context pack |
+| 3. 章节摘要切片 | `chapter_summaries.json`(若存在) | 每次 context pack |
+| 4. 最近一章原文 | `manuscript/<latest>.md` | 每次 context pack |
 
-def prep_context(chapter_id: str, task: str) -> ContextPack:
-    canon = rag_query(index="canon", query=chapter_id, k=4)
-    personas = rag_query(index="personas", query=task, k=4)
-    world = rag_query(index="world", query=task, k=3)
-    foreshadows = rag_query(index="foreshadow", query=chapter_id, k=5)
-    summaries = load_pyramid_summaries(chapter_id)
+预算由调用方裁剪(LLM 工具循环注入 LLM 之前的预处理)。
 
-    # top-up:命中硬规则时强制补充完整资料,不依赖相似度排序。
-    if is_reveal_chapter(chapter_id):
-        foreshadows.extend(load_required_foreshadows(chapter_id))
+### 检索替代:grep + 伏笔 ledger
 
-    return trim_to_budget(
-        ContextPack(chapter_id, canon, personas, world, foreshadows, summaries),
-        budget_tokens=30_000,
-    )
-```
+- **`project_search`**(`writer/tools/builtin/analysis_tools.py`):Claude Code 风格的 Grep 模拟器,行级子串匹配,无嵌入、无向量兜底。覆盖"在项目目录中找关键词"的需求。
+- **`foreshadow_search`**(`writer/tools/builtin/foreshadow_tools.py`):结构化查询 `<project_root>/伏笔.yaml`,支持按 `id` / `tags` / `status` / `chapter_range` / `keyword` 多条件 AND 过滤。覆盖"伏笔召回"的检索需求。
 
-## 核心依赖版最小代码
+### S0 路径
 
-```python
-from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-import tiktoken
+未绑定项目时,`production_deps` 注入 sentinel `Path("/__no_project__")`。`project_search` 等路径工具会通过 `safe_path` 拒绝(走 `ToolDeniedError` → `Done(aborted)`);`foreshadow_search` 主动识别 sentinel 并返回友好提示(不走 abort),这是路径无关工具的预期行为。
 
+### LangChain 角色
 
-def split_chinese_markdown(text: str) -> list[Document]:
-    splitter = RecursiveCharacterTextSplitter(
-        separators=["\n## ", "\n### ", "\n\n", "。", "！", "？", "\n"],
-        chunk_size=800,
-        chunk_overlap=120,
-    )
-    return splitter.create_documents([text])
+LangChain 在 L4(LLM Provider)+ L3(LLM tool loop 桥接)仍然使用;`writer/tools/langchain_bridge.py::_build_args_schema` 复用 `inspect.signature + get_type_hints + pydantic.create_model` 给 builtin Tools 生成 LC `StructuredTool.args_schema`。`LLMToolLoop` (`src/writer/llm/agent.py`) 用 native `bind_tools` 或 JSON-prompt 路径消费工具列表。
 
+---
 
-def count_tokens(text: str, model: str = "gpt-4o-mini") -> int:
-    encoder = tiktoken.encoding_for_model(model)
-    return len(encoder.encode(text))
+## 与 OpenSpec 的一致性
 
+- 移除:`src/writer/rag.py` 整文件 + `pyproject.toml:28` `faiss-cpu>=1.8.0` 依赖
+- 重命名:`foreshadow_query(query: str)` → `foreshadow_search(id / tags / status / chapter_range / keyword)`
+- 主 Spec delta:`openspec/specs/foreshadow-ledger/spec.md` (NEW, 3 Requirements + 13 Scenarios)
+- 路由 + 引擎 spec delta:`openspec/specs/intent-routing/spec.md` L17-19、L33-35 + `openspec/specs/engine-loop/spec.md` L21-26、L72、L75-76
 
-def trim_blocks_to_budget(blocks: list[str], max_tokens: int) -> list[str]:
-    selected: list[str] = []
-    used = 0
-    for block in blocks:
-        cost = count_tokens(block)
-        if used + cost > max_tokens:
-            break
-        selected.append(block)
-        used += cost
-    return selected
-```
+## 后续 TODO(不在 chg-remove-rag 范围)
 
-## 落地建议
-
-- 新增 `ContextPack` 类型,包含 `system_block`、`canon_block`、`history_block`、`task_block`、`token_audit`。
-- `prep_context` 负责预算裁剪,主写作节点只读取 `state.context`。
-- 章节定稿后生成 `chapter_summaries.json`,不要把历史正文原文直接塞给模型。
-- 中文分块优先按标题、段落、句号、问号、叹号切分,避免硬切断语义。
-
-## 验收标准
-
-- 写第 30 章时仍能检索到第 3 章埋下的相关伏笔。
-- 上下文超预算时系统按固定顺序压缩,不会随机丢弃关键正典。
-- 每次上下文拼装都有 token 审计记录。
-- 主 Agent 节点不包含检索细节,便于后续替换 RAG 实现。
+- 章节定稿后写 `chapter_summaries.json` 的写入路径(目前只读)
+- `chapter_summaries.json` ↔ `伏笔.yaml` 交叉引用(决定 top-up 哪些条目)
+- LLM 工具循环预算从 `MAX_LOOP_STEPS=5` 提到按 token 动态计算
+- 真正的长上下文压缩(pyramid memory)何时启用,先观察章节数 / 摘要大小再决定

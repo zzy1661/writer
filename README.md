@@ -59,8 +59,11 @@ uv run writer
 | `writer new <书名>` | 创建新书项目（含 `.writer/`、`创意/`；创建前多选题材） |
 | REPL `/init <name>` | 在 REPL 内创建并绑定项目 |
 | REPL `/init <梗概>` | S1 已绑定项目时，写入 `创意/核心创意.md` 并更新 `AGENT.md` |
-| REPL `/大纲 <创意>` | 生成大纲并写入 `outline/大纲.md` |
-| REPL `/目录` | 基于已有大纲生成章节目录，写入 `outline/toc.md` |
+| REPL `/大纲 <创意>` | 生成大纲并写入 `outline/大纲.md`(SKILL.md directive) |
+| REPL `/目录` | 基于已有大纲生成章节目录，写入 `outline/toc.md`(SKILL.md directive) |
+| REPL `/续写` | 基于已有大纲和章节摘要继续写下一章正文(SKILL.md directive) |
+| REPL `/改` | 用 `safe_edit_file` 对项目内文件做精确字符串替换 + diff(SKILL.md directive) |
+| REPL `/字数统计` | 估算项目文件的字数（走 `wordcount` builtin Tool） |
 | REPL `/状态` | 查看 session、项目路径、当前状态（S0–S5） |
 
 REPL 启动时会自动绑定项目：当前目录含 `AGENT.md`，或只有一个含 `AGENT.md` 的子目录时生效。若目录下有多个项目，请 `cd` 进入具体项目后再启动 REPL。

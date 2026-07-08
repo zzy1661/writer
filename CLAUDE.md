@@ -61,36 +61,39 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 | 包                 | 职责                                                                                                                            | 关键文件                                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全；构造一个 `EngineSession` 跨 turn 复用                     | `cli/main.py`                                                              |
-| `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `pending_interrupt` / `turns` + 一次性构造的 `deps`               | `session/engine_session.py`                                                |
-| `writer.routing`   | L2 前台意图路由：**`IntentRouter` Protocol** + **`RuleBasedIntentRouter` MVP**；`AgentAction` 是路由的输出而非业务 agent 的属性 | `routing/intent_router.py`                                                 |
+| `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `project_genre` / `pending_interrupt` / `turns` + 一次性构造的 `deps` | `session/engine_session.py`                                                |
+| `writer.routing`   | L2 前台意图路由：**`IntentRouter` Protocol** + `RuleBasedIntentRouter`(MVP)/ `LlmIntentRouter`(LangChain structured output)/ `CompositeRouter`(rule-first + LLM fallback) | `routing/{intent_router,llm_router,composite_router}.py`                   |
 | `writer.engine`    | L2 状态机 + AsyncGenerator（events / context / deps / config / loop 五个模块）                                                  | `engine/{loop,deps,events,context,config}.py`                              |
-| `writer.roles`     | L3 子代理角色（当前只 `StoryConsultant`，含 `draft_outline()`）                                                                 | `roles/story_consultant.py`                                                |
-| `writer.workflows` | L3 长任务 stub（`write_chapter` / `review_chapter`）                                                                            | `workflows/{write,review}_chapter.py`                                      |
-| `writer.tools`     | L3 Tool 基础设施（Protocol + Registry + Runtime + langchain_bridge + 5 个 builtin）                                             | `tools/{protocol,registry,runtime,langchain_bridge}.py` + `tools/builtin/` |
-| `writer.skills`    | L3 技能占位（`HookDesigner` 等未来落地）                                                                                        | `skills/__init__.py`                                                       |
+| `writer.roles`     | L3 子代理角色（`StoryConsultant` 兜底 + `HistoryConsultant` / `XuanhuanConsultant` / `RomanceConsultant` 三题材子类,按 `AGENT.md` 题材行派生） | `roles/{story,history,xuanhuan,romance}_consultant.py`                     |
+| `writer.workflows` | L3 长任务 stub（`write_chapter` / `review_chapter` 占位,等真实 LangGraph 图落地）                                              | `workflows/{write,review}_chapter.py`                                      |
+| `writer.tools`     | L3 Tool 基础设施（Protocol + Registry + Runtime + langchain_bridge + 9 个 builtin）                                             | `tools/{protocol,registry,runtime,langchain_bridge,errors}.py` + `tools/builtin/{file,glob,analysis,foreshadow,locate}_tools.py` + `foreshadow_ledger.py` |
+| `writer.skills`    | L3 Markdown SKILL.md directives:shipped 4 个(`/大纲` `/目录` `/续写` `/改`)+ 项目级覆盖(`<project_root>/.writer/skills/`)      | `skills/{protocol,registry,directive_discovery,errors,builtin_sources,loader}.py` |
+| `writer.llm`       | L3 LLM 工具循环与结构化输出(`LLMToolLoop` ReAct 多步 + 双 provider 路径)                                                       | `llm/{agent,provider,structured}.py`                                       |
 | `writer.agent`     | **兼容层**——re-export 旧的 `WriterCommandAgent` / `NovelAgent` 别名，最终会移除                                                 | `agent/__init__.py`                                                        |
 | `writer.config`    | pydantic-settings，`WRITER_*` 环境变量                                                                                          | `config/settings.py`                                                       |
-| `writer.project`   | `writer new` / `/init` 创建的小说项目目录（`manuscript/` `outline/` `characters/` `world/` `notes/` + `.writer/` 元数据）         | `project/workspace.py`                                                     |
+| `writer.project`   | `writer new` / `/init` 创建的小说项目目录（`manuscript/` `outline/` `characters/` `world/` `notes/` + `.writer/` 元数据）         | `project/{workspace,state,genre,init_brief,ideas}.py`                      |
 
 ### 关键设计约束
 
-- **`IntentRouter` 是 Protocol，不是具体类**。engine 只依赖 Protocol；`RuleBasedIntentRouter` 是无网络 MVP，`LlmIntentRouter`（LangChain structured output）作为同一协议后面的插槽，未来切换不动 `engine/` 或 `cli/`。
-- **`EngineDeps` 是 DI 边界**。engine 不直接 new 协作者，所有外部依赖（`router`、`story_consultant`、未来的 `tool_registry` / `workflow_starter`）都通过 Protocol 注入；`production_deps()` 是默认装配；`EngineDeps.rebind_tool_runtime(new)` 用于 `EngineSession.set_project_root` 时的 runtime 热替换（2026-07-05 替代旧的 duck-typed mutation）。
-- **Engine 输出是事件流**（`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`），全部 `@dataclass(frozen=True)`。`AgentAction`（路由输出）是 **Pydantic `BaseModel` + `model_config={"frozen": True}`**——不是 `@dataclass`，新人不要用 `dataclasses.replace(...)`；用 `model_copy(update=...)`。CLI 在 `_run_engine` 里 `match` 渲染。
-- **REPL 路由原则**：除框架命令（`/退出` `/帮助` `/状态`）外，斜杠命令与自然语言**一律交给 engine**，避免 CLI 层重复维护命令路由。
-- **Tool 安全**：所有 builtin Tool 必须经 `runtime.safe_path()` 防越界；`Tool` 必须用**命名 keyword 参数**（`def run(self, runtime, *, path: str)`），不能用 `**kwargs`，否则 LangChain `args_schema` 无法生成。
+- **`IntentRouter` 是 Protocol，不是具体类**。engine 只依赖 Protocol；`RuleBasedIntentRouter` 是无网络 MVP,`LlmIntentRouter`(LangChain structured output,双 provider:native `bind_tools` / JSON-prompt)与 `CompositeRouter`(rule-first + LLM fallback)已实装并由 `production_deps()` 默认装配。`engine/` 与 `cli/` 不依赖任何具体 router 实现。
+- **`EngineDeps` 是 DI 边界**。engine 不直接 new 协作者，所有外部依赖(`router` / `story_consultant` / `tool_registry` / `tool_runtime` / `directive_registry` / `tool_loop`)都通过 Protocol 注入；`production_deps(genre="...")` 是默认装配；`EngineDeps.rebind_*` 系列方法(`rebind_tool_runtime` / `rebind_story_consultant` / `rebind_directive_registry`,2026-07-05 起替代旧的 duck-typed mutation)用于 `EngineSession.set_project_root` 时的热替换。
+- **Engine 输出是事件流**(`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`),全部 `@dataclass(frozen=True)`。`AgentAction`(路由输出)是 **Pydantic `BaseModel` + `model_config={"frozen": True}`**——不是 `@dataclass`,新人不要用 `dataclasses.replace(...)`;用 `model_copy(update=...)`。CLI 在 `_run_engine` 里 `match` 渲染。
+- **REPL 路由原则**:除框架命令(`/退出` `/帮助` `/状态`)外,斜杠命令与自然语言**一律交给 engine**,避免 CLI 层重复维护命令路由。
+- **Tool 安全**:所有 builtin Tool 必须经 `runtime.safe_path()` 防越界;写入类(`safe_write_file` / `safe_edit_file`)额外走 `runtime.allowed_write_paths` 白名单 + AGENT.md 3-stage guard;`Tool` 必须用**命名 keyword 参数**(`def run(self, runtime, *, path: str)`),不能用 `**kwargs`,否则 LangChain `args_schema` 无法生成。
+- **业务规则是 directive**:SKILL.md frontmatter(`command` / `description` / `requires_states` / `body` / `references` / `scripts`)驱动 4 个下游表面(`/帮助` / Tab 补全 / 状态机拦截 / Engine 分发);加新 shipped directive 或项目级 `.md` 覆盖**不需要改 CLI / engine 代码**。
 
 ### 事件流与 Done 分支
 
-`run_engine` 是个 `AsyncIterator[TextChunk | ActionEvent | ToolCall | ToolResult | Interrupt | Done | ErrorEvent]`，每轮产出一个 `Done` 终结。`Done.reason` 当前覆盖七个分支：
+`run_engine` 是个 `AsyncIterator[TextChunk | ActionEvent | ToolCall | ToolResult | Interrupt | Done | ErrorEvent]`,每轮产出一个 `Done` 终结。`Done.reason` 当前覆盖八个分支:
 
-- `answered`——`answer_directly` 或 `/大纲`（含 `chapter_count`）
-- `command_pending`——其它斜杠命令
-- `tool_pending`——保留(目前未使用,实际工具调用走 `tool_completed`)
-- `tool_completed`——`call_tool` 真调 `ToolRegistry.invoke()` 后(含 `ToolCall`/`ToolResult` 事件)
-- `workflow_pending`——`/创作` `/审核` 工作流
-- `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮)
-- `aborted`——`ErrorEvent` 后兜底分支(引擎异常/工具异常)
+- `answered`——`answer_directly` / `/init` / `/大纲` / SKILL.md directive 命中后真执行(含 `chapter_count`)
+- `command_pending`——其它斜杠命令(尚未实装的占位)
+- `tool_pending`——保留分支(目前未使用,实际工具调用走 `tool_completed` / `tool_loop_completed`)
+- `tool_completed`——`call_tool` 在 rule-only 部署(`tool_loop=None`)走同步 `_run_tool` 后(含 `ToolCall` / `ToolResult` 事件)
+- `tool_loop_completed`——`call_tool` 走 LLM 工具循环(`LLMToolLoop`)后,**预算耗尽**优雅退出(2026-07-08 新增,与 `aborted` 区分)
+- `workflow_pending`——`/创作` `/审核` 工作流(当前为 sync stub,等真实 LangGraph 图)
+- `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮;`/init <故事梗概>` 在 S1 时也走 `answered` 不走 `ask_user`)
+- `aborted`——`ErrorEvent` 后兜底分支(`except ToolError` / `except SkillError` / `except Exception` 三层)
 
 **会话层**：以上每轮事件由 `EngineSession`(`writer.session`)驱动 — REPL 启动时构造一个,跨所有 turn 复用;`session_id` frozen、`deps` 一次性构建、`tool_runtime` 在 `set_project_root()` 时按需换；`Interrupt` 事件入 `session.pending_interrupt`,下一轮 `ctx.user_input` 自动拼接 `"[pending] {prompt}\n[answer] {user_input}"` 后再喂给引擎;`Done` 事件触发 `session.record_turn(...)` + `session.clear_pending_interrupt()`。
 

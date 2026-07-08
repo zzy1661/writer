@@ -14,70 +14,70 @@
 
 ## 解决方案
 
-引入 `AgentInterrupt` 协议。LangGraph 节点或 Tool 遇到需要用户决策时,不直接 `input()`,而是返回或抛出结构化 interrupt:
+引入 `Interrupt` 事件 dataclass(per `src/writer/engine/events.py::Interrupt`,2026-07-08 实测)。引擎或 LLM 工具循环遇到需要用户决策时,**不**直接 `input()`,而是 yield `Interrupt` 事件给 REPL:
 
 - `choice`:让用户从选项中选择。
 - `text`:让用户输入单行或多行文本。
 - `confirm`:让用户确认破坏性操作。
 
-REPL 收到 interrupt 后暂停当前 run,展示交互界面,把用户回答写回 state,然后 resume。
+REPL 收到 interrupt 后展示交互界面,把用户回答拼到下一次 turn 的 `user_input`(`[pending] {prompt}\n[answer] {user_input}` per `compose_pending_input`)再喂给引擎。本轮以 `Done(reason="ask_user")` 终结。
 
 ## 最小化代码
+
+实际 `Interrupt`(`src/writer/engine/events.py`):
 
 ```python
 from dataclasses import dataclass
 from typing import Literal
 
 
-@dataclass
-class AgentInterrupt:
+@dataclass(frozen=True)
+class Interrupt(Event):
+    """引擎发出的"等待用户回答"事件,frozen 子类。"""
+
     type: Literal["choice", "text", "confirm"]
     prompt: str
     options: list[str] | None = None
-    default: str | bool | None = None
-    multiline: bool = False
-
-
-@dataclass
-class UserReply:
-    value: str | bool
-
-
-def ask_user_choice(prompt: str, options: list[str], default: str | None = None) -> AgentInterrupt:
-    return AgentInterrupt(
-        type="choice",
-        prompt=prompt,
-        options=options,
-        default=default,
-    )
-
-
-def repl_handle_interrupt(interrupt: AgentInterrupt) -> UserReply:
-    if interrupt.type == "choice":
-        print(interrupt.prompt)
-        for index, option in enumerate(interrupt.options or [], start=1):
-            print(f"{index}. {option}")
-        raw = input("> ").strip()
-        selected = (interrupt.options or [])[int(raw) - 1]
-        return UserReply(value=selected)
-
-    if interrupt.type == "text":
-        if interrupt.multiline:
-            lines: list[str] = []
-            while True:
-                line = input()
-                if line == '"""':
-                    break
-                lines.append(line)
-            return UserReply(value="\n".join(lines))
-        return UserReply(value=input(f"{interrupt.prompt}\n> "))
-
-    if interrupt.type == "confirm":
-        raw = input(f"{interrupt.prompt} [y/N] ").strip().lower()
-        return UserReply(value=raw == "y")
-
-    raise ValueError(f"未知 interrupt 类型: {interrupt.type}")
 ```
+
+`EngineSession.compose_pending_input`(实际 `src/writer/session/engine_session.py`):
+
+```python
+def compose_pending_input(original: str, pending: Interrupt | None) -> str:
+    if pending is None:
+        return original
+    return f"[pending] {pending.prompt}\n[answer] {original}"
+```
+
+引擎分支:
+
+```python
+case "ask_user":
+    prompt = action.user_prompt or "请补充信息"
+    yield Interrupt(type="text", prompt=prompt, options=None)
+    yield Done(reason="ask_user", payload={"prompt": prompt})
+```
+
+REPL 处理(简化版):
+
+```python
+async def run_repl(session: EngineSession, deps: EngineDeps):
+    while True:
+        line = await prompt_async("writer> ")
+        input_text = compose_pending_input(line, session.pending_interrupt)
+        session.clear_pending_interrupt()
+        async for event in run_engine(build_ctx(input_text), deps):
+            if isinstance(event, Interrupt):
+                session.set_pending_interrupt(event)
+                render_interactive_prompt(event)  # choice/text/confirm 分发
+            elif isinstance(event, Done):
+                session.record_turn(line, event.reason)
+                break
+            else:
+                render_event(event)
+```
+
+注意:**当前实现没有保留旧文档里 `AgentInterrupt` / `UserReply` 这两个 dataclass**。Interrupt 是 engine 事件,UserReply 直接是下一次 turn 的 `user_input` 字符串(无需独立类型)。多轮 resume 由 `EngineSession.pending_interrupt` 字段串起来,跨 `run_engine()` 调用自动拼接。
 
 ## LangGraph 节点伪代码
 

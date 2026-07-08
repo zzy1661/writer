@@ -62,33 +62,47 @@ from prompt_toolkit.history import FileHistory
 from rich.console import Console
 
 
-COMMANDS = [
-    "/init",
-    "/大纲",
-    "/目录",
-    "/创作",
-    "/续写",
-    "/改",
-    "/审核",
-    "/状态",
-    "/退出",
+# 静态框架命令 + shipped SKILL.md directive 命令(2026-07-09 实测)
+# `STATIC_REPL_COMMANDS` 是硬编码列表;
+# `built_directive_registry().help_entries()` 拉取项目级覆盖后的实际命令;
+# `build_repl_commands(directive_registry)` 把两者拼起来
+STATIC_REPL_COMMANDS = [
+    ("/init", "创建项目"),
+    ("/状态", "查看 session 与项目状态"),
+    ("/帮助", "列出可用命令"),
+    ("/退出", "退出 REPL"),
+]
+SHIPPED_DIRECTIVE_COMMANDS = [
+    "/大纲", "/目录", "/续写", "/改",
 ]
 
 
-def run_repl() -> None:
+def build_completer(directive_registry) -> WordCompleter:
+    commands = (
+        [cmd for cmd, _ in STATIC_REPL_COMMANDS]
+        + SHIPPED_DIRECTIVE_COMMANDS
+        + [cmd for cmd, _ in directive_registry.help_entries()]
+        + ["/创作", "/审核", "/字数统计", "/exit", "/quit"]
+    )
+    return WordCompleter(sorted(set(commands)), ignore_case=True)
+
+
+def run_repl(directive_registry) -> None:
     console = Console()
     session = PromptSession(
         history=FileHistory("~/.config/writer/history"),
-        completer=WordCompleter(COMMANDS, ignore_case=True),
+        completer=build_completer(directive_registry),
     )
 
     while True:
         line = session.prompt("writer> ")
         command = parse_command(line)
-        if command.name in {"/退出", "/quit", "/q"}:
+        if command.name in {"/退出", "/exit", "/quit", "/q"}:
             break
         console.print(f"[blue]解析命令:[/blue] {command.name} {command.args}")
 ```
+
+**关键差异**:实际 `cli/main.py::build_repl_commands(directive_registry)` 不硬编码命令名,而是从 `DirectiveRegistry.help_entries()` + `STATIC_REPL_COMMANDS` 派生。新增 shipped directive 或项目级覆盖的 directive 自动出现在 `/帮助` 和 Tab 补全里,**不需要改 CLI 代码**。
 
 ## 落地建议
 
