@@ -20,6 +20,7 @@ class TocSkill:
     command = "/目录"
     description = "生成或查看章节目录"
     requires_states = frozenset({ProjectState.HAS_OUTLINE, ProjectState.HAS_TOC})
+    extra_instructions: str = ""
 
     async def run(
         self,

@@ -13,7 +13,7 @@ from writer.engine.deps import EngineDeps
 from writer.roles import HistoryConsultant, StoryConsultant, XuanhuanConsultant
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
-from writer.skills import built_skill_registry
+from writer.skills import SkillRegistry, built_skill_registry
 from writer.tools import ToolRuntime, built_tool_registry
 
 # ---------------------------------------------------------------------------
@@ -310,6 +310,16 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             # asserts this method is *called* during set_project_root,
             # not that it returns a new object.
             self.story_consultant = new_consultant
+            return self
+
+        def rebind_skill_registry(
+            self, new_registry: SkillRegistry
+        ) -> EngineDeps:
+            # Added 2026-07-08 (chg-project-skills). The session's
+            # ``set_project_root`` calls this after rebuilding the
+            # registry; the stub mirrors the production wiring by
+            # mutating in place.
+            self.skill_registry = new_registry
             return self
 
     # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.

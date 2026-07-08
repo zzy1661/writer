@@ -25,6 +25,7 @@ class OutlineSkill:
     # (running /大纲 in S3+ would otherwise let it clobber the existing
     # TOC pipeline state).
     requires_states = frozenset({ProjectState.INITIALIZED, ProjectState.HAS_OUTLINE})
+    extra_instructions: str = ""
 
     async def run(
         self,

@@ -37,6 +37,7 @@ class ContinueWritingSkill:
     command = "/续写"
     description = "继续未完成章节"
     requires_states = frozenset({ProjectState.WRITING})
+    extra_instructions: str = ""
 
     async def run(
         self,

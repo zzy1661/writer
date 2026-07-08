@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from importlib import metadata
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from writer.skills.continue_writing import ContinueWritingSkill
@@ -99,9 +100,17 @@ def _validate_skill(skill: Skill) -> None:
 class SkillRegistry:
     """Lookup table for command-bound skills.
 
-    Duplicate commands raise :class:`SkillError` at construction time —
-    earlier (built-in) entries win, so passing the same command twice
-    is a configuration error rather than silent last-write-wins.
+    Duplicate commands are resolved with **last-write-wins** semantics:
+    when the same ``command`` appears more than once in the input
+    list, the later entry replaces the earlier one. This Replace
+    semantics is intentional — it lets the project-level layer
+    (see :func:`discover_project_skills`) override the built-in layer,
+    and the entry-point layer override both, with no special casing
+    in the caller.
+
+    Per-skill validation still raises :class:`SkillError` (via
+    :func:`_validate_skill`) — a malformed skill is always a hard
+    error and will abort registry construction.
     """
 
     def __init__(
@@ -117,12 +126,9 @@ class SkillRegistry:
         seen: dict[str, Skill] = {}
         for skill in items:
             _validate_skill(skill)
-            if skill.command in seen:
-                msg = (
-                    f"duplicate skill command {skill.command!r}: "
-                    f"{seen[skill.command].__class__.__name__} vs {skill.__class__.__name__}"
-                )
-                raise SkillError(msg)
+            # Last-write-wins: the same ``command`` appearing more than
+            # once is the supported way to layer overrides (built-in →
+            # project → plugin). Per chg-project-skills design Decision 8.
             seen[skill.command] = skill
 
         self._by_command: dict[str, Skill] = seen
@@ -240,19 +246,42 @@ def discover_entry_point_skills() -> list[Skill]:
     return discovered
 
 
-def built_skill_registry() -> SkillRegistry:
-    """Built-in skills + entry-point skills; built-ins win on command collision.
+def built_skill_registry(
+    project_root: Path | None = None,
+) -> SkillRegistry:
+    """Built-in skills + project-level skills + entry-point skills.
 
-    Built-ins come first so a plugin shadowing ``/大纲`` triggers the
-    duplicate-command error in :class:`SkillRegistry.__init__` — this
-    is intentional: silently letting a plugin clobber a core skill
-    would make behaviour non-deterministic and hard to debug.
+    Layers (Replace semantics — later wins on command collision):
+
+    1. :data:`BUILTIN_SKILLS` — the four shipped skills.
+    2. :func:`writer.skills.loader.discover_project_skills` (only when
+       ``project_root`` is provided) — project-level overrides at
+       ``<project_root>/.writer/skills/``.
+    3. :func:`discover_entry_point_skills` — Python entry-point
+       plugins registered under ``[project.entry-points."writer.skills"]``.
+
+    The ``project_root=None`` path preserves the legacy behavior (no
+    project layer; back-compat for tests and callers that do not have
+    a project bound).
+
+    The function never raises for missing project skills (the loader
+    swallows per-file errors as warnings) and never raises for missing
+    entry-point plugins. A truly empty registry (no built-ins, no
+    project, no plugins) is still valid.
     """
 
-    extras = discover_entry_point_skills()
-    if not extras:
+    items: list[Skill] = list(BUILTIN_SKILLS)
+
+    if project_root is not None:
+        from writer.skills.loader import discover_project_skills  # noqa: PLC0415
+
+        items.extend(discover_project_skills(project_root))
+
+    items.extend(discover_entry_point_skills())
+
+    if len(items) == len(BUILTIN_SKILLS):
         return SkillRegistry()
-    return SkillRegistry(skills=list(BUILTIN_SKILLS), extra_skills=extras)
+    return SkillRegistry(skills=items)
 
 
 __all__ = [

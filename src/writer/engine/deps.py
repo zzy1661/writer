@@ -151,6 +151,23 @@ class EngineDeps(Protocol):
         """
         ...
 
+    def rebind_skill_registry(
+        self, new_registry: SkillRegistry
+    ) -> EngineDeps:
+        """Return a new (or in-place mutated) ``EngineDeps`` with the skill registry swapped.
+
+        Symmetric to :meth:`rebind_tool_runtime` and
+        :meth:`rebind_story_consultant`. Called by
+        :meth:`writer.session.EngineSession.set_project_root` after
+        the new project's ``.writer/skills/`` has been scanned — the
+        registry MUST be rebuilt on project change so project-level
+        skill overrides (per ``chg-project-skills``) take effect on the
+        next REPL turn.
+
+        Added 2026-07-08 alongside the project-skills capability.
+        """
+        ...
+
 
 @dataclass
 class _DefaultEngineDeps:
@@ -197,6 +214,16 @@ class _DefaultEngineDeps:
         # Symmetric to ``rebind_tool_runtime``; uses ``dataclasses.replace``
         # to keep the production wiring effectively immutable.
         return replace(self, story_consultant=new_consultant)
+
+    def rebind_skill_registry(
+        self, new_registry: SkillRegistry
+    ) -> EngineDeps:
+        # Symmetric to ``rebind_tool_runtime`` / ``rebind_story_consultant``;
+        # uses ``dataclasses.replace`` to keep the production wiring
+        # effectively immutable. Per chg-project-skills: project-level
+        # skills live in the project directory, so this MUST be called
+        # whenever the bound project changes.
+        return replace(self, skill_registry=new_registry)
 
 
 def _select_router(
@@ -247,7 +274,11 @@ def production_deps(
         project_root: Optional override for the tool runtime's root. When
             ``None`` (the S0 path), a sentinel root is used so
             ``safe_path`` still rejects escapes; path-free tools
-            (``foreshadow_search`` etc.) keep working.
+            (``foreshadow_search`` etc.) keep working. Also passed
+            to :func:`writer.skills.built_skill_registry` so the
+            initial skill registry already reflects the bound
+            project's ``.writer/skills/`` overrides (per
+            ``chg-project-skills``).
         primary_router: Optional override for the rule router used as
             the primary in the ``CompositeRouter`` (when API key is
             set) or as the bare router (when not). Defaults to a fresh
@@ -283,7 +314,7 @@ def production_deps(
         story_consultant=_consultant_for_genre(resolved, genre),
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
-        skill_registry=built_skill_registry(),
+        skill_registry=built_skill_registry(project_root=root),
         tool_loop=tool_loop,
         _workflows=dict(WORKFLOWS),
     )

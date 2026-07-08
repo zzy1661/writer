@@ -18,7 +18,6 @@ from unittest.mock import MagicMock
 import pytest
 
 from writer.engine.events import Done, TextChunk
-from writer.skills.errors import SkillError
 from writer.skills.registry import (
     ENTRY_POINT_GROUP,
     built_skill_registry,
@@ -44,6 +43,7 @@ class _AlreadyBuiltSkill:
     command = "/ep_instance"
     description = "entry-point: pre-built instance"
     requires_states = frozenset({"S1"})  # type: ignore[arg-type]
+    extra_instructions = ""
 
     async def run(
         self,
@@ -63,6 +63,7 @@ class _ClassSkill:
     command = "/ep_class"
     description = "entry-point: class to instantiate"
     requires_states = frozenset({"S1"})  # type: ignore[arg-type]
+    extra_instructions = ""
 
     async def run(
         self,
@@ -253,20 +254,22 @@ def test_built_skill_registry_includes_entry_point_discoveries(
     assert registry.get("/ep_instance") is not None
 
 
-def test_built_skill_registry_builtin_wins_on_collision(
+def test_built_skill_registry_later_wins_on_collision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A plugin shadowing ``/大纲`` triggers the duplicate command error.
+    """A plugin shadowing ``/大纲`` REPLACES the built-in (last-write-wins).
 
-    Built-ins come first; the registry constructor rejects the
-    would-be clobber, which surfaces the misconfiguration loudly
-    instead of silently overriding a core skill.
+    Per ``chg-project-skills`` Decision 8: the registry uses Replace
+    semantics so the project-level layer can override the built-in
+    layer and the entry-point layer can override both. This test
+    pins the third (entry-point) layer.
     """
 
     class _ShadowOutline(TocSkill):
         command = "/大纲"
         description = "shadow outline"
         requires_states = frozenset({"S5"})  # type: ignore[arg-type]
+        extra_instructions = ""
 
     fake_eps = _fake_entry_points(
         ("shadow", "p.mod:Skill", _ShadowOutline()),
@@ -276,5 +279,6 @@ def test_built_skill_registry_builtin_wins_on_collision(
         lambda *, group: fake_eps if group == ENTRY_POINT_GROUP else [],
     )
 
-    with pytest.raises(SkillError, match="duplicate skill command"):
-        built_skill_registry()
+    registry = built_skill_registry()
+    # Plugin wins, not built-in
+    assert isinstance(registry.get("/大纲"), _ShadowOutline)

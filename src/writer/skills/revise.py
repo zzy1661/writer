@@ -27,6 +27,7 @@ class ReviseSkill:
     command = "/改"
     description = "修改章节内容"
     requires_states = frozenset({ProjectState.WRITING})
+    extra_instructions: str = ""
 
     async def run(
         self,

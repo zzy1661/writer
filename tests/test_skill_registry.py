@@ -131,9 +131,39 @@ def test_skill_registry_rejects_skill_with_empty_requires_states() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_skill_registry_rejects_duplicate_command() -> None:
-    with pytest.raises(SkillError, match="duplicate skill command"):
-        SkillRegistry([OutlineSkill(), OutlineSkill()])
+def test_skill_registry_later_wins_over_earlier() -> None:
+    """Same ``command`` appearing twice → later entry replaces earlier.
+
+    Per ``chg-project-skills`` Decision 8: Replace semantics let the
+    project-level layer override the built-in layer (and the entry-point
+    layer override both) without raising.
+    """
+
+    class _CustomOutline(OutlineSkill):
+        description = "project-level override"
+
+    registry = SkillRegistry([OutlineSkill(), _CustomOutline()])
+    assert isinstance(registry.get("/大纲"), _CustomOutline)
+
+
+def test_skill_registry_extras_override_skills() -> None:
+    """``extra_skills`` are appended after ``skills`` and win on collision.
+
+    Combined with the test above, this is the canonical "project skill
+    replaces built-in" path: built_skill_registry feeds ``BUILTIN_SKILLS``
+    as ``skills`` and project skills as ``extra_skills``; the project
+    skill must replace the built-in by command.
+    """
+
+    class _ProjectOutline(OutlineSkill):
+        description = "from project skills"
+
+    registry = SkillRegistry(
+        skills=[OutlineSkill(), TocSkill()],
+        extra_skills=[_ProjectOutline()],
+    )
+    assert isinstance(registry.get("/大纲"), _ProjectOutline)
+    assert isinstance(registry.get("/目录"), TocSkill)
 
 
 def test_skill_registry_allows_extras_to_come_after_builtins() -> None:
