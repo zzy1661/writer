@@ -73,7 +73,7 @@ STATIC_REPL_COMMANDS = [
     ("/退出", "退出 REPL"),
 ]
 SHIPPED_DIRECTIVE_COMMANDS = [
-    "/大纲", "/目录", "/续写", "/改",
+    "/大纲", "/目录",
 ]
 
 

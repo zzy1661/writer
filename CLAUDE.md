@@ -49,12 +49,12 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
               ↓ AgentAction
        L2 Engine 状态机 (AsyncGenerator)  ← writer/engine/
               ↓
-       L3 角色 / 工作流 / 工具            ← writer/{roles,workflows,tools}/
+       L3 角色 / 工作流 / 工具            ← writer/{workflows,tools}/
               ↓
        L4 LLM Provider（未来）            ← OpenAI-compatible
 ```
 
-**接线流**：`用户输入 → deps.route() → router.route() → AgentAction → engine.loop 分发 → run_command ⇒ roles.StoryConsultant / start_workflow ⇒ workflows.run_workflow / call_tool ⇒ tools.*`
+**接线流**：`用户输入 → deps.route() → router.route() → AgentAction → engine.loop 分发 → run_command ⇒ SkillDirective / start_workflow ⇒ workflows.run_workflow / call_tool ⇒ tools.*`
 
 ### 各包职责
 
@@ -64,10 +64,10 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 | `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `project_genre` / `pending_interrupt` / `turns` + 一次性构造的 `deps` | `session/engine_session.py`                                                |
 | `writer.routing`   | L2 前台意图路由：**`IntentRouter` Protocol** + `RuleBasedIntentRouter`(MVP)/ `LlmIntentRouter`(LangChain structured output)/ `CompositeRouter`(rule-first + LLM fallback) | `routing/{intent_router,llm_router,composite_router}.py`                   |
 | `writer.engine`    | L2 状态机 + AsyncGenerator（events / context / deps / config / loop 五个模块）                                                  | `engine/{loop,deps,events,context,config}.py`                              |
-| `writer.roles`     | L3 子代理角色（`StoryConsultant` 兜底 + `HistoryConsultant` / `XuanhuanConsultant` / `RomanceConsultant` 三题材子类,按 `AGENT.md` 题材行派生） | `roles/{story,history,xuanhuan,romance}_consultant.py`                     |
+| `writer.agents`    | L3 LLM 调度身份 + 题材分支 Markdown 文件（`writer.agents._shipped/*.md`，按 `AGENT.md` 题材行派生）+ 唯一的 Python-side capability (`writer.agents.process_init_brief`) | `agents/{__init__,protocol,registry,agent_discovery,builtin_sources,capability}.py` + `agents/_shipped/{other,历史,言情,玄幻}.md` |
 | `writer.workflows` | L3 长任务 stub（`write_chapter` / `review_chapter` 占位,等真实 LangGraph 图落地）                                              | `workflows/{write,review}_chapter.py`                                      |
 | `writer.tools`     | L3 Tool 基础设施（Protocol + Registry + Runtime + langchain_bridge + 9 个 builtin）                                             | `tools/{protocol,registry,runtime,langchain_bridge,errors}.py` + `tools/builtin/{file,glob,analysis,foreshadow,locate}_tools.py` + `foreshadow_ledger.py` |
-| `writer.skills`    | L3 Markdown SKILL.md directives:shipped 4 个(`/大纲` `/目录` `/续写` `/改`)+ 项目级覆盖(`<project_root>/.writer/skills/`)      | `skills/{protocol,registry,directive_discovery,errors,builtin_sources,loader}.py` |
+| `writer.skills`    | L3 Markdown SKILL.md directives:shipped 2 个(`/大纲` `/目录`)+ 项目级覆盖(`<project_root>/.writer/skills/`)      | `skills/{protocol,registry,directive_discovery,errors,builtin_sources,loader}.py` |
 | `writer.llm`       | L3 LLM 工具循环与结构化输出(`LLMToolLoop` ReAct 多步 + 双 provider 路径)                                                       | `llm/{agent,provider,structured}.py`                                       |
 | `writer.agent`     | **兼容层**——re-export 旧的 `WriterCommandAgent` / `NovelAgent` 别名，最终会移除                                                 | `agent/__init__.py`                                                        |
 | `writer.config`    | pydantic-settings，`WRITER_*` 环境变量                                                                                          | `config/settings.py`                                                       |
@@ -76,11 +76,11 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 ### 关键设计约束
 
 - **`IntentRouter` 是 Protocol，不是具体类**。engine 只依赖 Protocol；`RuleBasedIntentRouter` 是无网络 MVP,`LlmIntentRouter`(LangChain structured output,双 provider:native `bind_tools` / JSON-prompt)与 `CompositeRouter`(rule-first + LLM fallback)已实装并由 `production_deps()` 默认装配。`engine/` 与 `cli/` 不依赖任何具体 router 实现。
-- **`EngineDeps` 是 DI 边界**。engine 不直接 new 协作者，所有外部依赖(`router` / `story_consultant` / `tool_registry` / `tool_runtime` / `directive_registry` / `tool_loop`)都通过 Protocol 注入；`production_deps(genre="...")` 是默认装配；`EngineDeps.rebind_*` 系列方法(`rebind_tool_runtime` / `rebind_story_consultant` / `rebind_directive_registry`,2026-07-05 起替代旧的 duck-typed mutation)用于 `EngineSession.set_project_root` 时的热替换。
+- **`EngineDeps` 是 DI 边界**。engine 不直接 new 协作者，所有外部依赖(`router` / `agent_registry` / `tool_registry` / `tool_runtime` / `directive_registry` / `tool_loop`)都通过 Protocol 注入；`production_deps(...)` 是默认装配（2026-07-09 `chg-remove-roles` 起去掉了 `story_agent` 与 `genre=` 参数）；`EngineDeps.rebind_*` 系列方法(`rebind_tool_runtime` / `rebind_directive_registry` / `rebind_agent_registry`,2026-07-05 起替代旧的 duck-typed mutation)用于 `EngineSession.set_project_root` 时的热替换。
 - **Engine 输出是事件流**(`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`),全部 `@dataclass(frozen=True)`。`AgentAction`(路由输出)是 **Pydantic `BaseModel` + `model_config={"frozen": True}`**——不是 `@dataclass`,新人不要用 `dataclasses.replace(...)`;用 `model_copy(update=...)`。CLI 在 `_run_engine` 里 `match` 渲染。
 - **REPL 路由原则**:除框架命令(`/退出` `/帮助` `/状态`)外,斜杠命令与自然语言**一律交给 engine**,避免 CLI 层重复维护命令路由。
 - **Tool 安全**:所有 builtin Tool 必须经 `runtime.safe_path()` 防越界;写入类(`safe_write_file` / `safe_edit_file`)额外走 `runtime.allowed_write_paths` 白名单 + AGENT.md 3-stage guard;`Tool` 必须用**命名 keyword 参数**(`def run(self, runtime, *, path: str)`),不能用 `**kwargs`,否则 LangChain `args_schema` 无法生成。
-- **业务规则是 directive**:SKILL.md frontmatter(`command` / `description` / `requires_states` / `body` / `references` / `scripts`)驱动 4 个下游表面(`/帮助` / Tab 补全 / 状态机拦截 / Engine 分发);加新 shipped directive 或项目级 `.md` 覆盖**不需要改 CLI / engine 代码**。
+- **业务规则是 directive**:SKILL.md frontmatter(`command` / `description` / `requires_states` / `body` / `references` / `scripts`)驱动多个下游表面(`/帮助` / Tab 补全 / 状态机拦截 / Engine 分发);加新 shipped directive 或项目级 `.md` 覆盖**不需要改 CLI / engine 代码**。
 
 ### 事件流与 Done 分支
 
@@ -110,7 +110,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 | ------------------------------ | -------------------------------------------------------------------- |
 | `docs/技术架构总览.md`         | 四层架构 + LangGraph 状态图 + LangChain 角色定位 + LLM Provider 路由 |
 | `docs/命令与用户流程.md`       | 三阶段 MVP 命令路线 + S0-S5 项目状态机 + 命令 × 状态可用性矩阵       |
-| `docs/技术架构细节.md`         | 工程实现细节                                                         |
+| `docs/技术架构细节.md`         | **已归档**——2026-07-01 的 LangGraph + RAG top-up spec,被 `技术架构总览.md` 取代;见文件首行 banner |
 | `docs/设计文档.md`             | 早期总体设计                                                         |
 | `技术难点与解决方案备忘/01-17` | 17 个技术决策备忘（状态机、RAG、Tool 设计、Agent 架构模式等）        |
 

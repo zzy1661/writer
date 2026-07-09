@@ -1,6 +1,6 @@
 # LLM 提供商路由与流式输出
 
-> **2026-07-08 重要修订**:本文档原描述基于"三档模型路由"(high/mid/low)的 L4 Provider 抽象,**该抽象从未实装**——当前 L4 直接用 LangChain `BaseChatModel`,通过 `WRITER_MODEL` / `WRITER_BASE_URL` / `WRITER_API_KEY` 环境变量切换具体模型。三档路由的诉求改由"按 directive 类别调不同 model"实现,但目前 **4 个 shipped directive 都用同一模型**,未做分流。
+> **2026-07-08 重要修订**:本文档原描述基于"三档模型路由"(high/mid/low)的 L4 Provider 抽象,**该抽象从未实装**——当前 L4 直接用 LangChain `BaseChatModel`,通过 `WRITER_MODEL` / `WRITER_BASE_URL` / `WRITER_API_KEY` 环境变量切换具体模型。三档路由的诉求改由"按 directive 类别调不同 model"实现,但目前 **2 个 shipped directive (`/大纲` `/目录`) 都用同一模型**,未做分流(`/续写` `/改` 占位 SKILL.md 已于 2026-07-09 删除)。
 >
 > 真正落地的是:
 >

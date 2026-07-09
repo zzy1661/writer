@@ -44,7 +44,7 @@ REPL 用户输入混合三类:
 - `ask_user` — 请求用户补充信息
 - `answer_directly` — 直接回答说明性问题
 
-角色选择也在路由结果里(`role: story_consultant | proofreader | historian | reviewer`),但角色只作为后续 workflow 或 prompt 的参数,不由路由器自己执行全部流程。
+角色选择也在路由结果里(`role: story_agent | proofreader | historian | reviewer`),但角色只作为后续 workflow 或 prompt 的参数,不由路由器自己执行全部流程。
 
 ## 最小化代码
 
@@ -53,7 +53,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, Field
 
 
-Role = Literal["story_consultant", "proofreader", "historian", "reviewer"]
+Role = Literal["story_agent", "proofreader", "historian", "reviewer"]
 ActionType = Literal["run_command", "call_tool", "start_workflow", "ask_user", "answer_directly"]
 
 
@@ -100,7 +100,7 @@ class RuleBasedIntentRouter:
             return AgentAction(action_type="run_command",
                                command=text.split(maxsplit=1)[0])
         return AgentAction(action_type="answer_directly",
-                           answer=f"我可以处理 /init、/大纲、/目录、/创作、/审核、/改 等写作命令。你刚才说的是:{text}")
+                           answer=f"我可以处理 /init、/大纲、/目录、/创作、/审核 等写作命令。你刚才说的是:{text}")
 
     @classmethod
     def looks_like_command(cls, text: str) -> bool:

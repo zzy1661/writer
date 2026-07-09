@@ -2,7 +2,7 @@
 
 > **2026-07-08 重要修订**:本文档原列出的 Tool 清单(`read_file` / `write_file` / `chapter_register` / `rag_query` 等 19 个)是**早期设想**。当前实装的 builtin Tool 只有 6 个,LLM 通过 `project_search` + `safe_read_file` + `safe_write_file` 自由组合完成"读、改、查、统计"工作,业务 Tool(`chapter_register` / `foreshadow_update` / `consistency_check` 等)已被 [OpenSpec `chg-markdown-skills`](../../openspec/changes/archive/2026-07-09-chg-project-skills/) 的 **Markdown SKILL.md directives** 替代。
 >
-> 下文先列出当前 6 个 builtin Tool,再保留跨边界实现要点(签名约束 / PEP-563 / `ToolRuntime` / `ToolRegistry` 注册名唯一 / LangChain 桥接)。
+> 下文先列出当前 9 个 builtin Tool,再保留跨边界实现要点(签名约束 / PEP-563 / `ToolRuntime` / `ToolRegistry` 注册名唯一 / LangChain 桥接)。
 
 ## 业务背景
 
@@ -16,11 +16,11 @@ Tool 必须表达业务语义,但又不能太多:
 - 业务级 Tool(`chapter_register`)如果写成 Python 类,跨项目定制就麻烦(项目级覆盖需要 hook 进类加载,不可行)
 - LLM 直接编辑 Markdown 不可控(格式破坏、状态不一致)
 
-最终决定:**路径工具 + 纯检索类工具 + 统计工具** 6 个保持 Python 类;**业务级"做什么"** 用 SKILL.md directives(让项目目录里放个 `.md` 就能覆盖)。
+最终决定:**路径工具 + 纯检索类工具 + 统计工具** 9 个保持 Python 类;**业务级"做什么"** 用 SKILL.md directives(让项目目录里放个 `.md` 就能覆盖)。
 
 ## 当前 builtin Tool 清单(2026-07-09 实测)
 
-`src/writer/tools/builtin/__init__.py::built_tool_registry()` 注册 **9 个 Tool**。`safe_write_file` / `safe_edit_file` / `safe_glob` 三个由 [chg-add-write-edit-glob](2026-07-09) 补入,补齐了 4 个 shipped directive 描述的 LLM 工具流。
+`src/writer/tools/builtin/__init__.py::built_tool_registry()` 注册 **9 个 Tool**。`safe_write_file` / `safe_edit_file` / `safe_glob` 三个由 [chg-add-write-edit-glob](2026-07-09) 补入,补齐了 2 个 shipped directive(`/大纲` `/目录`)描述的 LLM 工具流。
 
 ### 文件 / 路径类(必须有 project_root,走 `safe_path` 或路径白名单)
 
@@ -30,7 +30,7 @@ Tool 必须表达业务语义,但又不能太多:
 | `safe_list_dir` | `path: str = "."` | 列目录(`d`/`f` 前缀);跳过隐藏文件;非目录抛 `ToolNotADirectoryError` |
 | **`safe_write_file`** | `path`, `content`, `mode="create"\|"overwrite"\|"append"`, `backup=True` | 在白名单内写 UTF-8 文件;`mode=create` 默认拒覆盖;`mode=overwrite` 原子替换 + 备份到 `.writer/backups/<relpath>.<ISO-ts>`;`mode=append` 尾部追加(非原子、不备份);AGENT.md 仅允许 `overwrite` 并自动保留 `题材:` 行;`max_file_size` 字节限制 |
 | **`safe_edit_file`** | `path`, `old_string`, `new_string`, `replace_all=False`, `dry_run=False`, `backup=True` | 精确字符串替换(Claude Code Edit 语义);`old_string` 必须唯一除非 `replace_all=True`;`dry_run=True` 只返回 unified diff 不写盘;AGENT.md 走同 3-stage guard |
-| **`safe_glob`** | `pattern`, `sort_by="name"\|"mtime"` | `pathlib` 模式匹配;`sort_by="mtime"` 找最新文件便于 `/续写`;跳隐藏文件 |
+| **`safe_glob`** | `pattern`, `sort_by="name"\|"mtime"` | `pathlib` 模式匹配;`sort_by="mtime"` 按修改时间排序便于查找最近编辑的文件;跳隐藏文件 |
 
 ### 检索类(路径工具 + 启发式匹配)
 
@@ -75,7 +75,7 @@ DEFAULT_WRITE_WHITELIST: frozenset[str] = frozenset({
 
 - `/字数统计` → `wordcount(path=...)`(`RuleBasedIntentRouter`)
 - 自然语言含"伏笔"或 `F\d+` 模式 → `foreshadow_search(id=..., keyword=...)`(`_parse_foreshadow_args`)
-- SKILL.md directive(`/大纲 /目录 /续写 /改`)→ `_run_directive` 把 body + references 喂给 LLM 工具循环,LLM 自由组合 9 个 Tool
+- SKILL.md directive(`/大纲` `/目录`)→ `_run_directive` 把 body + references 喂给 LLM 工具循环,LLM 自由组合 9 个 Tool
 - LLM 工具循环里的自由调用 → 9 个 Tool 任意组合,LLM 决定
 
 ### 已**移除**的旧 Tool(常见误以为存在的)
