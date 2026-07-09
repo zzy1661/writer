@@ -144,6 +144,21 @@ class EngineSession:
         new_agent_registry = built_agent_registry(project_root=resolved)
         self.deps = self.deps.rebind_agent_registry(new_agent_registry)
 
+        # 重建 tool_loop(Bug 01):当原 deps 带 tool_loop 时,
+        # 用新 runtime 重新构造,确保 LLMToolLoop._runtime 指向新根。
+        # rule-only 部署(tool_loop=None)时保持 None。
+        # 延迟 import 避免 engine.deps → llm.agent 循环。
+        from writer.llm.agent import LLMToolLoop
+
+        new_loop: LLMToolLoop | None = None
+        if self.deps.tool_loop is not None:
+            new_loop = LLMToolLoop(
+                settings=self.deps.settings,
+                registry=self.deps.tool_registry,
+                runtime=new_runtime,
+            )
+        self.deps = self.deps.rebind_tool_loop(new_loop)
+
     def refresh_project_state(self) -> str:
         """从磁盘文件刷新 ``project_state`` 并返回它。"""
 

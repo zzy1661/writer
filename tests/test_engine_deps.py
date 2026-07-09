@@ -122,3 +122,31 @@ def test_production_deps_respects_explicit_primary_router_with_api_key() -> None
     assert deps.router.primary is sentinel
     # Fallback is the LLM router; primary must remain the sentinel
     assert isinstance(deps.router.fallback, LlmIntentRouter)
+
+
+# ---------------------------------------------------------------------------
+# Bug 01 — rebind_tool_loop
+# ---------------------------------------------------------------------------
+
+
+def test_production_deps_rebind_tool_loop(tmp_path: Path) -> None:
+    """Bug 01: _DefaultEngineDeps.rebind_tool_loop 返回新实例。"""
+    from writer.engine.deps import _DefaultEngineDeps
+
+    deps = production_deps(_settings(with_key=False))
+    assert isinstance(deps, _DefaultEngineDeps)
+
+    # rebind_tool_loop(None) 返回新 deps,tool_loop 字段被替换
+    new_deps = deps.rebind_tool_loop(None)
+    assert new_deps is not deps
+    assert new_deps.tool_loop is None
+    # 其他字段保留(dataclasses.replace 行为)
+    assert new_deps.tool_runtime is deps.tool_runtime
+    assert new_deps.router is deps.router
+
+
+def test_production_deps_settings_field_exposed(tmp_path: Path) -> None:
+    """Bug 01: EngineDeps Protocol 暴露 settings 字段。"""
+    settings = _settings(with_key=True)
+    deps = production_deps(settings)
+    assert deps.settings is settings

@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 from writer.agents import builtin_agent_registry
+from writer.config import get_settings
 from writer.engine import Interrupt
 from writer.engine.context import EngineContext
 from writer.engine.deps import EngineDeps
@@ -259,6 +260,10 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             # override (test surface). Leaving ``None`` makes the
             # workflow fall back to ``get_llm(settings)``.
             self.review_llm = None
+            # Added 2026-07-09 (Bug 01). Required by Protocol so
+            # ``set_project_root`` can rebuild ``tool_loop`` against
+            # the same settings without re-resolving globals.
+            self.settings = get_settings()
 
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)
@@ -300,6 +305,15 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             self.agent_registry = new_registry
             return self
 
+        def rebind_tool_loop(
+            self, new_loop: object
+        ) -> EngineDeps:
+            # Added 2026-07-09 (Bug 01). Symmetric to rebind_tool_runtime.
+            # ``set_project_root`` calls this with a newly constructed
+            # ``LLMToolLoop`` (or ``None`` for rule-only deployment).
+            self.tool_loop = new_loop
+            return self
+
     # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.
     stub = PlainDeps()
     assert isinstance(stub, EngineDeps)
@@ -318,6 +332,141 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
     assert session.deps.router is original_router
     # Runtime swapped to the new root.
     assert session.deps.tool_runtime.project_root == tmp_path.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Bug 01 — tool_loop rebind on set_project_root
+# ---------------------------------------------------------------------------
+
+
+def test_set_project_root_rebuilds_tool_loop(tmp_path: Path) -> None:
+    """Bug 01: 当 deps 带 tool_loop 时,set_project_root 用新 runtime 重建。
+
+    直接构造 production_deps(settings with API key) 让 tool_loop 被装配,
+    然后 set_project_root(B),断言 deps.tool_loop._runtime 指向 B。
+    """
+    from pydantic import SecretStr
+
+    from writer.config import Settings
+    from writer.engine.deps import production_deps
+
+    proj_a = tmp_path / "proj_a"
+    proj_b = tmp_path / "proj_b"
+    proj_a.mkdir()
+    proj_b.mkdir()
+
+    settings = Settings(
+        model="gpt-4o-mini",
+        api_key=SecretStr("sk-test"),
+        base_url="https://api.openai.com/v1",
+        temperature=0.0,
+    )
+
+    deps = production_deps(settings=settings, project_root=proj_a)
+    assert deps.tool_loop is not None
+    assert deps.tool_loop._runtime.project_root == proj_a.resolve()
+
+    session = EngineSession()
+    session.deps = deps
+    session.project_root = proj_a
+
+    # 切到 B:tool_loop 应被重建,新 runtime 指向 B
+    session.set_project_root(proj_b)
+    assert session.deps.tool_loop is not None
+    assert session.deps.tool_loop._runtime.project_root == proj_b.resolve()
+
+
+def test_set_project_root_with_protocol_only_deps(tmp_path: Path) -> None:
+    """Bug 01: PlainDeps 补 rebind_tool_loop 后,set_project_root 通过。"""
+    # PlainDeps 已有 rebind_tool_loop;这里只验证 isinstance(stub, EngineDeps)
+    # 仍然为真,确保 Protocol 字段扩展未破坏 stub 验证。
+    stub_factory = _build_plain_deps_stub()  # type: ignore[func-returns-value]
+    session = EngineSession()
+    session.deps = stub_factory
+    assert isinstance(session.deps, EngineDeps)
+    # 调用 set_project_root 不抛 AttributeError
+    session.set_project_root(tmp_path)
+    assert session.deps.tool_runtime.project_root == tmp_path.resolve()
+
+
+def _build_plain_deps_stub() -> EngineDeps:
+    """返回一个最小 PlainDeps 实例,满足 EngineDeps Protocol。"""
+    # 直接复用类内测试的 stub 模式;最小字段集足以过 isinstance 检查。
+    class _Stub:
+        def __init__(self) -> None:
+            self.router = RuleBasedIntentRouter()
+            self.agent_registry = builtin_agent_registry()
+            self.tool_registry = built_tool_registry()
+            self.tool_runtime = ToolRuntime(
+                project_root=Path("/__no_project__").resolve()
+            )
+            self.directive_registry = built_directive_registry()
+            self.tool_loop = None
+            self.prose_client = DeterministicProseClient()
+            self.review_llm = None
+            self.settings = get_settings()
+
+        def route(self, user_input: str, project_state: str) -> AgentAction:
+            return self.router.route(user_input, project_state)
+
+        def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
+            return WorkflowResult(status="completed", chunks=())
+
+        def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
+            self.tool_runtime = new_runtime
+            return self
+
+        def rebind_directive_registry(
+            self, new_registry: DirectiveRegistry
+        ) -> EngineDeps:
+            self.directive_registry = new_registry
+            return self
+
+        def rebind_skill_registry(
+            self, new_registry: DirectiveRegistry
+        ) -> EngineDeps:
+            self.directive_registry = new_registry
+            return self
+
+        def rebind_agent_registry(self, new_registry: object) -> EngineDeps:
+            self.agent_registry = new_registry
+            return self
+
+        def rebind_tool_loop(self, new_loop: object) -> EngineDeps:
+            self.tool_loop = new_loop
+            return self
+
+    return _Stub()
+
+
+def test_set_project_root_none_does_not_error(tmp_path: Path) -> None:
+    """Bug 01: tool_loop 原本非 None,set_project_root(None) 不抛错。"""
+    from pydantic import SecretStr
+
+    from writer.config import Settings
+    from writer.engine.deps import production_deps
+
+    proj_a = tmp_path / "proj_a"
+    proj_a.mkdir()
+
+    settings = Settings(
+        model="gpt-4o-mini",
+        api_key=SecretStr("sk-test"),
+        base_url="https://api.openai.com/v1",
+        temperature=0.0,
+    )
+    deps = production_deps(settings=settings, project_root=proj_a)
+    assert deps.tool_loop is not None
+
+    session = EngineSession()
+    session.deps = deps
+    session.project_root = proj_a
+
+    # 切到 None:不应抛错;tool_loop 仍指向 LLMToolLoop(因为 settings
+    # 还有 API key);runtime 已切到 sentinel。
+    session.set_project_root(None)
+    # 不抛错,tool_runtime 已切到 sentinel
+    assert session.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
 
 
 # ---------------------------------------------------------------------------

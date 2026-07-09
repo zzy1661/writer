@@ -83,6 +83,9 @@ class EngineDeps(Protocol):
     # ReviewVerdict 调用中使用此 LLM，而不是从 settings 重新构造
     # ``ChatOpenAI``。测试在此注入 recording fake；生产保持 None。
     review_llm: Any
+    # 全局配置；用于 tool_loop rebind 时复用同一 settings（2026-07-09
+    # 增补以修复 Bug 01）。
+    settings: Settings
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
         ...
@@ -154,6 +157,22 @@ class EngineDeps(Protocol):
         """
         ...
 
+    def rebind_tool_loop(
+        self, new_loop: LLMToolLoop | None
+    ) -> EngineDeps:
+        """返回一个新的（或就地变更后的） ``EngineDeps``，其中 ReAct 工具循环已替换。
+
+        与 :meth:`rebind_tool_runtime` 对称。由
+        :meth:`writer.session.EngineSession.set_project_root` 在替换
+        ``tool_runtime`` 之后调用 —— 新的循环必须针对新的 runtime 构造，
+        才能让 ``self._runtime`` 指向新的项目根。传 ``None`` 保持
+        session 在 rule-only 模式（无 API key）。实现可以自由返回新
+        实例（默认实现用 ``dataclasses.replace``）或就地变更 ``self``。
+
+        2026-07-09 增补以修复 Bug 01（tool_loop 未在 project 切换时重建）。
+        """
+        ...
+
 
 @dataclass
 class _DefaultEngineDeps:
@@ -171,6 +190,7 @@ class _DefaultEngineDeps:
     tool_loop: LLMToolLoop | None = None
     prose_client: LLMProseClient | None = None
     review_llm: Any = None
+    settings: Settings = field(default=None)  # type: ignore[assignment]
     _workflows: dict[str, WorkflowStub] = field(default_factory=dict)
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -223,6 +243,14 @@ class _DefaultEngineDeps:
         # Per ``fea-agent-mirror``：项目级 agent 位于项目目录内，
         # 因此绑定项目变更时必须调用本方法。
         return replace(self, agent_registry=new_registry)
+
+    def rebind_tool_loop(
+        self, new_loop: LLMToolLoop | None
+    ) -> EngineDeps:
+        # 与 ``rebind_tool_runtime`` 对称；2026-07-09 增补以修复 Bug 01：
+        # set_project_root 时必须用新 runtime 重建 tool_loop，
+        # 否则 LLMToolLoop._runtime 仍指向旧 project_root。
+        return replace(self, tool_loop=new_loop)
 
 
 def _select_router(
@@ -349,6 +377,7 @@ def production_deps(
         directive_registry=built_directive_registry(project_root=root),
         tool_loop=tool_loop,
         prose_client=prose_client,
+        settings=resolved,
         _workflows=dict(WORKFLOWS),
     )
 
