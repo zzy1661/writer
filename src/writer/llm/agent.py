@@ -169,7 +169,7 @@ class LLMToolLoop:
         self,
         action: AgentAction,
         ctx: EngineContext,
-        deps: EngineDeps,  # noqa: ARG002 — 与 engine helpers 保持对称
+        deps: EngineDeps,
         cfg: EngineConfig,
     ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
         """驱动 ReAct 循环直至 ``answer_directly`` 或预算耗尽。
@@ -182,13 +182,16 @@ class LLMToolLoop:
         工具调用抛出的异常向外传播 —— 引擎外层的 ``except ToolError``
         边界是暴露工具失败的唯一漏斗；我们不在这里吞异常，让相同的
         ``ErrorEvent + Done(aborted)`` UX 生效。
+
+        ``deps`` 用于 :meth:`_initial_messages` 拼接 directive body 与
+        agent identity —— 让 LLM 看到 SKILL.md / agent Markdown 提供的
+        上下文（per Bug 02 修复）。
         """
 
-        del deps  # 当前未使用；保留在签名里为未来 hooks
         del cfg  # 当前未使用；为未来 per-loop 配置保留
 
         state = ToolLoopState(
-            messages=self._initial_messages(action, ctx.user_input),
+            messages=self._initial_messages(action, ctx.user_input, deps=deps),
         )
 
         while state.tool_calls_made < MAX_LOOP_STEPS:
@@ -261,17 +264,55 @@ class LLMToolLoop:
     # ------------------------------------------------------------------
 
     def _initial_messages(
-        self, action: AgentAction, user_input: str
+        self, action: AgentAction, user_input: str, *, deps: EngineDeps
     ) -> list[BaseMessage]:
-        """用 system prompt + 用户轮次为对话播种。
+        """用 system prompt + directive / agent body + 用户轮次为对话播种。
 
-        System prompt 内嵌工具目录（name + description）供 JSON-prompt
-        provider 使用，并为所有 provider 加上模型名 / 版本 banner
-        让日志历史自描述。
+        System prompt 由四段拼接（per Bug 02 修复）:
+
+        1. **base system prompt** —— 工具循环说明 + 工具目录；
+        2. **directive body** —— 当 ``action.command`` 命中
+           ``deps.directive_registry`` 时，追加 SKILL.md body + references；
+        3. **agent identity** —— 当 ``action.target_agent`` 命中
+           ``deps.agent_registry`` 时，追加 agent Markdown body；
+        4. **router hint** —— 当 ``action.answer`` 非空时，追加
+           router 拼好的 prompt hint（向后兼容）。
         """
 
-        system = self._system_prompt()
-        return [SystemMessage(content=system), HumanMessage(content=user_input)]
+        system_parts: list[str] = [self._system_prompt()]
+
+        # 1. directive body:仅当 action 是 answer_directly 且有 command
+        if action.action_type == "answer_directly" and action.command:
+            directive_meta = deps.directive_registry.get(action.command)
+            if directive_meta is not None:
+                refs = "\n\n".join(
+                    f"--- {relpath} ---\n{body}"
+                    for relpath, body in directive_meta.references.items()
+                )
+                section = (
+                    f"[directive body: {directive_meta.command}]\n"
+                    f"{directive_meta.body}"
+                )
+                if refs:
+                    section += f"\n\n[directive references]\n{refs}"
+                system_parts.append(section)
+
+        # 2. agent identity:仅当 action.target_agent 非空
+        if action.target_agent:
+            agent_meta = deps.agent_registry.get(action.target_agent)
+            if agent_meta is not None:
+                system_parts.append(
+                    f"[agent identity: {agent_meta.name}]\n{agent_meta.body}"
+                )
+
+        # 3. router 拼好的 answer(用作 hint,不是指令)
+        if action.answer:
+            system_parts.append(f"[router hint]\n{action.answer}")
+
+        return [
+            SystemMessage(content="\n\n".join(system_parts)),
+            HumanMessage(content=user_input),
+        ]
 
     def _system_prompt(self) -> str:
         """构建循环的 system prompt。

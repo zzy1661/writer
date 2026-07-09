@@ -285,7 +285,8 @@ def _noop_deps() -> _DefaultEngineDeps:
     """Construct a deps instance with ``tool_loop=None``.
 
     Used by the loop's direct tests — they don't need a real deps, the
-    loop ignores ``deps`` after the initial signature plumb.
+    loop reads ``deps.directive_registry`` / ``deps.agent_registry``
+    for Bug 02 (_initial_messages 拼 SKILL.md body 与 agent body)。
     """
 
     return _DefaultEngineDeps(
@@ -299,6 +300,8 @@ def _noop_deps() -> _DefaultEngineDeps:
         # ``_DefaultEngineDeps``. The tool-loop tests don't exercise
         # it, so the Deterministic default is fine.
         prose_client=DeterministicProseClient(),
+        # Bug 01: ``settings`` 字段。Bug 02 测试也需要。
+        settings=_settings(),
     )
 
 
@@ -395,3 +398,155 @@ async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() ->
     assert aborted, "expected a Done(aborted) event"
     assert aborted[-1].payload is not None
     assert "not_a_tool" in str(aborted[-1].payload["error"])
+
+
+# ---------------------------------------------------------------------------
+# Bug 02 — _initial_messages 拼 directive body 与 agent identity
+# ---------------------------------------------------------------------------
+
+
+def _stub_directive_registry() -> Any:
+    """Mock DirectiveRegistry.get 返回固定 directive。"""
+    from writer.skills.protocol import SkillDirective
+
+    fake_directive = SkillDirective(
+        command="/大纲",
+        description="测试 directive",
+        requires_states=frozenset(),
+        body="四幕模板 body 内容",
+        references={},
+    )
+
+    class _Stub:
+        def get(self, command: str) -> SkillDirective | None:
+            if command == "/大纲":
+                return fake_directive
+            return None
+
+    return _Stub()
+
+
+def _stub_agent_registry() -> Any:
+    """Mock AgentRegistry.get 返回固定 agent。"""
+    from writer.agents.protocol import Agent
+
+    fake_agent = Agent(
+        name="历史",
+        description="测试 agent",
+        genre="历史",
+        body="历史题材 prompt body",
+    )
+
+    class _Stub:
+        def get(self, name: str) -> Agent | None:
+            if name == "历史":
+                return fake_agent
+            return None
+
+    return _Stub()
+
+
+def test_initial_messages_includes_directive_body() -> None:
+    """Bug 02: action.command 命中 directive_registry → SystemMessage 含 [directive body]"""
+    from langchain_core.messages import SystemMessage
+
+    registry = built_tool_registry()
+    runtime = ToolRuntime(project_root=Path("/__no_project__"))
+    chat = _ScriptedChat([{"content": "ok"}])
+    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+
+    # 构造 mock deps,带 stub directive_registry
+    deps = _noop_deps()
+    deps.directive_registry = _stub_directive_registry()  # type: ignore[assignment]
+
+    action = AgentAction(
+        action_type="answer_directly",
+        command="/大纲",
+    )
+
+    messages = loop._initial_messages(action, "用户输入", deps=deps)
+    sys_msg = messages[0]
+    assert isinstance(sys_msg, SystemMessage)
+    assert "[directive body: /大纲]" in sys_msg.content
+    assert "四幕模板 body 内容" in sys_msg.content
+
+
+def test_initial_messages_includes_agent_identity() -> None:
+    """Bug 02: action.target_agent 命中 agent_registry → SystemMessage 含 [agent identity]"""
+    from langchain_core.messages import SystemMessage
+
+    registry = built_tool_registry()
+    runtime = ToolRuntime(project_root=Path("/__no_project__"))
+    chat = _ScriptedChat([{"content": "ok"}])
+    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+
+    deps = _noop_deps()
+    deps.agent_registry = _stub_agent_registry()  # type: ignore[assignment]
+
+    action = AgentAction(
+        action_type="answer_directly",
+        target_agent="历史",
+    )
+
+    messages = loop._initial_messages(action, "用户输入", deps=deps)
+    sys_msg = messages[0]
+    assert isinstance(sys_msg, SystemMessage)
+    assert "[agent identity: 历史]" in sys_msg.content
+    assert "历史题材 prompt body" in sys_msg.content
+
+
+def test_initial_messages_includes_references() -> None:
+    """Bug 02: directive 带 references → SystemMessage 含 [directive references] 段"""
+    from langchain_core.messages import SystemMessage
+
+    from writer.skills.protocol import SkillDirective
+
+    fake_directive = SkillDirective(
+        command="/大纲",
+        description="测试 directive",
+        requires_states=frozenset(),
+        body="body",
+        references={"template.md": "模板内容", "examples.md": "示例内容"},
+    )
+
+    class _Stub:
+        def get(self, command: str) -> SkillDirective | None:
+            return fake_directive if command == "/大纲" else None
+
+    registry = built_tool_registry()
+    runtime = ToolRuntime(project_root=Path("/__no_project__"))
+    chat = _ScriptedChat([{"content": "ok"}])
+    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+
+    deps = _noop_deps()
+    deps.directive_registry = _Stub()  # type: ignore[assignment]
+
+    action = AgentAction(action_type="answer_directly", command="/大纲")
+    messages = loop._initial_messages(action, "用户输入", deps=deps)
+    sys_msg = messages[0]
+    assert isinstance(sys_msg, SystemMessage)
+    assert "[directive references]" in sys_msg.content
+    assert "--- template.md ---" in sys_msg.content
+    assert "模板内容" in sys_msg.content
+
+
+def test_initial_messages_no_command_no_body() -> None:
+    """Bug 02: action.command=None 时不查 directive_registry,SystemMessage 只含 base prompt。"""
+    from langchain_core.messages import SystemMessage
+
+    registry = built_tool_registry()
+    runtime = ToolRuntime(project_root=Path("/__no_project__"))
+    chat = _ScriptedChat([{"content": "ok"}])
+    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+
+    deps = _noop_deps()
+    deps.directive_registry = _stub_directive_registry()  # type: ignore[assignment]
+
+    action = AgentAction(action_type="answer_directly")  # 无 command
+    messages = loop._initial_messages(action, "用户输入", deps=deps)
+    sys_msg = messages[0]
+    assert isinstance(sys_msg, SystemMessage)
+    # 不应包含 directive body(因为 action.command is None)
+    assert "[directive body:" not in sys_msg.content
+    # base prompt 应仍在
+    assert "工具循环" in sys_msg.content
