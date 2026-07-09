@@ -1,8 +1,8 @@
 # Agent 架构模式与本项目选型
 
-> **2026-07-09 重要修订**:本文档原标题《Agent 架构模式与本项目选型》给出的 engine 结构已大幅演进:EngineDeps 从 1 字段(router)扩展到 **6 字段 + 5 方法**,新增 `tool_loop` (`LLMToolLoop`,ReAct 风格多步工具循环,2026-07-08)、`directive_registry`(`Skill` 已重命名为 `SkillDirective`,`SkillRegistry` 已重命名为 `DirectiveRegistry`,2026-07-09)。LlmIntentRouter + CompositeRouter 已实装。EngineDeps.rebind_* 系列方法已替代早期的 duck-typed mutation。
+> **2026-07-09 重要修订**:本文档原标题《Agent 架构模式与本项目选型》给出的 engine 结构已大幅演进:EngineDeps 从 1 字段(router)扩展到 **6 字段 + 4 方法**,新增 `tool_loop` (`LLMToolLoop`,ReAct 风格多步工具循环,2026-07-08)、`directive_registry`(`Skill` 已重命名为 `SkillDirective`,`SkillRegistry` 已重命名为 `DirectiveRegistry`,2026-07-09)、`agent_registry`(2026-07-09 `fea-agent-mirror`)。LlmIntentRouter + CompositeRouter 已实装。EngineDeps.rebind_* 系列方法已替代早期的 duck-typed mutation。
 >
-> 题材分支(History/Romance/Xuanhuan Consultant)已通过 [OpenSpec `fea-genre-aware-init`](../../openspec/changes/archive/2026-07-06-fea-genre-aware-init/) 落地。
+> 题材分支(`writer.roles.{History,Romance,Xuanhuan,Story}Agent` Python 类)已通过 [OpenSpec `fea-genre-aware-init`](../../openspec/changes/archive/2026-07-06-fea-genre-aware-init/) 落地,2026-07-09 `fea-agent-mirror` 由 `Consultant` 改名为 `Agent`。**2026-07-09 `chg-remove-roles` 进一步清理**:`writer.roles` 整包删除;`EngineDeps.story_agent` 字段 + `rebind_story_agent` 方法 + `_agent_for_genre` 工厂全部移除;题材分支完全迁移到 `writer.agents.AgentRegistry` Markdown 范式(`writer/agents/_shipped/*.md` 4 份)。`writer.agents.process_init_brief` 是唯一保留的 Python-side capability(原 `StoryAgent.process_init_brief`)。
 
 ## 问题
 
@@ -157,11 +157,11 @@ Tool-Use 本身不是 Agent 范式,但是大多数 Agent 都依赖它。RAG Agen
   - `start_workflow` 走 `_DefaultEngineDeps.run_workflow`(占位,等真实 LangGraph 图)
 - **工具层**:6 个 builtin Tool(`safe_read_file` / `safe_list_dir` / `project_search` / `foreshadow_search` / `chapter_locate` / `wordcount`)
   - 主范式:Tool-Use + LangChain `bind_tools` / JSON-prompt 双 provider
-  - 业务级"做什么"由 **Markdown SKILL.md directives** 表达(4 个 shipped:`/大纲` `/目录` `/续写` `/改`),不是 Python 类
-- **角色层(题材分支)**:每个题材一个 `StoryConsultant` 子类(已 apply 2026-07-06)
-  - `HistoryConsultant` / `XuanhuanConsultant` / `RomanceConsultant` / `StoryConsultant`(兜底)
-  - 通过 `EngineDeps.story_consultant` 槽位按 `AGENT.md` `题材:` 行动态派生
-  - 每个子类的 `chapters` 字符串前缀约定表达题材差异
+  - 业务级"做什么"由 **Markdown SKILL.md directives** 表达(2 个 shipped:`/大纲` `/目录`),不是 Python 类
+- **角色层(题材分支)**:每个题材一个 Markdown agent(`writer/agents/_shipped/*.md` 4 份,2026-07-09 `chg-remove-roles` 后取代原 `StoryAgent` Python 类)
+  - `other` / `历史` / `言情` / `玄幻`(兜底)
+  - 通过 `writer.agents.AgentRegistry` 按 `AGENT.md` `题材:` 行动态派生(LLM dispatch 时按 agent `description` 自选)
+  - 每个 agent 的 `chapters` 字符串前缀约定表达题材差异(在 directive body 内 inline,不再由 Python 端注入)
 
 这五个层级分别对应不同的范式,但共同遵循几个原则:
 
@@ -180,7 +180,7 @@ Tool-Use 本身不是 Agent 范式,但是大多数 Agent 都依赖它。RAG Agen
 | 角色不能越权 | 多 Agent 共享消息总线容易泄露上下文 | 每个节点只读自己需要的 canon block 子集 |
 | 审核失败要回流 | 单 Agent 没有显式回流边 | `review_gate` 通过条件边回 `write_chapter` |
 | 状态可恢复 | ReAct 历史不可序列化检查点 | EngineSession 维护 turn history,WorkflowStub 占位等 LangGraph checkpoint |
-| 历史题材可选加载 | ReAct 不知道是否加载历史顾问 | 通过 `project_genre` 字段 + `_consultant_for_genre()` 派生 Consultant 子类 |
+| 历史题材可选加载 | ReAct 不知道是否加载历史顾问 | 通过 `project_genre` 字段 + `writer.agents.AgentRegistry` 按题材派生 Markdown agent;LLM 按 `description` 自选(`chg-remove-roles`,2026-07-09) |
 | 项目级定制业务规则 | Python 类难覆盖 | 项目目录 `.writer/skills/` 里放 `.md` 即可覆盖 shipped SKILL.md |
 
 ## 最小 demo / 伪代码
@@ -302,7 +302,7 @@ writer/engine/
 class EngineDeps(Protocol):
     # 字段
     router: IntentRouter
-    story_consultant: StoryConsultant
+    agent_registry: AgentRegistry                # 2026-07-09 chg-remove-roles:story_agent 字段删除
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry       # NEW 2026-07-09 (原 skill_registry)
@@ -312,16 +312,16 @@ class EngineDeps(Protocol):
     def route(self, user_input, project_state) -> AgentAction: ...
     def run_workflow(self, name, ctx) -> Iterable[str]: ...
     def rebind_tool_runtime(self, new_runtime) -> EngineDeps: ...
-    def rebind_story_consultant(self, new_consultant) -> EngineDeps: ...
     def rebind_skill_registry(self, new_registry) -> EngineDeps: ...  # back-compat alias
     def rebind_directive_registry(self, new_registry) -> EngineDeps: ...
+    def rebind_agent_registry(self, new_registry) -> AgentRegistry: ...  # 2026-07-09 fea-agent-mirror
 ```
 
-`production_deps()` 默认装配(纯工厂,2026-07-08 M2 起):
+`production_deps()` 默认装配(纯工厂,2026-07-08 M2 起;`chg-remove-roles` 2026-07-09 后去掉 `story_agent=` / `genre=` kwarg):
 
 - `router`:有 API key 时返回 `CompositeRouter`,否则纯 `RuleBasedIntentRouter`
-- `story_consultant`:按 `genre=` 选 `HistoryConsultant` / `RomanceConsultant` / `XuanhuanConsultant` / `StoryConsultant`
-- `tool_registry`:`built_tool_registry()` 6 个 builtin Tool
+- `agent_registry`:`writer.agents.built_agent_registry(project_root=...)` — 题材分支由 `_shipped/*.md` 4 份 Markdown 携带(`chg-remove-roles`,2026-07-09)
+- `tool_registry`:`built_tool_registry()` 9 个 builtin Tool(`safe_write_file` / `safe_edit_file` / `safe_glob` 由 `chg-add-write-edit-glob` 补入)
 - `tool_runtime`:`ToolRuntime(project_root=...)`,S0 路径下用 sentinel `/__no_project__`
 - `directive_registry`:`built_directive_registry(project_root=...)`,项目级 SKILL.md 通过 last-write-wins 覆盖 shipped
 - `tool_loop`:有 API key 时构造 `LLMToolLoop`(否则 `None`,引擎走同步 `_run_tool`)
@@ -365,7 +365,7 @@ class EngineDeps(Protocol):
 - `EngineContext / EngineConfig / Event 子类 / AgentAction` 全程 frozen(`@dataclass(frozen=True)` 或 Pydantic `model_config={"frozen": True}`)
 - `run_engine` 是 `AsyncIterator[Event]`,不持有会话状态
 - `EngineDeps` 必须 `@runtime_checkable`,便于测试时 mock
-- 6 字段 + 5 方法全部需要在手写 `EngineDeps` stub 时实现(测试 fakes 经常漏 `tool_loop = None` 字段)
+- 6 字段 + 4 方法全部需要在手写 `EngineDeps` stub 时实现(测试 fakes 经常漏 `tool_loop = None` 字段);`chg-remove-roles`(2026-07-09)后 `rebind_story_agent` 不再存在
 - LLM 工具循环有 `MAX_LOOP_STEPS=5` 上限,耗尽时走 `Done(tool_loop_completed, payload={tool_calls_made, last_output})`,**不算** aborted
 - `ToolError` / `SkillError` 在 engine 边界 catch 后产出 `ErrorEvent + Done(aborted)`,不外溢
 - `rebind_*` 系列方法是热替换 deps 的唯一接口;任何 duck-typed mutation 已被禁止(2026-07-05 M6 修复)
@@ -375,7 +375,7 @@ class EngineDeps(Protocol):
 - 前台路由器输出一律是 `AgentAction`,不允许自由文本
 - 长任务只能由后台 LangGraph 执行,前台不直接推进 draft
 - 任何文件写入都通过 builtin Tool(`safe_read_file` / `safe_write_file` 间接),不能由 LLM 直接编辑 Markdown
-- 题材分支只影响 `StoryConsultant` 子类,不影响 `IntentRouter` / `ToolRegistry` / `directive_registry`
+- 题材分支只影响 `writer.agents.AgentRegistry`(4 份 `_shipped/*.md`),不影响 `IntentRouter` / `ToolRegistry` / `directive_registry`(2026-07-09 `chg-remove-roles` 后)
 - 审核结果可以决定是否回流到 `write` 节点,回流次数受 `retry_count` 上限保护
 - 在事件流中能清晰看到每个范式的位置:Plan(`run_command` 命中 directive → LLM 工具循环)、Execute(`call_tool` / `start_workflow`)、Review(`run_workflow` 内 review_gate)
 

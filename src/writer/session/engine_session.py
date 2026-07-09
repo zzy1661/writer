@@ -8,7 +8,7 @@ turn. It owns:
   latest state detected from disk.
 - **deps** (mutable): the ``EngineDeps`` instance, built once at
   construction. ``tool_runtime`` is swapped via :meth:`set_project_root`
-  while router / story_agent / tool_registry are preserved.
+  while router / tool_registry are preserved.
 - **turns** (mutable): append-only list of :class:`TurnRecord`.
 - **pending_interrupt** (mutable): the most recent ``Interrupt`` event
   emitted by the engine, cleared when the next turn completes.
@@ -75,9 +75,9 @@ class EngineSession:
             from writer.engine.deps import production_deps
 
             if self.project_root is not None:
-                # Production-deps is now a pure factory (M2 2026-07-08) —
-                # it no longer reads AGENT.md behind the caller's back,
-                # so we refresh ``project_genre`` here and pass it down.
+                # Refresh ``project_genre`` so the very first ``/状态`` read
+                # shows the right value; ``production_deps`` itself no longer
+                # reads ``AGENT.md`` (per ``chg-remove-roles``).
                 self.refresh_project_genre()
             # ``production_deps`` is responsible for also wiring
             # ``directive_registry`` with the bound project (per
@@ -85,10 +85,7 @@ class EngineSession:
             # lookup sees the project-level overrides. We do NOT
             # post-hoc rebuild here — the session's
             # ``set_project_root`` handles later project changes.
-            self.deps = production_deps(
-                project_root=self.project_root,
-                genre=self.project_genre,
-            )
+            self.deps = production_deps(project_root=self.project_root)
 
     # ------------------------------------------------------------------
     # project_root + deps management
@@ -99,12 +96,14 @@ class EngineSession:
 
         Router / tool_registry are preserved across the swap.
         ``tool_runtime`` is rebuilt because it holds the project_root
-        that gates ``safe_path`` checks. ``story_agent`` is ALSO
-        rebuilt if the bound project's ``AGENT.md`` ``题材:`` line
-        resolves to a different Agent subclass (per arch-optimizer
-        M1, 2026-07-07): without this rebuild, a REPL session that
-        runs ``/init 历史`` then ``/init 玄幻`` would keep the
-        HistoryAgent in deps and serve stale outlines.
+        that gates ``safe_path`` checks.
+
+        Removed in ``chg-remove-roles``: the ``_agent_for_genre`` +
+        ``rebind_story_agent`` block. ``writer.roles.StoryAgent`` (and
+        the ``EngineDeps.story_agent`` field) is gone, so the session
+        no longer needs to rebuild a Python-side capability on
+        project / genre change. Genre awareness for LLM dispatch is
+        carried by ``writer.agents.AgentRegistry`` (rebuilt below).
 
         ``directive_registry`` is also rebuilt (per ``chg-markdown-skills``)
         so the new project's ``.writer/skills/`` overrides become
@@ -122,8 +121,6 @@ class EngineSession:
             return
 
         from writer.agents import built_agent_registry
-        from writer.config import get_settings
-        from writer.engine.deps import _agent_for_genre
         from writer.skills import built_directive_registry
         from writer.tools import ToolRuntime
 
@@ -139,14 +136,6 @@ class EngineSession:
         self.deps = self.deps.rebind_tool_runtime(new_runtime)
         self.refresh_project_state()
         self.refresh_project_genre()
-
-        # Rebuild story_agent against the freshly-read genre. Uses
-        # the same Settings the deps were originally built with so
-        # LLM/feature flags stay consistent across the swap.
-        new_agent = _agent_for_genre(
-            get_settings(), self.project_genre
-        )
-        self.deps = self.deps.rebind_story_agent(new_agent)
 
         # Rebuild the directive registry so the new project's
         # ``.writer/skills/`` overrides take effect on the next turn.
@@ -180,6 +169,12 @@ class EngineSession:
         ``"other"``. Called automatically from
         :meth:`set_project_root` and on demand by callers that want to
         re-read after an external ``AGENT.md`` edit.
+
+        Note (per ``chg-remove-roles``): this value is no longer wired
+        into a Python-side ``StoryAgent`` subclass. ``/状态`` still
+        surfaces it; LLM dispatch routes through the Markdown
+        ``writer.agents.AgentRegistry``, which reads genre from each
+        agent's ``AGENT.md`` frontmatter (or project override).
         """
 
         if self.project_root is None:

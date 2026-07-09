@@ -6,7 +6,12 @@ from langchain_core.messages import AIMessage
 
 from writer.config import Settings
 from writer.project.init_brief import apply_init_brief
-from writer.roles import StoryAgent
+
+# ---------------------------------------------------------------------------
+# process_init_brief direct (covers the function-based capability introduced
+# by ``chg-remove-roles``: ``writer.roles.StoryAgent`` is gone, replaced by
+# :func:`writer.agents.process_init_brief`).
+# ---------------------------------------------------------------------------
 
 
 class _FakeBriefChat:
@@ -30,8 +35,12 @@ def test_apply_init_brief_writes_core_idea_and_agent_requirements(tmp_path) -> N
         }
         """
     )
-    agent = StoryAgent(Settings(), llm=fake)
-    result = apply_init_brief(project, "程序员穿越唐朝", agent)
+    result = apply_init_brief(
+        project,
+        "程序员穿越唐朝",
+        settings=Settings(),
+        llm=fake,
+    )
 
     assert result.source == "llm"
     core = (project / "创意" / "核心创意.md").read_text(encoding="utf-8")
@@ -42,16 +51,46 @@ def test_apply_init_brief_writes_core_idea_and_agent_requirements(tmp_path) -> N
     assert "30 万字" in agent
 
 
-def test_process_init_brief_fallback_without_api_key(tmp_path) -> None:  # noqa: ANN001
+def test_process_init_brief_fallback_without_api_key() -> None:
+    """``process_init_brief`` falls back to the deterministic Markdown body.
+
+    Updated 2026-07-09 (``chg-remove-roles``): the previous test
+    round-tripped through ``apply_init_brief`` so the ``StoryAgent``
+    fallback path got exercised. We now invoke
+    :func:`writer.agents.process_init_brief` directly and assert the
+    structured ``source='fallback'`` contract.
+    """
+
+    from writer.agents import process_init_brief
+
+    result = process_init_brief(
+        "一个废土少年的故事", settings=Settings(api_key=None)
+    )
+
+    assert result.source == "fallback"
+    assert "核心创意" in result.core_idea
+    assert "一个废土少年的故事" in result.core_idea
+
+
+def test_process_init_brief_fallback_writes_files_via_apply(tmp_path) -> None:  # noqa: ANN001
+    """End-to-end: ``apply_init_brief`` with no API key writes the files."""
+
     project = tmp_path / "novel"
     project.mkdir()
     (project / "AGENT.md").write_text("# novel\n\n", encoding="utf-8")
 
-    agent = StoryAgent(Settings(api_key=None))
-    result = apply_init_brief(project, "一个废土少年的故事", agent)
+    apply_init_brief(
+        project,
+        "一个废土少年的故事",
+        settings=Settings(api_key=None),
+    )
 
-    assert result.source == "fallback"
     assert (project / "创意" / "核心创意.md").is_file()
+
+
+# ---------------------------------------------------------------------------
+# Helpers around `/init <brief>` parsing (unchanged across the rewrite).
+# ---------------------------------------------------------------------------
 
 
 def test_should_run_init_brief_on_bound_s1_project(tmp_path) -> None:  # noqa: ANN001

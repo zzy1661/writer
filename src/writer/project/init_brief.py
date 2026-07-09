@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from writer.agents import InitBriefResult, process_init_brief
+from writer.config import Settings
 from writer.project.state import ProjectState, append_agent_requirements, detect_state
-from writer.roles import InitBriefResult, StoryAgent
 
 _SENTENCE_PUNCTUATION = "。！？；,.!?;"
 _MAX_PROJECT_NAME_LEN = 30
@@ -75,11 +76,18 @@ def should_run_init_brief(
 def apply_init_brief(
     project_root: Path,
     brief: str,
-    agent: StoryAgent,
+    *,
+    settings: Settings,
+    llm=None,
 ) -> InitBriefResult:
-    """Expand a natural-language brief and write project files."""
+    """Expand a natural-language brief and write project files.
 
-    result = agent.process_init_brief(brief)
+    The Python-side capability lives in :func:`writer.agents.process_init_brief`
+    (per ``chg-remove-roles``: the ``writer.roles.StoryAgent`` class was deleted
+    once its other methods became dead code after ``fea-agent-mirror``).
+    """
+
+    result = process_init_brief(brief, settings=settings, llm=llm)
     ideas_dir = project_root / "创意"
     ideas_dir.mkdir(parents=True, exist_ok=True)
     (ideas_dir / "核心创意.md").write_text(result.core_idea, encoding="utf-8")

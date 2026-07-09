@@ -22,7 +22,7 @@ requires_states: [HAS_OUTLINE, HAS_TOC]
 ## 执行步骤
 
 1. 用 `safe_read_file` 读取 `outline/大纲.md`，提取四幕结构与章节标题。
-2. 调 `story_consultant.draft_toc(outline_text, project_root=ctx.project_root)` 得到 `TocResult(title, chapters)`。
+2. 调 `story_agent.draft_toc(outline_text, project_root=ctx.project_root)` 得到 `TocResult(title, chapters)`。
 3. 按下方模板格式化输出，写入 `outline/toc.md`。
 4. 调 `refresh_agent_file(project_root, project_state=HAS_TOC)`。
 5. yield `TextChunk` 显示前几章示例 + `Done(reason="answered", payload={"chapter_count": N})`。

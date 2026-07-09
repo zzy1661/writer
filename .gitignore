@@ -19,3 +19,4 @@ openspec
 # architecture-optimizer reports (gitignored scratch space)
 tmp/
 .VSCodeCounter
+e2e

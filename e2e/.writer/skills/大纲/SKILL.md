@@ -24,7 +24,7 @@ requires_states: [INITIALIZED, HAS_OUTLINE]
 
 1. 用 `safe_read_file` 读取 `outline/premise.md` 和 `outline/volume-plan.md`（若存在），提取用户已写的前提。
 2. 用 `safe_read_file` 读取当前 `outline/大纲.md`（若存在），检查是否要覆盖或追加。
-3. 调 `story_consultant.draft_outline(idea, project_root=ctx.project_root)` 得到 `OutlineResult(title, premise, chapters)`。
+3. 调 `story_agent.draft_outline(idea, project_root=ctx.project_root)` 得到 `OutlineResult(title, premise, chapters)`。
 4. 按下方模板格式化输出，写入 `outline/大纲.md`。
 5. 调 `refresh_agent_file(project_root, project_state=HAS_OUTLINE)`。
 6. 在事件流里 yield TextChunk 显示章节列表（每行 `- <chapter>`）。

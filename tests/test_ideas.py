@@ -4,12 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from langchain_core.messages import AIMessage, HumanMessage
-
-from writer.config import Settings
 from writer.project.ideas import IdeasContext, build_outline_user_message, load_ideas_context
 from writer.project.workspace import create_workspace
-from writer.roles.story_agent import StoryAgent
 
 
 def test_load_ideas_context_reads_core_and_supplementary(tmp_path: Path) -> None:
@@ -47,32 +43,11 @@ def test_build_outline_user_message_prioritizes_core_idea() -> None:
     assert "不得偏离核心创意" in message
 
 
-def test_draft_outline_llm_prompt_includes_ideas_context(tmp_path: Path) -> None:
-    workspace = create_workspace("ideas-outline", tmp_path, with_ideas_dir=True)
-    ideas_dir = workspace.root / "创意"
-    (ideas_dir / "核心创意.md").write_text(
-        "# 核心创意\n\n林远穿越到他写的温馨游戏，却落入杀戮世界。",
-        encoding="utf-8",
-    )
-    (ideas_dir / "世界观.md").write_text("两个世界规则相反。", encoding="utf-8")
-
-    class _CapturingChat:
-        def invoke(self, messages: object) -> AIMessage:
-            self.messages = messages
-            return AIMessage(
-                content=(
-                    '{"title": "杀戮都市", "premise": "双世界反差", '
-                    '"chapters": ["第一幕", "第二幕", "第三幕", "第四幕"]}'
-                )
-            )
-
-    fake = _CapturingChat()
-    StoryAgent(Settings(), llm=fake).draft_outline(
-        "突出主角认知错位",
-        project_root=workspace.root,
-    )
-
-    human = next(m for m in fake.messages if isinstance(m, HumanMessage))
-    assert "林远穿越到他写的温馨游戏" in human.content
-    assert "世界观.md" in human.content
-    assert "突出主角认知错位" in human.content
+# ``test_draft_outline_llm_prompt_includes_ideas_context`` deleted in
+# ``chg-remove-roles`` (2026-07-09): the underlying ``draft_outline``
+# Python method is gone — outline generation is now driven by the LLM
+# consuming ``writer/skills/_shipped/大纲/SKILL.md`` (which reads
+# ``build_outline_user_message`` directly via ``safe_read_file``).
+# ``build_outline_user_message`` is still tested above; the integration
+# point moved from ``StoryAgent._draft_outline_with_llm`` into a
+# Markdown directive.
