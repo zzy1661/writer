@@ -53,9 +53,9 @@ console = Console()
 EXIT_COMMANDS = {"/退出", "/quit", "/q", "exit", "quit"}
 HELP_COMMANDS = {"/帮助", "/help", "help"}
 
-# Static REPL commands that aren't owned by a Skill. /大纲, /目录, /续写,
-# /改 used to live here too — they are now served by the DirectiveRegistry
-# (see ``build_repl_commands``).
+# Static REPL commands that aren't owned by a Skill. /大纲, /目录 used
+# to live here too — they are now served by the DirectiveRegistry (see
+# ``build_repl_commands``).
 STATIC_REPL_COMMANDS = [
     ("/init", "初始化小说项目"),
     ("/创作", "创作指定章节或下一章"),

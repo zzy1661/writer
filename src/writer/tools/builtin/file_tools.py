@@ -357,7 +357,8 @@ class SafeEditFile:
     The tool requires ``old_string`` to be unique unless ``replace_all=True``.
     On a hit, the new content is written atomically with an optional backup.
     ``dry_run=True`` returns the would-be diff in metadata without touching
-    disk; combined with the AGENT.md guard this makes ``/改`` reviewable.
+    disk; combined with the AGENT.md guard this makes LLM-driven edits
+    reviewable before commit.
     """
 
     name = "safe_edit_file"

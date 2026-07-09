@@ -71,10 +71,10 @@ _MANUSCRIPT_DIRS = (
 CURRENT_STATE_SECTION_HEADER = "## 当前状态"
 
 COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
-    # NOTE: /大纲, /目录, /续写, /改 are intentionally absent — they are
-    # Skill-backed commands whose availability is derived from the
-    # registered Skill's `requires_states`. See
-    # ``validate_command_available`` + ``SkillRegistryView``.
+    # NOTE: /大纲, /目录 are intentionally absent — they are Skill-backed
+    # commands whose availability is derived from the registered Skill's
+    # ``requires_states``. See ``validate_command_available`` +
+    # ``SkillRegistryView``.
     "/init": {ProjectState.UNINITIALIZED},
     "/创作": {ProjectState.HAS_TOC, ProjectState.WRITING},
     "/审核": {ProjectState.WRITING, ProjectState.FINISHED},
@@ -207,8 +207,8 @@ def validate_command_available(
     Lookup order for the availability set:
 
     1. ``skill_registry.state_matrix()`` — drives the Skill-bound
-       commands (``/大纲`` / ``/目录`` / ``/续写`` / ``改``) so the
-       state matrix is fully derived from Skill metadata.
+       commands (``/大纲`` / ``/目录``) so the state matrix is fully
+       derived from Skill metadata.
     2. ``COMMAND_ALLOWED`` — the static fallback for commands that
        aren't owned by any Skill (``/init`` itself plus the tool- and
        workflow-backed commands still listed by hand).
@@ -280,8 +280,6 @@ def _skill_hint(command: str) -> str:
     return {
         "/大纲": "请先执行 /init <项目名> 创建项目。",
         "/目录": "请先用 /大纲 生成并落盘大纲。",
-        "/续写": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
-        "/改": "请先进入正文编辑中状态，也就是至少有一章正文草稿。",
     }.get(command, "请先推进项目到可用状态。")
 
 

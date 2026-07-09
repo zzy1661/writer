@@ -139,7 +139,7 @@ class RuleBasedIntentRouter:
         return AgentAction(
             action_type="answer_directly",
             answer=(
-                "我可以处理 /init、/大纲、/目录、/创作、/审核、/改 等写作命令。"
+                "我可以处理 /init、/大纲、/目录、/创作、/审核 等写作命令。"
                 f"你刚才说的是：{text}"
             ),
         )

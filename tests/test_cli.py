@@ -138,7 +138,7 @@ def test_repl_completer_replaces_partial_command_not_double_slash() -> None:
 def test_repl_command_aliases_present() -> None:
     """Every documented REPL command should be reachable via its slash form."""
     command_names = {cmd for cmd, _ in REPL_COMMANDS}
-    assert {"/init", "/大纲", "/目录", "/创作", "/续写", "/改", "/审核", "/状态", "/帮助", "/退出"} <= command_names
+    assert {"/init", "/大纲", "/目录", "/创作", "/审核", "/状态", "/帮助", "/退出"} <= command_names
     assert "/退出" in EXIT_COMMANDS
     assert "/帮助" in HELP_COMMANDS
 

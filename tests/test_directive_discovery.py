@@ -257,7 +257,7 @@ def test_discover_directives_skips_unknown_state(tmp_path: Path, caplog) -> None
 def test_discover_shipped_directives_returns_four() -> None:
     directives = discover_shipped_directives()
     commands = sorted(d.command for d in directives)
-    assert commands == sorted(["/大纲", "/目录", "/续写", "/改"])
+    assert commands == sorted(["/大纲", "/目录"])
 
 
 def test_discover_shipped_directives_have_references() -> None:
