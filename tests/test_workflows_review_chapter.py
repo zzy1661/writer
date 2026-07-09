@@ -157,8 +157,27 @@ class TestGraphTopology:
 # ---------------------------------------------------------------------------
 
 
+def _patch_high_score_llm(monkeypatch: pytest.MonkeyPatch, score: int = 9) -> None:
+    """为不需要校验 review 内容的测试提供高分 fake LLM。"""
+    llm = _RecordingChatModel()
+    llm.response_factory = lambda: _build_fake_multi_concern(
+        continuity_score=score,
+        pacing_score=score,
+        prose_score=score,
+        total=score,
+    )
+
+    def _fake_get_llm(_settings: Any) -> Any:
+        return llm
+
+    monkeypatch.setattr("writer.llm.provider.get_llm", _fake_get_llm)
+
+
 class TestLoadTargetChapter:
-    def test_load_specific_chapter(self, project_root: Path) -> None:
+    def test_load_specific_chapter(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_high_score_llm(monkeypatch)
         _write_chapter(project_root, "1.3", "first chapter content")
         deps = _make_deps(project_root)
         ctx = EngineContext(
@@ -170,7 +189,10 @@ class TestLoadTargetChapter:
         assert "load_target_chapter" in text
         assert "1.3" in text
 
-    def test_load_current_finds_latest(self, project_root: Path) -> None:
+    def test_load_current_finds_latest(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_high_score_llm(monkeypatch)
         _write_chapter(project_root, "1.1", "first")
         _write_chapter(project_root, "1.2", "second")
         _write_chapter(project_root, "1.3", "third")
@@ -184,10 +206,13 @@ class TestLoadTargetChapter:
         text = "".join(result.chunks)
         assert "1.3" in text
 
-    def test_load_missing_chapter_returns_failed(self, project_root: Path) -> None:
+    def test_load_missing_chapter_returns_failed(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         # Create the manuscript/ directory so we get past the
         # ``manuscript_missing`` check; the chapter file itself is
         # what we expect to be flagged as not found.
+        _patch_high_score_llm(monkeypatch)
         (project_root / "manuscript").mkdir()
         deps = _make_deps(project_root)
         ctx = EngineContext(
@@ -207,7 +232,10 @@ class TestLoadTargetChapter:
         assert result.status == "failed"
         assert result.metrics.get("error") == "no_project_root"
 
-    def test_load_without_manuscript_dir_returns_failed(self, project_root: Path) -> None:
+    def test_load_without_manuscript_dir_returns_failed(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _patch_high_score_llm(monkeypatch)
         deps = _make_deps(project_root)
         ctx = EngineContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
@@ -223,18 +251,40 @@ class TestLoadTargetChapter:
 
 
 class TestDeterministicPath:
-    def test_deterministic_pass_decision(self, project_root: Path) -> None:
+    def test_deterministic_pass_decision(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Bug 3 fix: _aggregate_reviews_node 现在总是走 _llm_review。
+        # 用 monkeypatch 模拟"无 API key"路径,断言降级到低分 review
+        # + needs_rewrite 决策。
+        from writer.llm.provider import LLMConfigError
+
+        def _raise(_settings: Any) -> Any:
+            raise LLMConfigError("missing API key")
+
+        monkeypatch.setattr("writer.llm.provider.get_llm", _raise)
+
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
         ctx = EngineContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
-        assert result.status == "completed"
-        assert result.metrics.get("decision") == "pass"
-        assert result.metrics.get("total_score") == 8
+        # 降级路径:LLM 错误 → low score → needs_rewrite 决策 → pending
+        assert result.status == "pending"
+        assert result.metrics.get("decision") == "needs_rewrite"
+        assert result.metrics.get("total_score") == 4
 
-    def test_deterministic_writes_review_report(self, project_root: Path) -> None:
+    def test_deterministic_writes_review_report(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from writer.llm.provider import LLMConfigError
+
+        def _raise(_settings: Any) -> Any:
+            raise LLMConfigError("missing API key")
+
+        monkeypatch.setattr("writer.llm.provider.get_llm", _raise)
+
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
         ctx = EngineContext(
@@ -247,12 +297,128 @@ class TestDeterministicPath:
         assert report_path.exists()
         payload = json.loads(report_path.read_text(encoding="utf-8"))
         assert payload["chapter_id"] == "1.1"
-        assert payload["decision"] == "pass"
-        assert payload["total_score"] == 8
+        assert payload["decision"] == "needs_rewrite"
+        assert payload["total_score"] == 4
         assert "timestamp" in payload
         assert "concerns" in payload
         # All three concerns present.
         assert set(payload["concerns"]) == {"continuity", "pacing", "prose"}
+
+
+# ---------------------------------------------------------------------------
+# Tests: LLM path (Bug 3 — review_chapter 移除 review_llm 早返)
+# ---------------------------------------------------------------------------
+
+
+class TestLLMPath:
+    def test_aggregate_reviews_uses_llm_when_api_key_set(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """API key 配了 + 不注入 review_llm:应调用 _llm_review。"""
+        calls: list[Any] = []
+
+        def _fake_get_llm(settings: Any) -> Any:
+            calls.append(settings)
+            llm = _RecordingChatModel()
+            llm.response_factory = lambda: _build_fake_multi_concern(
+                continuity_score=9,
+                pacing_score=9,
+                prose_score=9,
+                total=9,
+            )
+            return llm
+
+        monkeypatch.setattr("writer.llm.provider.get_llm", _fake_get_llm)
+
+        _write_chapter(project_root, "1.1", "x" * 200)
+        deps = _make_deps(project_root)
+        # 不注入 review_llm:让 _llm_review 内部 fallback 到 get_llm
+        ctx = EngineContext(
+            user_input="/审核 1.1", project_root=project_root, project_state="S2"
+        )
+        result = run(ctx, deps)
+        # _llm_review 真的被调用,产出 9 分 review
+        assert calls, "_get_llm 应该被调用"
+        assert result.metrics.get("total_score") == 9
+        assert result.metrics.get("decision") == "pass"
+
+    def test_aggregate_reviews_falls_back_to_low_when_no_api_key(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无 API key:get_llm 抛 LLMConfigError,降级到低分 review。"""
+        from writer.llm.provider import LLMConfigError
+
+        def _raise(_settings: Any) -> Any:
+            raise LLMConfigError("missing API key")
+
+        monkeypatch.setattr("writer.llm.provider.get_llm", _raise)
+
+        _write_chapter(project_root, "1.1", "x" * 200)
+        deps = _make_deps(project_root)
+        ctx = EngineContext(
+            user_input="/审核 1.1", project_root=project_root, project_state="S2"
+        )
+        result = run(ctx, deps)
+        # 降级路径:score=4 + needs_rewrite
+        assert result.metrics.get("total_score") == 4
+        assert result.metrics.get("decision") == "needs_rewrite"
+
+    def test_review_llm_injected_overrides_settings(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """注入 review_llm 优先于 settings.get_llm()。"""
+        from writer.llm.provider import LLMConfigError
+
+        called: list[Any] = []
+
+        def _should_not_be_called(_settings: Any) -> Any:
+            called.append(True)
+            raise LLMConfigError("不应被调用")
+
+        monkeypatch.setattr("writer.llm.provider.get_llm", _should_not_be_called)
+
+        llm = _RecordingChatModel()
+        llm.response_factory = lambda: _build_fake_multi_concern(
+            continuity_score=10,
+            pacing_score=10,
+            prose_score=10,
+            total=10,
+        )
+        _write_chapter(project_root, "1.1", "x" * 200)
+        deps = _make_deps(project_root, review_llm=llm)
+        ctx = EngineContext(
+            user_input="/审核 1.1", project_root=project_root, project_state="S2"
+        )
+        result = run(ctx, deps)
+        # 注入 review_llm 优先,get_llm 未被调用
+        assert not called, "get_llm 不应被调用,注入 review_llm 优先"
+        assert result.metrics.get("total_score") == 10
+        assert result.metrics.get("decision") == "pass"
+
+    def test_no_api_key_fallback_message_includes_error(
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """降级路径:continuity.findings[0] 含 'LLM 错误:' 前缀。"""
+        from writer.llm.provider import LLMConfigError
+
+        def _raise(_settings: Any) -> Any:
+            raise LLMConfigError("missing API key")
+
+        monkeypatch.setattr("writer.llm.provider.get_llm", _raise)
+
+        _write_chapter(project_root, "1.1", "x" * 200)
+        deps = _make_deps(project_root)
+        ctx = EngineContext(
+            user_input="/审核 1.1", project_root=project_root, project_state="S2"
+        )
+        result = run(ctx, deps)
+        report_path = result.artifacts["review_path"]
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+        continuity_findings = payload["concerns"]["continuity"].get("findings", [])
+        assert continuity_findings
+        assert continuity_findings[0].startswith("LLM 错误:")
+        # summary 含 LLM 调用失败前缀
+        assert "LLM 调用失败" in payload["summary"]
 
 
 # ---------------------------------------------------------------------------
@@ -347,12 +513,20 @@ class TestDecisionGate:
 
 class TestContinuityFindings:
     def test_continuity_findings_reference_foreshadows(
-        self, project_root: Path
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # ``prep_review_context`` returns the IDs from
-        # ``foreshadow_search``. The deterministic path puts each ID
-        # in the continuity findings list so the persisted report
-        # contains them.
+        # Bug 3 fix:production 路径走 _llm_review。用 monkeypatch
+        # 注入 fake LLM,其 response 在 continuity.findings 中带
+        # 伏笔 ID,模拟"_deterministic_review 把 ID 写进 findings"
+        # 的契约。
+        llm = _RecordingChatModel()
+        llm.response_factory = lambda: _build_fake_multi_concern(
+            continuity_findings=["F001", "F003", "F007"],
+        )
+        monkeypatch.setattr(
+            "writer.llm.provider.get_llm", lambda _settings: llm
+        )
+
         from writer.tools import ToolResult
 
         result = ToolResult(
@@ -377,8 +551,10 @@ class TestContinuityFindings:
         assert "F007" in findings_text
 
     def test_report_includes_active_foreshadows_list(
-        self, project_root: Path
+        self, project_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        _patch_high_score_llm(monkeypatch)
+
         from writer.tools import ToolResult
 
         deps = _make_deps(project_root)

@@ -241,43 +241,37 @@ def _prep_review_context_node(state: ReviewerState) -> ReviewerState:
 def _aggregate_reviews_node(state: ReviewerState) -> ReviewerState:
     """单次 LLM 调用产出 :class:`MultiConcernReview`。
 
-    确定性路径（``deps.prose_client.name == "deterministic"``）下，
-    节点用 score 8、所有 concern 通过、findings 为空组装一个
-    确定性的 review —— 与 ``write_chapter`` review_gate 的离线路径相同。
+    始终走 :func:`_llm_review` 路径，让其内部的 fallback
+    (``review_llm is None → _get_llm(get_settings())``) 在 production
+    默认装配 + API key 已配时自然走到 LLM。当 LLM 调用失败时
+    降级到带错误信息的低分 review，让 ``decision_gate`` 标记
+    ``needs_rewrite``。
     """
     deps = _get_deps()
     chapter_text = state.get("chapter_text", "")
     active_foreshadows = state.get("active_foreshadows", [])
     focus = state.get("focus", [])
 
-    # 当未注入 review_llm（即纯规则部署）时使用确定性 review。
-    # prose_client 的 name 不是 gate —— prose_client 与 write_chapter
-    # 共享，其 name 反映章节草稿是真实还是确定性，而非 review LLM
-    # 是否可用。
-    review_llm = getattr(deps, "review_llm", None)
-    if review_llm is None:
-        review = _deterministic_review(active_foreshadows, focus)
-    else:
-        try:
-            review = _llm_review(deps, chapter_text, active_foreshadows, focus)
-        except Exception as exc:  # noqa: BLE001
-            # LLM 错误：以低分降级到确定性 review，让 decision_gate
-            # 标记 ``needs_rewrite``。
-            from writer.workflows.types import ConcernVerdict
+    try:
+        review = _llm_review(deps, chapter_text, active_foreshadows, focus)
+    except Exception as exc:  # noqa: BLE001
+        # LLM 错误（API key 未配 / 调用失败 / schema 不匹配）：
+        # 降级到低分 review + 错误信息。生产路径的 fallback。
+        from writer.workflows.types import ConcernVerdict
 
-            low = ConcernVerdict.model_validate(
-                {"score": 4, "pass": False, "findings": []}
-            )
-            low_with_error = ConcernVerdict.model_validate(
-                {"score": 4, "pass": False, "findings": [f"LLM 错误: {exc}"]}
-            )
-            review = MultiConcernReview(
-                continuity=low_with_error,
-                pacing=low,
-                prose=low,
-                total_score=4,
-                summary=f"LLM 调用失败: {exc}",
-            )
+        low = ConcernVerdict.model_validate(
+            {"score": 4, "pass": False, "findings": []}
+        )
+        low_with_error = ConcernVerdict.model_validate(
+            {"score": 4, "pass": False, "findings": [f"LLM 错误: {exc}"]}
+        )
+        review = MultiConcernReview(
+            continuity=low_with_error,
+            pacing=low,
+            prose=low,
+            total_score=4,
+            summary=f"LLM 调用失败: {exc}",
+        )
 
     trace = [*state.get("trace", []), "aggregate_reviews"]
     return {
