@@ -19,7 +19,7 @@
 | 维度 | Claude Code 做法 | writer-agent 做法 | 数据来源 |
 | --- | --- | --- | --- |
 | 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `run_engine` AsyncIterator[Event] + `match action.action_type` 单层 dispatch | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
-| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `EngineDeps` 5 字段 + 3 方法(router / story_consultant / tool_registry / tool_runtime + route / run_workflow / rebind_tool_runtime) | [05](#) / `src/writer/engine/deps.py` |
+| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `EngineDeps` 5 字段 + 3 方法(router / story_agent / tool_registry / tool_runtime + route / run_workflow / rebind_tool_runtime) | [05](#) / `src/writer/engine/deps.py` |
 | 路由 | `RuleBasedRouter` + `LlmRouter` 同一 Protocol 下;`CompositeRouter` rule-first + LLM fallback | `RuleBasedIntentRouter` + `LlmIntentRouter` + `CompositeRouter`(本会话 M5/M6 已对齐 production_deps 接受 `primary_router` kwarg) | [15](#) / `src/writer/routing/` |
 | 扩展点 | 27 个 Hook 事件 + Markdown frontmatter 协议同构(Skill/Agent/Command/OutputStyle)+ Plugin manifest | 仅 SKILL.md frontmatter;`writer/hooks/` 未实装;`writer/commands/` / `writer/agents/` / `writer/output_styles/` 空缺 | [20-Hooks系统.md](~/Desktop/sources/Claude-Code-Source-Study/docs/20) / [21](#) |
 | 配置 | 5+1 层优先级(user/project/local/policy/managed)+ TRUSTED_SETTING_SOURCES + SAFE_ENV_VARS | 单一 Pydantic BaseSettings | [03-配置体系与企业MDM.md](~/Desktop/sources/Claude-Code-Source-Study/docs/03) |

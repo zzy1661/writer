@@ -2,10 +2,10 @@
 
 This package replaces the previous arrangement in which prompt strings
 lived inline in :mod:`writer.routing.llm_router`,
-:mod:`writer.project.ideas`, and :mod:`writer.roles.story_consultant`.
+:mod:`writer.project.ideas`, and :mod:`writer.roles.story_agent`.
 Centralizing them gives the rest of the system a single auditable
 surface (useful when iterating on identity wording or A/B-testing
-templates) and turns the four genre Consultants from hardcoded
+templates) and turns the four genre Agents from hardcoded
 subclasses into a single class with a ``GENRE`` discriminator.
 
 Layering:
@@ -13,19 +13,23 @@ Layering:
 * :mod:`writer.prompts.protocol` — :class:`PromptKey` /
   :class:`PromptBundle` data types.
 * :mod:`writer.prompts.identity` — short identity fragments per
-  consultant (genre-agnostic wording about *who the LLM is*).
+  agent (genre-agnostic wording about *who the LLM is*).
 * :mod:`writer.prompts.router` — the ``COMMAND_AGENT_TEMPLATE`` used
   by :class:`writer.routing.LlmIntentRouter`.
-* :mod:`writer.prompts.consultants` — the four outline templates, the
+* :mod:`writer.prompts.agents` — the four outline templates, the
   TOC template, the init-brief template, and the deterministic
   :data:`FALLBACK_OUTLINE_CHAPTERS` chapter lists.
 * :mod:`writer.prompts.shared` — the JSON-contract fallback for
   providers that do not support ``response_format``.
 * :mod:`writer.prompts.registry` — the lookup surface, mirroring
   :mod:`writer.skills.registry.SkillRegistry`.
+
+Renamed from ``consultants`` to ``agents`` per ``fea-agent-mirror``
+(2026-07-09); clean break — no ``CONSULTANT_IDENTITY_*`` aliases are
+preserved.
 """
 
-from writer.prompts.consultants import (
+from writer.prompts.agents import (
     FALLBACK_OUTLINE_CHAPTERS,
     INIT_BRIEF_TEMPLATE,
     OUTLINE_TEMPLATE_HISTORY,
@@ -35,10 +39,10 @@ from writer.prompts.consultants import (
     TOC_TEMPLATE,
 )
 from writer.prompts.identity import (
-    CONSULTANT_IDENTITY_HISTORY,
-    CONSULTANT_IDENTITY_ROMANCE,
-    CONSULTANT_IDENTITY_STORY,
-    CONSULTANT_IDENTITY_XUANHUAN,
+    AGENT_IDENTITY_HISTORY,
+    AGENT_IDENTITY_ROMANCE,
+    AGENT_IDENTITY_STORY,
+    AGENT_IDENTITY_XUANHUAN,
 )
 from writer.prompts.protocol import PromptBundle, PromptKey
 from writer.prompts.registry import (
@@ -54,12 +58,12 @@ from writer.prompts.router import COMMAND_AGENT_TEMPLATE
 from writer.prompts.shared import json_contract_message
 
 __all__ = [
+    "AGENT_IDENTITY_HISTORY",
+    "AGENT_IDENTITY_ROMANCE",
+    "AGENT_IDENTITY_STORY",
+    "AGENT_IDENTITY_XUANHUAN",
     "BUILTIN_PROMPTS",
     "COMMAND_AGENT_TEMPLATE",
-    "CONSULTANT_IDENTITY_HISTORY",
-    "CONSULTANT_IDENTITY_ROMANCE",
-    "CONSULTANT_IDENTITY_STORY",
-    "CONSULTANT_IDENTITY_XUANHUAN",
     "ENTRY_POINT_GROUP",
     "FALLBACK_OUTLINE_CHAPTERS",
     "INIT_BRIEF_TEMPLATE",

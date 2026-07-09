@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from writer.project.state import ProjectState, append_agent_requirements, detect_state
-from writer.roles import InitBriefResult, StoryConsultant
+from writer.roles import InitBriefResult, StoryAgent
 
 _SENTENCE_PUNCTUATION = "。！？；,.!?;"
 _MAX_PROJECT_NAME_LEN = 30
@@ -75,11 +75,11 @@ def should_run_init_brief(
 def apply_init_brief(
     project_root: Path,
     brief: str,
-    consultant: StoryConsultant,
+    agent: StoryAgent,
 ) -> InitBriefResult:
     """Expand a natural-language brief and write project files."""
 
-    result = consultant.process_init_brief(brief)
+    result = agent.process_init_brief(brief)
     ideas_dir = project_root / "创意"
     ideas_dir.mkdir(parents=True, exist_ok=True)
     (ideas_dir / "核心创意.md").write_text(result.core_idea, encoding="utf-8")

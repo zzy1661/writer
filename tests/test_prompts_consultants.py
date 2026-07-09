@@ -1,10 +1,10 @@
-"""Unit tests for :mod:`writer.prompts.consultants`."""
+"""Unit tests for :mod:`writer.prompts.agents`."""
 
 from __future__ import annotations
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from writer.prompts.consultants import (
+from writer.prompts.agents import (
     FALLBACK_OUTLINE_CHAPTERS,
     INIT_BRIEF_TEMPLATE,
     OUTLINE_TEMPLATE_HISTORY,
@@ -117,7 +117,7 @@ def test_init_brief_template_uses_neutral_identity() -> None:
 def test_fallback_outline_chapters_covers_all_genres() -> None:
     """Every genre key in ``GENRE`` ClassVars must have a fallback."""
 
-    # The keys here mirror the four ClassVar values on the Consultants.
+    # The keys here mirror the four ClassVar values on the Agents.
     expected_keys = {"other", "历史", "言情", "玄幻"}
     assert expected_keys.issubset(FALLBACK_OUTLINE_CHAPTERS.keys())
 

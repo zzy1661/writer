@@ -1,8 +1,8 @@
-"""Unit tests verifying that the genre Consultants route through the prompt registry.
+"""Unit tests verifying that the genre Agents route through the prompt registry.
 
-The point of centralising prompts is that each concrete Consultant
-(``StoryConsultant`` / ``HistoryConsultant`` / ``RomanceConsultant`` /
-``XuanhuanConsultant``) feeds the LLM the identity fragment that matches
+The point of centralising prompts is that each concrete Agent
+(``StoryAgent`` / ``HistoryAgent`` / ``RomanceAgent`` /
+``XuanhuanAgent``) feeds the LLM the identity fragment that matches
 its declared ``GENRE``. These tests pin that behaviour by injecting a
 fake chat model that captures the messages it receives.
 """
@@ -13,10 +13,10 @@ from langchain_core.messages import AIMessage, SystemMessage
 
 from writer.config import Settings
 from writer.project.ideas import IdeasContext
-from writer.roles.history_consultant import HistoryConsultant
-from writer.roles.romance_consultant import RomanceConsultant
-from writer.roles.story_consultant import StoryConsultant
-from writer.roles.xuanhuan_consultant import XuanhuanConsultant
+from writer.roles.history_agent import HistoryAgent
+from writer.roles.romance_agent import RomanceAgent
+from writer.roles.story_agent import StoryAgent
+from writer.roles.xuanhuan_agent import XuanhuanAgent
 
 
 class _CapturingChat:
@@ -46,9 +46,9 @@ _OUTLINE_PAYLOAD = (
 )
 
 
-def test_story_consultant_sends_neutral_identity() -> None:
+def test_story_agent_sends_neutral_identity() -> None:
     fake = _CapturingChat(_OUTLINE_PAYLOAD)
-    StoryConsultant(Settings(), llm=fake).draft_outline("测试")
+    StoryAgent(Settings(), llm=fake).draft_outline("测试")
 
     systems = _system_texts(fake.messages)
     # The JSON-contract message + the central prompt's system message both
@@ -60,12 +60,12 @@ def test_story_consultant_sends_neutral_identity() -> None:
     assert not any("玄幻题材" in text for text in systems)
 
 
-def test_history_consultant_sends_history_identity() -> None:
+def test_history_agent_sends_history_identity() -> None:
     fake_llm = _CapturingChat(_OUTLINE_PAYLOAD)
-    consultant = HistoryConsultant(Settings())
+    agent = HistoryAgent(Settings())
     # Inject the LLM directly so the no-API-key branch is bypassed.
-    consultant._llm = fake_llm  # noqa: SLF001 — direct injection for test
-    consultant._draft_outline_with_llm(  # noqa: SLF001
+    agent._llm = fake_llm  # noqa: SLF001 — direct injection for test
+    agent._draft_outline_with_llm(  # noqa: SLF001
         idea="贞观之治",
         ideas=IdeasContext(),
     )
@@ -74,18 +74,18 @@ def test_history_consultant_sends_history_identity() -> None:
     assert any("历史题材" in text for text in systems)
 
 
-def test_history_consultant_uses_genre_fallback_when_no_llm() -> None:
+def test_history_agent_uses_genre_fallback_when_no_llm() -> None:
     """Without an API key, the history fallback must surface 史实:/虚构: markers."""
 
-    result = HistoryConsultant(Settings()).draft_outline("贞观")
+    result = HistoryAgent(Settings()).draft_outline("贞观")
     assert all("史实:" in ch and "虚构:" in ch for ch in result.chapters)
 
 
-def test_xuanhuan_consultant_sends_xuanhuan_identity() -> None:
+def test_xuanhuan_agent_sends_xuanhuan_identity() -> None:
     fake_llm = _CapturingChat(_OUTLINE_PAYLOAD)
-    consultant = XuanhuanConsultant(Settings())
-    consultant._llm = fake_llm  # noqa: SLF001
-    consultant._draft_outline_with_llm(  # noqa: SLF001
+    agent = XuanhuanAgent(Settings())
+    agent._llm = fake_llm  # noqa: SLF001
+    agent._draft_outline_with_llm(  # noqa: SLF001
         idea="废柴觉醒",
         ideas=IdeasContext(),
     )
@@ -94,18 +94,18 @@ def test_xuanhuan_consultant_sends_xuanhuan_identity() -> None:
     assert any("玄幻题材" in text for text in systems)
 
 
-def test_xuanhuan_consultant_uses_genre_fallback_when_no_llm() -> None:
+def test_xuanhuan_agent_uses_genre_fallback_when_no_llm() -> None:
     """Without an API key, the xuanhuan fallback must surface 境界 markers."""
 
-    result = XuanhuanConsultant(Settings()).draft_outline("废柴觉醒")
+    result = XuanhuanAgent(Settings()).draft_outline("废柴觉醒")
     assert all("境界" in ch for ch in result.chapters)
 
 
-def test_romance_consultant_sends_romance_identity() -> None:
+def test_romance_agent_sends_romance_identity() -> None:
     fake_llm = _CapturingChat(_OUTLINE_PAYLOAD)
-    consultant = RomanceConsultant(Settings())
-    consultant._llm = fake_llm  # noqa: SLF001
-    consultant._draft_outline_with_llm(  # noqa: SLF001
+    agent = RomanceAgent(Settings())
+    agent._llm = fake_llm  # noqa: SLF001
+    agent._draft_outline_with_llm(  # noqa: SLF001
         idea="仇人之子",
         ideas=IdeasContext(),
     )
@@ -114,22 +114,22 @@ def test_romance_consultant_sends_romance_identity() -> None:
     assert any("言情题材" in text for text in systems)
 
 
-def test_romance_consultant_uses_genre_fallback_when_no_llm() -> None:
+def test_romance_agent_uses_genre_fallback_when_no_llm() -> None:
     """Without an API key, the romance fallback must surface 节拍 markers."""
 
-    result = RomanceConsultant(Settings()).draft_outline("仇人之子")
+    result = RomanceAgent(Settings()).draft_outline("仇人之子")
     assert all(ch.startswith("节拍") for ch in result.chapters)
 
 
-def test_consultant_constructs_accept_prompt_registry_kwarg() -> None:
+def test_agent_constructs_accept_prompt_registry_kwarg() -> None:
     """The constructor's ``prompt_registry`` kwarg is honoured."""
 
     from writer.prompts.registry import PromptRegistry, builtin_prompt_registry
 
     custom_registry = builtin_prompt_registry()
-    consultant = StoryConsultant(Settings(), prompt_registry=custom_registry)
-    assert consultant._prompt_registry is custom_registry  # noqa: SLF001
+    agent = StoryAgent(Settings(), prompt_registry=custom_registry)
+    assert agent._prompt_registry is custom_registry  # noqa: SLF001
 
     # Default registry is created lazily
-    other = StoryConsultant(Settings())
+    other = StoryAgent(Settings())
     assert isinstance(other._prompt_registry, PromptRegistry)  # noqa: SLF001

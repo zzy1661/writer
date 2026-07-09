@@ -30,7 +30,7 @@ import logging
 from importlib import metadata
 from typing import TYPE_CHECKING
 
-from writer.prompts.consultants import (
+from writer.prompts.agents import (
     INIT_BRIEF_TEMPLATE,
     OUTLINE_TEMPLATE_HISTORY,
     OUTLINE_TEMPLATE_ROMANCE,
@@ -266,7 +266,7 @@ def discover_entry_point_prompts() -> list[PromptBundle]:
 def builtin_prompt_registry() -> PromptRegistry:
     """Built-in prompts only — no entry-point plugins.
 
-    Used as the default by :class:`writer.roles.StoryConsultant` when
+    Used as the default by :class:`writer.roles.StoryAgent` when
     the caller does not inject a custom registry. Tests that need a
     pristine registry (no plugins) should call this rather than
     :func:`built_prompt_registry`.

@@ -56,7 +56,7 @@ class _JsonOnlyChat:
         return AIMessage(
             content=(
                 '{"action_type":"start_workflow","command":"/创作",'
-                '"role":"story_consultant","workflow":"write_chapter"}'
+                '"role":"story_agent","workflow":"write_chapter"}'
             )
         )
 
@@ -73,7 +73,7 @@ def test_llm_router_returns_structured_action() -> None:
     expected = AgentAction(
         action_type="start_workflow",
         workflow="write_chapter",
-        role="story_consultant",
+        role="story_agent",
         command="/创作",
     )
     chain = RunnableLambda(lambda _: expected)
@@ -83,7 +83,7 @@ def test_llm_router_returns_structured_action() -> None:
 
     assert action.action_type == "start_workflow"
     assert action.workflow == "write_chapter"
-    assert action.role == "story_consultant"
+    assert action.role == "story_agent"
 
 
 def test_llm_router_uses_json_prompt_for_deepseek_compatible_output() -> None:
@@ -99,7 +99,7 @@ def test_llm_router_uses_json_prompt_for_deepseek_compatible_output() -> None:
 
     assert action.action_type == "start_workflow"
     assert action.command == "/创作"
-    assert action.role == "story_consultant"
+    assert action.role == "story_agent"
     assert action.workflow == "write_chapter"
 
 
@@ -155,7 +155,7 @@ def test_composite_router_invokes_llm_for_natural_language() -> None:
     expected = AgentAction(
         action_type="start_workflow",
         workflow="write_chapter",
-        role="story_consultant",
+        role="story_agent",
     )
     stub = _StubLLMRouter(responses=[expected])
     composite = CompositeRouter(

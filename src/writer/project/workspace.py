@@ -25,6 +25,7 @@ fallback). See ``tests/test_workspace.py`` for the contracts.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,6 +84,7 @@ def create_workspace(
     genres: list[str] | None = None,
     with_ideas_dir: bool = False,
     with_writer_meta: bool = False,
+    seed_agents: bool = False,
 ) -> NovelWorkspace:
     project_name = _normalize_name(name)
     genre_list = normalize_genres(genres if genres is not None else [genre])
@@ -139,7 +141,9 @@ def create_workspace(
     created_files.extend(_genre_scaffolding(root, canonical_genre))
 
     if with_writer_meta:
-        created_files.extend(_writer_meta_scaffolding(root, force=force))
+        created_files.extend(
+            _writer_meta_scaffolding(root, force=force, seed_agents=seed_agents)
+        )
 
     return NovelWorkspace(root=root, created_files=created_files)
 
@@ -151,7 +155,11 @@ def create_new_workspace(
     force: bool = False,
     genres: list[str] | None = None,
 ) -> NovelWorkspace:
-    """Create a novel project with ``创意/`` and ``.writer/`` metadata."""
+    """Create a novel project with ``创意/`` and ``.writer/`` metadata.
+
+    The ``.writer/`` meta scaffolding mirrors both the 4 shipped
+    directives AND the 4 shipped agents (per ``fea-agent-mirror``).
+    """
 
     return create_workspace(
         name,
@@ -160,14 +168,20 @@ def create_new_workspace(
         genres=genres,
         with_ideas_dir=True,
         with_writer_meta=True,
+        seed_agents=True,
     )
 
 
-def _writer_meta_scaffolding(root: Path, *, force: bool = False) -> list[Path]:
+def _writer_meta_scaffolding(
+    root: Path, *, force: bool = False, seed_agents: bool = False
+) -> list[Path]:
     writer_root = root / ".writer"
+    # NOTE: ``agents/`` is no longer a placeholder .gitkeep; the
+    # _seed_agents helper below creates real .md files. We still
+    # ensure the directory exists so projects that pre-date the
+    # agent mirror (and that already have a .gitkeep) don't break.
     targets = {
         writer_root / "skills" / ".gitkeep": "",
-        writer_root / "agents" / ".gitkeep": "",
         writer_root / "config": _WRITER_CONFIG_TEMPLATE,
     }
     created: list[Path] = []
@@ -177,7 +191,127 @@ def _writer_meta_scaffolding(root: Path, *, force: bool = False) -> list[Path]:
             path.write_text(content, encoding="utf-8")
             created.append(path)
 
+    # Make sure the agents directory exists even if no shipped agent
+    # can be discovered (per the legacy / S0 path). The .gitkeep is
+    # removed by the seed step when real .md files land.
+    (writer_root / "agents").mkdir(parents=True, exist_ok=True)
+
     created.extend(_seed_directives(writer_root, force=force))
+    if seed_agents:
+        created.extend(_seed_agents(writer_root, force=force))
+    return created
+
+
+def _seed_agents(
+    writer_root: Path, *, force: bool = False
+) -> list[Path]:
+    """Copy the 4 shipped agent ``.md`` files into the project.
+
+    Each shipped agent lives at
+    ``writer.agents._shipped/<name>.md`` (loaded via
+    :mod:`importlib.resources`). This helper copies every ``*.md``
+    to ``<writer_root>/agents/<filename>`` so the project starts with
+    a complete editable copy of the 4 default agents.
+
+    After copying, the project's directory contains the same files as
+    the shipped source. The discovery layer treats shipped and
+    user-added agents identically — the user is free to edit, delete,
+    or extend.
+
+    Per-file failures are logged at WARNING and skipped (so a
+    broken shipped copy does not block the rest). Files that already
+    exist on disk are left untouched unless ``force=True``.
+
+    Called by :func:`_writer_meta_scaffolding` only when
+    ``with_writer_meta=True`` (the ``create_new_workspace`` path).
+    The low-level :func:`create_workspace` does NOT seed agents.
+    """
+
+    agents_dir = writer_root / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+
+    # Local import: keeps the workspace module free of a top-level
+    # writer.agents dependency (avoids any future circular import
+    # risk; mirrors the _seed_directives pattern above).
+    try:
+        import importlib.resources as _resources
+    except ImportError:  # pragma: no cover — Python 3.12+ has it
+        return []
+
+    created: list[Path] = []
+    try:
+        shipped_root = _resources.files("writer.agents._shipped")
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Cannot locate shipped agents package: %s: %s; "
+            "agent seeding skipped",
+            type(exc).__name__,
+            exc,
+        )
+        return []
+
+    try:
+        file_iter = sorted(
+            (p for p in shipped_root.iterdir() if p.name.endswith(".md")),
+            key=lambda p: p.name,
+        )
+    except (OSError, NotImplementedError) as exc:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Cannot iterate shipped agents: %s: %s; "
+            "agent seeding skipped",
+            type(exc).__name__,
+            exc,
+        )
+        return []
+
+    for src_path in file_iter:
+        target = agents_dir / src_path.name
+        # Per ``fea-agent-mirror`` spec: NEVER overwrite an existing
+        # agent file (even when ``force=True``). The user's edits are
+        # the source of truth once the mirror has landed; subsequent
+        # ``writer new --force`` runs are a no-op for existing
+        # agent files. This is stricter than the directives mirror
+        # because agents carry project-specific identity (the
+        # user's tweaked description / body) that is more likely
+        # to be customized than the generic skill bodies.
+        if target.exists():
+            continue
+        try:
+            content = src_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Cannot read shipped agent file %s: %s; skipping",
+                src_path,
+                exc,
+            )
+            continue
+        try:
+            target.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Cannot write shipped agent file %s: %s; skipping",
+                target,
+                exc,
+            )
+            continue
+        created.append(target)
+
+    # Tidy up: if real .md files were created and a stale .gitkeep
+    # placeholder is sitting in the agents directory, remove it so the
+    # project tree doesn't have a confusing empty file.
+    if created:
+        stale = agents_dir / ".gitkeep"
+        if stale.is_file():
+            with contextlib.suppress(OSError):
+                stale.unlink()
     return created
 
 

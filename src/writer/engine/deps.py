@@ -13,12 +13,13 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from writer.agents import AgentRegistry, built_agent_registry
 from writer.config import Settings, get_settings
 from writer.roles import (
-    HistoryConsultant,
-    RomanceConsultant,
-    StoryConsultant,
-    XuanhuanConsultant,
+    HistoryAgent,
+    RomanceAgent,
+    StoryAgent,
+    XuanhuanAgent,
 )
 from writer.routing import (
     AgentAction,
@@ -42,34 +43,35 @@ if TYPE_CHECKING:
 _NO_PROJECT_ROOT = Path("/__no_project__")
 
 
-# Maps the four supported canonical genres onto their Consultant classes.
+# Maps the four supported canonical genres onto their Agent classes.
 # Anything outside the whitelist (and ``"other"``) falls through to the
-# default :class:`StoryConsultant` per the ``fea-genre-aware-init`` spec.
-_GENRE_CONSULTANT: dict[str, type[StoryConsultant]] = {
-    "历史": HistoryConsultant,
-    "言情": RomanceConsultant,
-    "玄幻": XuanhuanConsultant,
+# default :class:`StoryAgent` per the ``fea-genre-aware-init`` spec.
+_GENRE_AGENT: dict[str, type[StoryAgent]] = {
+    "历史": HistoryAgent,
+    "言情": RomanceAgent,
+    "玄幻": XuanhuanAgent,
 }
 
 
-def _consultant_for_genre(
+def _agent_for_genre(
     settings: Settings, genre: str
-) -> StoryConsultant:
-    """Pure factory — pick a Consultant subclass by canonical genre key.
+) -> StoryAgent:
+    """Pure factory — pick an Agent subclass by canonical genre key.
 
-    No filesystem IO. Falls back to :class:`StoryConsultant` for unknown,
+    No filesystem IO. Falls back to :class:`StoryAgent` for unknown,
     empty, or ``"other"`` values. Used by both ``production_deps`` and
     :meth:`writer.session.EngineSession.set_project_root` (after
     :meth:`refresh_project_genre` has read the AGENT.md ``题材:`` line).
 
     Added 2026-07-07 to fix arch-optimizer M1: ``EngineSession`` needs
-    to rebuild its consultant when the bound project changes genre,
+    to rebuild its agent when the bound project changes genre,
     which requires a helper that doesn't re-read AGENT.md (the session
-    has already read it).
+    has already read it). Renamed from ``_consultant_for_genre`` to
+    ``_agent_for_genre`` per ``fea-agent-mirror`` (2026-07-09).
     """
     canonical = (genre or "").strip()
-    consultant_cls = _GENRE_CONSULTANT.get(canonical, StoryConsultant)
-    return consultant_cls(settings)
+    agent_cls = _GENRE_AGENT.get(canonical, StoryAgent)
+    return agent_cls(settings)
 
 
 @runtime_checkable
@@ -80,8 +82,13 @@ class EngineDeps(Protocol):
 
     * :attr:`router` — front-desk dispatcher (per 备忘 15; Protocol
       :class:`writer.routing.IntentRouter`).
-    * :attr:`story_consultant` — the role that handles short creative
-      commands such as ``/大纲`` (per 备忘 04).
+    * :attr:`story_agent` — the role that handles short creative
+      commands such as ``/大纲`` (per 备忘 04). Renamed from
+      ``story_consultant`` per ``fea-agent-mirror``.
+    * :attr:`agent_registry` — :class:`writer.agents.AgentRegistry`
+      for resolving agent names to their YAML-loaded definitions.
+      Rebuilt on project change via :meth:`rebind_agent_registry`
+      (per ``fea-agent-mirror``).
     * :attr:`tool_registry` — :class:`writer.tools.ToolRegistry` for
       resolving tool names to implementations (per 备忘 13).
     * :attr:`tool_runtime` — :class:`writer.tools.ToolRuntime` carrying
@@ -104,7 +111,8 @@ class EngineDeps(Protocol):
     """
 
     router: IntentRouter
-    story_consultant: StoryConsultant
+    story_agent: StoryAgent
+    agent_registry: AgentRegistry
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry
@@ -118,10 +126,9 @@ class EngineDeps(Protocol):
 
     def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
         """Return a new (or in-place mutated) ``EngineDeps`` with the runtime swapped.
-
         Called by :meth:`writer.session.EngineSession.set_project_root` to
         point the existing deps at a new project root without rebuilding
-        router / story_consultant / tool_registry. Implementations are
+        router / story_agent / tool_registry. Implementations are
         free to return a new instance (default impl uses ``dataclasses
         .replace``) or mutate ``self`` — both are valid as long as the
         returned value is used as the new deps.
@@ -133,25 +140,21 @@ class EngineDeps(Protocol):
         """
         ...
 
-    def rebind_story_consultant(
-        self, new_consultant: StoryConsultant
+    def rebind_story_agent(
+        self, new_agent: StoryAgent
     ) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the consultant swapped.
+        """Return a new (or in-place mutated) ``EngineDeps`` with the agent swapped.
 
         Symmetric to :meth:`rebind_tool_runtime`. Called by
         :meth:`writer.session.EngineSession.set_project_root` after
         :meth:`refresh_project_genre` has read the new project's
-        ``AGENT.md`` ``题材:`` line — Consultant classes
+        ``AGENT.md`` ``题材:`` line — Agent classes
         (History / Romance / Xuanhuan / Story fallback) are picked at
         construction time, so a genre change requires a fresh
-        consultant instance.
+        agent instance.
 
-        Added 2026-07-07 to fix arch-optimizer M1 (audit after
-        OpenSpec apply): the old code only refreshed ``session
-        .project_genre`` (the field) but never rebuilt ``deps
-        .story_consultant`` (the instance), so a REPL session that
-        switched from ``/init 历史`` to ``/init 玄幻`` would keep the
-        old HistoryConsultant in deps and serve stale outlines.
+        Renamed from ``rebind_story_consultant`` per ``fea-agent-mirror``
+        (2026-07-09). Symmetric to :meth:`rebind_agent_registry`.
         """
         ...
 
@@ -161,7 +164,7 @@ class EngineDeps(Protocol):
         """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
         Symmetric to :meth:`rebind_tool_runtime` and
-        :meth:`rebind_story_consultant`. Called by
+        :meth:`rebind_story_agent`. Called by
         :meth:`writer.session.EngineSession.set_project_root` after
         the new project's ``.writer/skills/`` has been scanned — the
         registry MUST be rebuilt on project change so project-level
@@ -184,7 +187,7 @@ class EngineDeps(Protocol):
         """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
         Symmetric to :meth:`rebind_tool_runtime` and
-        :meth:`rebind_story_consultant`. Called by
+        :meth:`rebind_story_agent`. Called by
         :meth:`writer.session.EngineSession.set_project_root` after
         the new project's ``.writer/skills/`` has been scanned — the
         registry MUST be rebuilt on project change so project-level
@@ -193,6 +196,22 @@ class EngineDeps(Protocol):
 
         Added 2026-07-09 (chg-markdown-skills). The prior
         :meth:`rebind_skill_registry` is preserved as an alias.
+        """
+        ...
+
+    def rebind_agent_registry(
+        self, new_registry: AgentRegistry
+    ) -> EngineDeps:
+        """Return a new (or in-place mutated) ``EngineDeps`` with the agent registry swapped.
+
+        Symmetric to :meth:`rebind_directive_registry`. Called by
+        :meth:`writer.session.EngineSession.set_project_root` after
+        the new project's ``.writer/agents/`` has been scanned — the
+        registry MUST be rebuilt on project change so project-level
+        agent overrides (per ``fea-agent-mirror``) take effect on
+        the next REPL turn.
+
+        Added 2026-07-09 (``fea-agent-mirror``).
         """
         ...
 
@@ -207,7 +226,8 @@ class _DefaultEngineDeps:
     """
 
     router: IntentRouter
-    story_consultant: StoryConsultant
+    story_agent: StoryAgent
+    agent_registry: AgentRegistry
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry
@@ -236,12 +256,12 @@ class _DefaultEngineDeps:
         # override the method.
         return replace(self, tool_runtime=new_runtime)
 
-    def rebind_story_consultant(
-        self, new_consultant: StoryConsultant
+    def rebind_story_agent(
+        self, new_agent: StoryAgent
     ) -> EngineDeps:
         # Symmetric to ``rebind_tool_runtime``; uses ``dataclasses.replace``
         # to keep the production wiring effectively immutable.
-        return replace(self, story_consultant=new_consultant)
+        return replace(self, story_agent=new_agent)
 
     def rebind_skill_registry(
         self, new_registry: DirectiveRegistry
@@ -254,18 +274,29 @@ class _DefaultEngineDeps:
     def rebind_directive_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
-        # Symmetric to ``rebind_tool_runtime`` / ``rebind_story_consultant``;
+        # Symmetric to ``rebind_tool_runtime`` / ``rebind_story_agent``;
         # uses ``dataclasses.replace`` to keep the production wiring
         # effectively immutable. Per chg-markdown-skills: project-level
         # directives live in the project directory, so this MUST be
         # called whenever the bound project changes.
         return replace(self, directive_registry=new_registry)
 
+    def rebind_agent_registry(
+        self, new_registry: AgentRegistry
+    ) -> EngineDeps:
+        # Symmetric to ``rebind_directive_registry``; uses
+        # ``dataclasses.replace`` to keep the production wiring
+        # effectively immutable. Per ``fea-agent-mirror``: project-level
+        # agents live in the project directory, so this MUST be called
+        # whenever the bound project changes.
+        return replace(self, agent_registry=new_registry)
+
 
 def _select_router(
     settings: Settings,
     *,
     primary: IntentRouter | None = None,
+    agent_registry: AgentRegistry | None = None,
 ) -> IntentRouter:
     """Return ``CompositeRouter`` when API key is configured, else bare rule router.
 
@@ -275,11 +306,19 @@ def _select_router(
     M5: the previous code hard-coded ``RuleBasedIntentRouter()`` inside
     the factory, so a future "RuleBasedIntentRouterV2" would silently
     miss the wiring.
+
+    ``agent_registry`` (added 2026-07-09 per ``fea-agent-mirror``) is
+    forwarded to the LLM router so its system prompt can include the
+    list of available agents for parent-LLM dispatch. The rule-based
+    router ignores it (rules operate on slash commands only).
     """
 
     rule = primary or RuleBasedIntentRouter()
     if settings.has_api_key:
-        return CompositeRouter(primary=rule, fallback=LlmIntentRouter(settings))
+        return CompositeRouter(
+            primary=rule,
+            fallback=LlmIntentRouter(settings, agent_registry=agent_registry),
+        )
     return rule
 
 
@@ -288,6 +327,8 @@ def production_deps(
     *,
     project_root: Path | None = None,
     primary_router: IntentRouter | None = None,
+    agent_registry: AgentRegistry | None = None,
+    story_agent: StoryAgent | None = None,
     genre: str = "other",
 ) -> EngineDeps:
     """Default dependency wiring used by the REPL and tests.
@@ -314,14 +355,24 @@ def production_deps(
             to :func:`writer.skills.built_skill_registry` so the
             initial skill registry already reflects the bound
             project's ``.writer/skills/`` overrides (per
-            ``chg-project-skills``).
+            ``chg-project-skills``); and to
+            :func:`writer.agents.built_agent_registry` for the
+            ``.writer/agents/`` layer (per ``fea-agent-mirror``).
         primary_router: Optional override for the rule router used as
             the primary in the ``CompositeRouter`` (when API key is
             set) or as the bare router (when not). Defaults to a fresh
             :class:`RuleBasedIntentRouter`. Added 2026-07-05 per M5.
-        genre: Canonical genre key for picking the Consultant subclass
+        agent_registry: Optional override for the agent registry.
+            Defaults to :func:`writer.agents.built_agent_registry`
+            scoped to ``project_root``. Added 2026-07-09 per
+            ``fea-agent-mirror``.
+        story_agent: Optional override for the active agent (typically
+            a :class:`StoryAgent` / :class:`HistoryAgent` /
+            :class:`RomanceAgent` / :class:`XuanhuanAgent`). Defaults
+            to :func:`_agent_for_genre` against the passed ``genre``.
+        genre: Canonical genre key for picking the Agent subclass
             (one of ``"历史" / "言情 / "玄幻"``, everything else
-            falls through to :class:`StoryConsultant`). Added 2026-07-08
+            falls through to :class:`StoryAgent`). Added 2026-07-08
             to make ``production_deps`` a pure factory (M2 of the
             genre-aware init sprint). Callers that have not yet read
             ``AGENT.md`` should pass ``"other"``.
@@ -345,9 +396,29 @@ def production_deps(
             registry=tool_registry,
             runtime=tool_runtime,
         )
+
+    # Resolve agent registry: caller override wins, else build from
+    # project_root (which falls back to the S0 sentinel; the loader
+    # treats missing directories as "no project layer").
+    resolved_agent_registry = (
+        agent_registry
+        if agent_registry is not None
+        else built_agent_registry(project_root=root)
+    )
+
+    # Resolve story agent: caller override wins, else pick by genre.
+    resolved_story_agent = (
+        story_agent if story_agent is not None else _agent_for_genre(resolved, genre)
+    )
+
     return _DefaultEngineDeps(
-        router=_select_router(resolved, primary=primary_router),
-        story_consultant=_consultant_for_genre(resolved, genre),
+        router=_select_router(
+            resolved,
+            primary=primary_router,
+            agent_registry=resolved_agent_registry,
+        ),
+        story_agent=resolved_story_agent,
+        agent_registry=resolved_agent_registry,
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
         directive_registry=built_directive_registry(project_root=root),

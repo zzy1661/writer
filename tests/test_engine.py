@@ -33,7 +33,7 @@ def test_router_classifies_write_command() -> None:
 
     assert action.action_type == "start_workflow"
     assert action.workflow == "write_chapter"
-    assert action.role == "story_consultant"
+    assert action.role == "story_agent"
     assert action.command == "/创作"
 
 
@@ -51,7 +51,7 @@ def test_router_classifies_tool_query() -> None:
 
     assert action.action_type == "call_tool"
     assert action.tool_name == "foreshadow_search"
-    assert action.role == "story_consultant"
+    assert action.role == "story_agent"
     # Rule extracts the F\d+ id and passes the original text as keyword
     # (sub-string fallback) so descriptive language still narrows results.
     assert action.arguments == {
@@ -201,9 +201,9 @@ def test_production_deps_has_router() -> None:
     from writer.routing import IntentRouter
 
     assert isinstance(deps.router, IntentRouter)
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
 
-    assert isinstance(deps.story_consultant, StoryConsultant)
+    assert isinstance(deps.story_agent, StoryAgent)
 
     action: AgentAction = deps.route("/init", "S0")
     assert action.action_type == "run_command"
@@ -401,9 +401,10 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
 
     import pytest
 
+    from writer.agents import builtin_agent_registry
     from writer.config import get_settings
     from writer.engine.deps import _DefaultEngineDeps
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.routing import RuleBasedIntentRouter
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
@@ -411,10 +412,11 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
 
     deps = _DefaultEngineDeps(
         router=RuleBasedIntentRouter(),
-        story_consultant=StoryConsultant(get_settings()),
+        story_agent=StoryAgent(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
         _workflows={},
     )
 
@@ -458,19 +460,21 @@ class _AskUserRouter:
 
 
 def test_engine_emits_error_event_on_router_failure() -> None:
+    from writer.agents import builtin_agent_registry
     from writer.config import get_settings
     from writer.engine import ErrorEvent
     from writer.engine.deps import _DefaultEngineDeps
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
         router=_FailingRouter(),  # type: ignore[arg-type]
-        story_consultant=StoryConsultant(get_settings()),
+        story_agent=StoryAgent(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
     )
 
     events = _consume(run_engine(_ctx("anything"), deps))
@@ -480,19 +484,21 @@ def test_engine_emits_error_event_on_router_failure() -> None:
 
 
 def test_engine_emits_interrupt_for_ask_user_action() -> None:
+    from writer.agents import builtin_agent_registry
     from writer.config import get_settings
     from writer.engine import Interrupt
     from writer.engine.deps import _DefaultEngineDeps
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
         router=_AskUserRouter("你想修改哪一段？"),  # type: ignore[arg-type]
-        story_consultant=StoryConsultant(get_settings()),
+        story_agent=StoryAgent(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
     )
 
     events = _consume(run_engine(_ctx("模糊输入"), deps))
@@ -505,20 +511,22 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
 
 
 def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
+    from writer.agents import builtin_agent_registry
     from writer.config import get_settings
     from writer.engine import TextChunk
     from writer.engine.config import EngineConfig
     from writer.engine.deps import _DefaultEngineDeps
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
         router=RuleBasedIntentRouter(),
-        story_consultant=StoryConsultant(get_settings()),
+        story_agent=StoryAgent(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
     )
 
     cfg = EngineConfig(session_id="x", fast_mode=True)
@@ -539,19 +547,21 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
 
 def test_engine_calls_tool_registry_on_call_tool_action() -> None:
     """Real call_tool path: registry invoked, ToolCall + ToolResult + tool_completed emitted."""
+    from writer.agents import builtin_agent_registry
     from writer.config import get_settings
     from writer.engine import ToolCall, ToolResult
     from writer.engine.deps import _DefaultEngineDeps
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
     deps = _DefaultEngineDeps(
         router=RuleBasedIntentRouter(),
-        story_consultant=StoryConsultant(get_settings()),
+        story_agent=StoryAgent(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
     )
 
     events = _consume(run_engine(_ctx("查一下 F003"), deps))
@@ -566,10 +576,11 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
 
 def test_engine_handles_tool_not_found_error() -> None:
     """A tool name that the registry doesn't know must yield ErrorEvent + Done(aborted)."""
+    from writer.agents import builtin_agent_registry
     from writer.config import get_settings
     from writer.engine import ErrorEvent
     from writer.engine.deps import _DefaultEngineDeps
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.routing import AgentAction
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
@@ -583,10 +594,11 @@ def test_engine_handles_tool_not_found_error() -> None:
 
     deps = _DefaultEngineDeps(
         router=_CallUnknownTool(),  # type: ignore[arg-type]
-        story_consultant=StoryConsultant(get_settings()),
+        story_agent=StoryAgent(get_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
     )
 
     events = _consume(run_engine(_ctx("anything"), deps))

@@ -214,7 +214,7 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
             return True
 
         # Bind the freshly-created project to the live session so subsequent
-        # engine turns can find the right RAG files / Consultant.
+        # engine turns can find the right RAG files / Agent.
         try:
             session.set_project_root(directory / name)
             session.refresh_project_genre()
@@ -604,7 +604,7 @@ def _maybe_apply_init_brief(
     load_project_settings(project_root)
     refresh_settings()
     deps = production_deps(project_root=project_root, genre=genre)
-    result = apply_init_brief(project_root, user_brief.strip(), deps.story_consultant)
+    result = apply_init_brief(project_root, user_brief.strip(), deps.story_agent)
     console.print(f"[green]已写入 创意/核心创意.md[/green]（来源: {result.source}）")
     console.print("[green]已更新 AGENT.md 基本要求[/green]")
 

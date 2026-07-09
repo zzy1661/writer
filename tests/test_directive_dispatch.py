@@ -188,14 +188,14 @@ def _stub_deps(project_root: Path) -> EngineDeps:
     SKILL.md packages.
     """
     from writer.config import get_settings
-    from writer.roles import StoryConsultant
+    from writer.roles import StoryAgent
     from writer.routing import RuleBasedIntentRouter
     from writer.tools import ToolRuntime, built_tool_registry
 
     class _Deps:
         def __init__(self) -> None:
             self.router = RuleBasedIntentRouter()
-            self.story_consultant = StoryConsultant(get_settings())
+            self.story_agent = StoryAgent(get_settings())
             self.tool_registry = built_tool_registry()
             self.tool_runtime = ToolRuntime(project_root=project_root)
             self.directive_registry = built_directive_registry(
@@ -213,8 +213,8 @@ def _stub_deps(project_root: Path) -> EngineDeps:
             self.tool_runtime = new_runtime
             return self
 
-        def rebind_story_consultant(self, new_consultant):
-            self.story_consultant = new_consultant
+        def rebind_story_agent(self, new_agent):
+            self.story_agent = new_agent
             return self
 
         def rebind_directive_registry(self, new_registry):

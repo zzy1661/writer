@@ -25,7 +25,7 @@ requires_states: [WRITING]
 
 1. 用 `safe_read_file` 读取指定章节当前内容。
 2. 用 `safe_read_file` 读取 `outline/toc.md` 该章节的大纲摘要。
-3. 调 `story_consultant.revise_chapter(chapter_text, edit_instruction, project_root=ctx.project_root)` 拿到修订后文本或 diff。
+3. 调 `story_agent.revise_chapter(chapter_text, edit_instruction, project_root=ctx.project_root)` 拿到修订后文本或 diff。
 4. 根据用户偏好（默认 in-place rewrite）：
    - in-place：先用 `safe_edit_file(old_string=<原段>, new_string=<新段>, dry_run=True)` 让用户在 TextChunk 里预览 diff；用户确认后改 `dry_run=False` 落盘。
    - 完全重写：用 `safe_write_file(path="manuscript/chapter-<chapter_id>.md", content=<新全文>, mode="overwrite")`。
@@ -52,4 +52,4 @@ requires_states: [WRITING]
 
 ## 当前状态
 
-**占位** —— 等 LLM 接入 `StoryConsultant.revise_chapter` 后启用。本 SKILL.md 提供完整指令模板。
+**占位** —— 等 LLM 接入 `StoryAgent.revise_chapter` 后启用。本 SKILL.md 提供完整指令模板。

@@ -15,7 +15,7 @@ explicit by introducing:
 
 Keeping ``AgentAction`` here (instead of in ``agent/``) reflects the layering:
 ``AgentAction`` is the **output of routing**, not a property of any business
-agent (``NovelAgent``/``StoryConsultant`` etc.). Engines and consumers import
+agent (``StoryAgent``/``HistoryAgent``/``XuanhuanAgent``/``RomanceAgent`` etc.). Engines and consumers import
 it from :mod:`writer.routing`.
 """
 
@@ -26,7 +26,7 @@ from typing import Any, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-Role = Literal["story_consultant", "proofreader", "historian", "reviewer"]
+Role = Literal["story_agent", "proofreader", "historian", "reviewer"]
 ActionType = Literal[
     "run_command",
     "call_tool",
@@ -43,6 +43,12 @@ class AgentAction(BaseModel):
     at their defaults. Using ``BaseModel`` (not ``dataclass``) keeps JSON
     serialization cheap when we later swap in an LLM structured-output
     implementation behind the same router.
+
+    ``kind`` (added per ``fea-agent-mirror``) discriminates between
+    command-shaped actions (``kind="command"``, the default — populated
+    ``command`` / ``workflow`` / ``tool_name`` etc.) and agent-shaped
+    actions (``kind="agent"``, ``target_agent`` populated). The default
+    keeps every existing call site zero-diff.
     """
 
     model_config = {"frozen": True}
@@ -55,6 +61,8 @@ class AgentAction(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
     answer: str | None = None
     user_prompt: str | None = None
+    kind: Literal["command", "agent"] = "command"
+    target_agent: str | None = None
 
 
 @runtime_checkable
@@ -95,7 +103,7 @@ class RuleBasedIntentRouter:
             return AgentAction(
                 action_type="call_tool",
                 command="/字数统计",
-                role="story_consultant",
+                role="story_agent",
                 tool_name="wordcount",
                 arguments={"path": path},
             )
@@ -103,7 +111,7 @@ class RuleBasedIntentRouter:
             return AgentAction(
                 action_type="start_workflow",
                 command="/创作",
-                role="story_consultant",
+                role="story_agent",
                 workflow="write_chapter",
                 arguments={"raw": text},
             )
@@ -118,7 +126,7 @@ class RuleBasedIntentRouter:
         if "伏笔" in text or "F0" in text:
             return AgentAction(
                 action_type="call_tool",
-                role="story_consultant",
+                role="story_agent",
                 tool_name="foreshadow_search",
                 arguments=_parse_foreshadow_args(text),
             )

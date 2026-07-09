@@ -6,11 +6,12 @@ from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID
 
+from writer.agents import builtin_agent_registry
 from writer.config import get_settings
 from writer.engine import Interrupt
 from writer.engine.context import EngineContext
 from writer.engine.deps import EngineDeps
-from writer.roles import HistoryConsultant, StoryConsultant, XuanhuanConsultant
+from writer.roles import HistoryAgent, StoryAgent, XuanhuanAgent
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
 from writer.skills import DirectiveRegistry, built_directive_registry
@@ -134,17 +135,17 @@ def test_session_set_project_root_same_path_is_noop(tmp_path: Path) -> None:
     assert session.deps.tool_runtime is runtime_after_first
 
 
-def test_session_set_project_root_rebuilds_story_consultant_on_genre_change(
+def test_session_set_project_root_rebuilds_story_agent_on_genre_change(
     tmp_path: Path,
 ) -> None:
-    """Switching projects across genres must rebuild ``deps.story_consultant``.
+    """Switching projects across genres must rebuild ``deps.story_agent``.
 
     Per arch-optimizer M1 (2026-07-07): the old code only refreshed
     ``session.project_genre`` (the field) but never rebuilt ``deps
-    .story_consultant`` (the instance). This test pins the new
+    .story_agent`` (the instance). This test pins the new
     contract — a REPL session that runs ``/init 历史`` then ``/init
-    玄幻`` ends up with an :class:`XuanhuanConsultant` in deps, not
-    the stale :class:`HistoryConsultant` from the previous project.
+    玄幻`` ends up with an :class:`XuanhuanAgent` in deps, not
+    the stale :class:`HistoryAgent` from the previous project.
     """
 
     def _seed_genre(root: Path, genre: str) -> None:
@@ -163,15 +164,15 @@ def test_session_set_project_root_rebuilds_story_consultant_on_genre_change(
     session = EngineSession()
     session.set_project_root(history_root)
     assert isinstance(
-        session.deps.story_consultant, HistoryConsultant
-    ), f"expected HistoryConsultant, got {type(session.deps.story_consultant).__name__}"
+        session.deps.story_agent, HistoryAgent
+    ), f"expected HistoryAgent, got {type(session.deps.story_agent).__name__}"
 
     session.set_project_root(xuanhuan_root)
     assert isinstance(
-        session.deps.story_consultant, XuanhuanConsultant
+        session.deps.story_agent, XuanhuanAgent
     ), (
-        f"expected XuanhuanConsultant after switching genres, "
-        f"got {type(session.deps.story_consultant).__name__}"
+        f"expected XuanhuanAgent after switching genres, "
+        f"got {type(session.deps.story_agent).__name__}"
     )
 
 
@@ -273,7 +274,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
     ``tool_runtime`` cleanly.
 
     The old code skipped the duck-typed branch and rebuilt the whole
-    production_deps (losing router / story_consultant) for any
+    production_deps (losing router / story_agent) for any
     Protocol-only stub — the test below would have failed before M6.
     """
 
@@ -282,7 +283,8 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
         def __init__(self) -> None:
             self.router = RuleBasedIntentRouter()
-            self.story_consultant = StoryConsultant(get_settings())
+            self.story_agent = StoryAgent(get_settings())
+            self.agent_registry = builtin_agent_registry()
             self.tool_registry = built_tool_registry()
             self.tool_runtime = ToolRuntime(
                 project_root=Path("/__no_project__").resolve()
@@ -302,14 +304,14 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             self.tool_runtime = new_runtime
             return self
 
-        def rebind_story_consultant(
-            self, new_consultant: StoryConsultant
+        def rebind_story_agent(
+            self, new_agent: StoryAgent
         ) -> EngineDeps:
             # Mirror M1's production wiring: in-place mutation is
             # allowed by the Protocol. The session-level test below
             # asserts this method is *called* during set_project_root,
             # not that it returns a new object.
-            self.story_consultant = new_consultant
+            self.story_agent = new_agent
             return self
 
         def rebind_directive_registry(
@@ -328,6 +330,16 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             # Back-compat alias kept for the older name; the Protocol
             # declares both methods so existing callers still work.
             self.directive_registry = new_registry
+            return self
+
+        def rebind_agent_registry(
+            self, new_registry: object
+        ) -> EngineDeps:
+            # Added 2026-07-09 (fea-agent-mirror). Symmetric to
+            # rebind_directive_registry: ``set_project_root`` calls
+            # this after rebuilding the registry from the new
+            # project's ``.writer/agents/``.
+            self.agent_registry = new_registry
             return self
 
     # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.

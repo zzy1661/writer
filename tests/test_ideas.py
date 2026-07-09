@@ -9,7 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from writer.config import Settings
 from writer.project.ideas import IdeasContext, build_outline_user_message, load_ideas_context
 from writer.project.workspace import create_workspace
-from writer.roles.story_consultant import StoryConsultant
+from writer.roles.story_agent import StoryAgent
 
 
 def test_load_ideas_context_reads_core_and_supplementary(tmp_path: Path) -> None:
@@ -67,7 +67,7 @@ def test_draft_outline_llm_prompt_includes_ideas_context(tmp_path: Path) -> None
             )
 
     fake = _CapturingChat()
-    StoryConsultant(Settings(), llm=fake).draft_outline(
+    StoryAgent(Settings(), llm=fake).draft_outline(
         "突出主角认知错位",
         project_root=workspace.root,
     )

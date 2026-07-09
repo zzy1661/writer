@@ -259,3 +259,87 @@ def test_create_workspace_other_genre_has_no_ticaline_in_agent_md(tmp_path: Path
     agent_text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
     assert "state: S1" in agent_text
     assert "题材:" not in agent_text
+
+
+# ---------------------------------------------------------------------------
+# fea-agent-mirror: agent mirror via _seed_agents
+# ---------------------------------------------------------------------------
+
+
+def test_create_new_workspace_seeds_all_four_agents(tmp_path: Path) -> None:
+    """``writer new`` mirrors the 4 shipped agent .md files to .writer/agents/."""
+
+    from writer.project.workspace import create_new_workspace
+
+    workspace = create_new_workspace("mirror_test", tmp_path, genres=["历史"])
+    agents_dir = workspace.root / ".writer" / "agents"
+    mirrored = sorted(p.name for p in agents_dir.iterdir() if p.suffix == ".md")
+    assert mirrored == ["other.md", "历史.md", "玄幻.md", "言情.md"]
+
+
+def test_create_workspace_low_level_does_not_seed_agents(tmp_path: Path) -> None:
+    """The low-level ``create_workspace`` API does NOT seed agents.
+
+    Even with ``with_writer_meta=True`` the agents/ directory is
+    created (so project-level overrides can be added later) but no
+    .md files are mirrored. This preserves back-compat for the
+    ``create_workspace`` API used by /init and the test fixtures.
+    """
+
+    from writer.project.workspace import create_workspace
+
+    workspace = create_workspace(
+        "low_level", tmp_path, with_writer_meta=True
+    )
+    agents_dir = workspace.root / ".writer" / "agents"
+    assert agents_dir.is_dir(), "agents dir should be created"
+    contents = [p.name for p in agents_dir.iterdir()]
+    assert contents == [], (
+        "low-level create_workspace must not seed agents, got: "
+        f"{contents}"
+    )
+
+
+def test_mirrored_agent_file_has_valid_frontmatter(tmp_path: Path) -> None:
+    """The mirrored ``历史.md`` has a parseable YAML frontmatter + non-empty body."""
+
+    from writer.agents import parse_agent_file
+    from writer.project.workspace import create_new_workspace
+
+    workspace = create_new_workspace("frontmatter_test", tmp_path, genres=["历史"])
+    history_path = workspace.root / ".writer" / "agents" / "历史.md"
+    assert history_path.is_file()
+
+    agent = parse_agent_file(history_path)
+    assert agent.name == "history"
+    assert agent.genre == "历史"
+    assert len(agent.body.strip()) > 50
+
+
+def test_mirror_does_not_overwrite_user_modified_agents(tmp_path: Path) -> None:
+    """A pre-existing user-edited agent file is NOT overwritten on re-init.
+
+    Per the spec: ``writer new`` mirrors shipped source only when the
+    target file does not exist. A user-modified .md stays intact.
+    """
+
+    from writer.project.workspace import create_new_workspace
+
+    # First init — creates the 4 mirrored files
+    workspace = create_new_workspace("no_overwrite", tmp_path, genres=["other"])
+    history_path = workspace.root / ".writer" / "agents" / "历史.md"
+
+    # User edits the file
+    history_path.write_text(
+        "---\nname: history\ndescription: USER MODIFIED — very long description here to satisfy the validator\n"
+        "genre: 历史\ntools: []\n---\n\n# USER BODY\n",
+        encoding="utf-8",
+    )
+
+    # Re-run with force=True (which should NOT touch existing files)
+    create_new_workspace(
+        "no_overwrite", tmp_path, genres=["other"], force=True
+    )
+    text = history_path.read_text(encoding="utf-8")
+    assert "USER MODIFIED" in text
+    assert "USER BODY" in text

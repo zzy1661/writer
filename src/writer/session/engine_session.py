@@ -8,7 +8,7 @@ turn. It owns:
   latest state detected from disk.
 - **deps** (mutable): the ``EngineDeps`` instance, built once at
   construction. ``tool_runtime`` is swapped via :meth:`set_project_root`
-  while router / story_consultant / tool_registry are preserved.
+  while router / story_agent / tool_registry are preserved.
 - **turns** (mutable): append-only list of :class:`TurnRecord`.
 - **pending_interrupt** (mutable): the most recent ``Interrupt`` event
   emitted by the engine, cleared when the next turn completes.
@@ -99,12 +99,12 @@ class EngineSession:
 
         Router / tool_registry are preserved across the swap.
         ``tool_runtime`` is rebuilt because it holds the project_root
-        that gates ``safe_path`` checks. ``story_consultant`` is ALSO
+        that gates ``safe_path`` checks. ``story_agent`` is ALSO
         rebuilt if the bound project's ``AGENT.md`` ``题材:`` line
-        resolves to a different Consultant subclass (per arch-optimizer
+        resolves to a different Agent subclass (per arch-optimizer
         M1, 2026-07-07): without this rebuild, a REPL session that
         runs ``/init 历史`` then ``/init 玄幻`` would keep the
-        HistoryConsultant in deps and serve stale outlines.
+        HistoryAgent in deps and serve stale outlines.
 
         ``directive_registry`` is also rebuilt (per ``chg-markdown-skills``)
         so the new project's ``.writer/skills/`` overrides become
@@ -121,8 +121,9 @@ class EngineSession:
         if new_root == self.project_root:
             return
 
+        from writer.agents import built_agent_registry
         from writer.config import get_settings
-        from writer.engine.deps import _consultant_for_genre
+        from writer.engine.deps import _agent_for_genre
         from writer.skills import built_directive_registry
         from writer.tools import ToolRuntime
 
@@ -139,13 +140,13 @@ class EngineSession:
         self.refresh_project_state()
         self.refresh_project_genre()
 
-        # Rebuild story_consultant against the freshly-read genre. Uses
+        # Rebuild story_agent against the freshly-read genre. Uses
         # the same Settings the deps were originally built with so
         # LLM/feature flags stay consistent across the swap.
-        new_consultant = _consultant_for_genre(
+        new_agent = _agent_for_genre(
             get_settings(), self.project_genre
         )
-        self.deps = self.deps.rebind_story_consultant(new_consultant)
+        self.deps = self.deps.rebind_story_agent(new_agent)
 
         # Rebuild the directive registry so the new project's
         # ``.writer/skills/`` overrides take effect on the next turn.
@@ -155,6 +156,13 @@ class EngineSession:
         # not a directory so ``discover_directives`` returns ``[]``.
         new_registry = built_directive_registry(project_root=resolved)
         self.deps = self.deps.rebind_directive_registry(new_registry)
+
+        # Rebuild the agent registry so the new project's
+        # ``.writer/agents/`` overrides (per ``fea-agent-mirror``)
+        # take effect on the next REPL turn. Symmetric to the
+        # directive registry rebind above.
+        new_agent_registry = built_agent_registry(project_root=resolved)
+        self.deps = self.deps.rebind_agent_registry(new_agent_registry)
 
     def refresh_project_state(self) -> str:
         """Refresh ``project_state`` from files on disk and return it."""

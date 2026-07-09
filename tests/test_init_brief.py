@@ -6,7 +6,7 @@ from langchain_core.messages import AIMessage
 
 from writer.config import Settings
 from writer.project.init_brief import apply_init_brief
-from writer.roles import StoryConsultant
+from writer.roles import StoryAgent
 
 
 class _FakeBriefChat:
@@ -30,8 +30,8 @@ def test_apply_init_brief_writes_core_idea_and_agent_requirements(tmp_path) -> N
         }
         """
     )
-    consultant = StoryConsultant(Settings(), llm=fake)
-    result = apply_init_brief(project, "程序员穿越唐朝", consultant)
+    agent = StoryAgent(Settings(), llm=fake)
+    result = apply_init_brief(project, "程序员穿越唐朝", agent)
 
     assert result.source == "llm"
     core = (project / "创意" / "核心创意.md").read_text(encoding="utf-8")
@@ -47,8 +47,8 @@ def test_process_init_brief_fallback_without_api_key(tmp_path) -> None:  # noqa:
     project.mkdir()
     (project / "AGENT.md").write_text("# novel\n\n", encoding="utf-8")
 
-    consultant = StoryConsultant(Settings(api_key=None))
-    result = apply_init_brief(project, "一个废土少年的故事", consultant)
+    agent = StoryAgent(Settings(api_key=None))
+    result = apply_init_brief(project, "一个废土少年的故事", agent)
 
     assert result.source == "fallback"
     assert (project / "创意" / "核心创意.md").is_file()

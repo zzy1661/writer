@@ -66,7 +66,7 @@ def normalize_genres(raw: str | list[str] | None) -> list[str]:
 
 
 def primary_genre(genres: list[str]) -> str:
-    """Pick the first known genre for consultant selection."""
+    """Pick the first known genre for agent selection."""
 
     for genre in genres:
         if genre in {"历史", "言情", "玄幻"}:

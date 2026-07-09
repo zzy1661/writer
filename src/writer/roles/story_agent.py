@@ -1,24 +1,27 @@
-"""Story Consultant role — the screenwriting specialist.
+"""Story Agent role — the screenwriting specialist.
 
 This is one *role* in the agent system (per 备忘 04 / 16 / 17), alongside
 others that will land later (``proofreader``, ``historian``, ``reviewer``).
 A role exposes a small capability surface — currently
-:meth:`StoryConsultant.draft_outline` — that the engine, CLI, and workflow
+:meth:`StoryAgent.draft_outline` — that the engine, CLI, and workflow
 stubs call explicitly. Roles do not invoke each other directly; cross-role
 composition happens at the workflow graph layer.
 
-When an API key is configured, the default consultant asks the configured
+When an API key is configured, the default agent asks the configured
 LLM for a structured outline. Without a key (or if the provider fails), it
 falls back to the deterministic four-act outline so the CLI remains usable
 offline.
 
 Genre dispatch lives on the ``GENRE`` class attribute. Subclasses
-(``HistoryConsultant`` / ``RomanceConsultant`` / ``XuanhuanConsultant``)
+(``HistoryAgent`` / ``RomanceAgent`` / ``XuanhuanAgent``)
 override ``GENRE`` only; the parent's
-:meth:`StoryConsultant._draft_outline_with_llm` looks the prompt up via
+:meth:`StoryAgent._draft_outline_with_llm` looks the prompt up via
 ``self._prompt_registry.require(PromptKey(role="outline", genre=self.GENRE))``
 so each genre gets the matching identity fragment without re-implementing
 the dispatch logic.
+
+Renamed from ``StoryConsultant`` to ``StoryAgent`` per
+``fea-agent-mirror``; the contract is unchanged.
 """
 
 from __future__ import annotations
@@ -92,11 +95,11 @@ class InitBriefResult:
     source: str = "fallback"
 
 
-class StoryConsultant:
-    """Screenwriting consultant — drafts four-act outlines from a premise.
+class StoryAgent:
+    """Screenwriting agent — drafts four-act outlines from a premise.
 
     Subclasses set ``GENRE`` to dispatch the prompt lookup
-    (e.g. ``HistoryConsultant.GENRE = "历史"``). The parent's
+    (e.g. ``HistoryAgent.GENRE = "历史"``). The parent's
     ``_draft_outline_with_llm`` looks up
     ``PromptKey(role="outline", genre=self.GENRE)`` so a single
     implementation drives all four genres.
@@ -274,4 +277,4 @@ class StoryConsultant:
         return f"{compact[:18]}..."
 
 
-__all__ = ["InitBriefResult", "OutlineResult", "StoryConsultant", "TocResult"]
+__all__ = ["InitBriefResult", "OutlineResult", "StoryAgent", "TocResult"]

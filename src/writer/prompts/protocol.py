@@ -8,9 +8,9 @@ touching call sites.
 A :class:`PromptBundle` is the unit of dispatch: it carries one
 :class:`langchain_core.prompts.ChatPromptTemplate` plus the composite
 key (:class:`PromptKey`) under which it is registered. The composite key
-is shaped ``(role, genre)`` because the four genre Consultants
-(``HistoryConsultant`` / ``XuanhuanConsultant`` / ``RomanceConsultant``
-/ ``StoryConsultant``) all consume the same ``outline`` role but with
+is shaped ``(role, genre)`` because the four genre Agents
+(``HistoryAgent`` / ``XuanhuanAgent`` / ``RomanceAgent``
+/ ``StoryAgent``) all consume the same ``outline`` role but with
 different identities.
 
 The dataclasses are ``frozen=True`` so callers cannot mutate a bundle
@@ -33,10 +33,10 @@ class PromptKey:
     ``role`` distinguishes the *kind* of LLM call:
     ``"router"`` / ``"outline"`` / ``"toc"`` / ``"init_brief"``.
 
-    ``genre`` distinguishes the consultant identity (and the
+    ``genre`` distinguishes the agent identity (and the
     genre-specific outline fallback): ``"历史"`` / ``"言情"`` /
     ``"玄幻"`` / ``"other"``. The default ``"other"`` is the catch-all
-    used by :class:`writer.roles.StoryConsultant` and by shared roles
+    used by :class:`writer.roles.StoryAgent` and by shared roles
     like ``"toc"`` and ``"init_brief"`` that do not branch by genre.
     """
 

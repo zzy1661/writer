@@ -9,7 +9,7 @@ cancellation.
 Phase 2 wiring (per 本次重构 Phase 2):
 
 * ``run_command`` for ``/大纲`` dispatches to
-  :meth:`writer.roles.StoryConsultant.draft_outline` and streams the
+  :meth:`writer.roles.StoryAgent.draft_outline` and streams the
   outline as ``TextChunk`` events before a terminal ``Done('answered')``.
 * ``start_workflow`` for ``write_chapter`` / ``review_chapter`` (and any
   future registered workflow) dispatches to
@@ -141,6 +141,15 @@ async def _engine_loop(
             )
             return
 
+        # Dispatch is on ``action.kind`` first (per ``fea-agent-mirror``)
+        # — a ``kind="agent"`` action takes the agent path regardless of
+        # the underlying ``action_type`` (which the LLM might emit as
+        # ``answer_directly`` since agents usually answer in prose).
+        if action.kind == "agent":
+            async for event in _run_agent(action, ctx, deps, cfg):  # type: ignore[assignment]
+                yield event
+            return
+
         match action.action_type:
             case "answer_directly":
                 yield TextChunk(text=action.answer or "")
@@ -224,7 +233,7 @@ async def _engine_loop(
         log.warning("技能错误: %s", exc, exc_info=True)
         # The skill command isn't on the SkillError itself — recover it
         # from the last routed action to keep the payload stable.
-        command = getattr(exc, "command", action.command if action else None)
+        command = getattr(exc, "command", getattr(action, "command", None))
         yield ErrorEvent(message=f"技能错误: {exc}", traceback=tb)
         yield Done(
             reason="aborted",
@@ -332,7 +341,7 @@ async def _run_init_brief_command(
     if not cfg.fast_mode:
         yield TextChunk(text="[engine] /init → apply_init_brief\n")
 
-    result = apply_init_brief(ctx.project_root, brief, deps.story_consultant)
+    result = apply_init_brief(ctx.project_root, brief, deps.story_agent)
     yield TextChunk(
         text=f"已写入 创意/核心创意.md（来源: {result.source}）\n"
         "已更新 AGENT.md 基本要求\n"
@@ -447,6 +456,108 @@ async def _run_workflow(
     for chunk in deps.run_workflow(name, ctx):
         yield TextChunk(text=chunk)
     yield Done(reason="workflow_pending", payload={"workflow": name})
+
+
+async def _run_agent(
+    action: AgentAction,
+    ctx: EngineContext,
+    deps: EngineDeps,
+    cfg: EngineConfig,
+) -> AsyncIterator[TextChunk | ActionEvent | Interrupt | ToolCall | ToolResult | Done | ErrorEvent]:
+    """Dispatch a ``kind="agent"`` action to the LLM with the agent's body.
+
+    Per ``fea-agent-mirror`` Decision 7: the engine composes an LLM
+    call whose system prompt is the chosen agent's ``body`` (the
+    agent's identity / role description) plus the genre-specific
+    outline template. The LLM is invoked through the existing
+    :class:`writer.llm.agent.LLMToolLoop` path (when an API key is
+    configured) so the model can use the tool registry to read
+    project state before producing a structured outline.
+
+    Without an LLM (``deps.tool_loop is None``) the helper falls back
+    to a deterministic four-act outline using the agent's genre —
+    same fallback as :class:`writer.roles.StoryAgent._draft_outline_fallback`.
+    The CLI renders the agent name in the terminal ``Done`` payload
+    so the user sees which agent produced the response.
+
+    Errors:
+
+    * :class:`writer.agents.AgentRegistryError` raised by
+      ``agent_registry.require`` when ``action.target_agent`` is not
+      a known agent → caught by the engine boundary, surfaced as
+      ``ErrorEvent + Done(aborted, payload={"error": ..., "command": name})``.
+    * Other LLM / tool failures are caught by the outer ``_engine_loop``
+      boundary (``except Exception`` arm).
+    """
+
+    from writer.agents import AgentRegistryError  # noqa: PLC0415
+
+    agent_name = action.target_agent or ""
+    try:
+        agent = deps.agent_registry.require(agent_name)
+    except AgentRegistryError as exc:
+        # Defer to the engine boundary's existing ``except`` arms by
+        # re-raising as a ``ToolError``-shaped ``AgentRegistryError``;
+        # but since ``AgentRegistryError`` is a ``ValueError`` (not
+        # ``ToolError``), we instead emit the events directly so the
+        # boundary's catch-all arm doesn't double-wrap the message.
+        from writer.engine.events import ErrorEvent
+
+        tb_msg = str(exc)
+        log.warning("Agent dispatch 错误: %s", exc, exc_info=True)
+        yield ErrorEvent(message=f"Agent 错误: {exc}", traceback=tb_msg)
+        yield Done(
+            reason="aborted",
+            payload={"error": str(exc), "command": agent_name},
+        )
+        return
+
+    if not cfg.fast_mode:
+        yield _log(f"[engine] agent dispatch → {agent_name}\n", cfg)
+
+    if deps.tool_loop is not None:
+        # LLM-driven path: feed the agent's body to the existing tool
+        # loop, which already knows how to invoke the LLM with a
+        # structured-output schema and the tool registry. We piggy-
+        # back on ``answer_directly`` so the loop just produces prose;
+        # the agent body is the system identity, the user input is
+        # the human message.
+        agent_action = AgentAction(
+            action_type="answer_directly",
+            command=None,
+            kind="agent",
+            target_agent=agent_name,
+            answer=(
+                f"[agent {agent_name!r} system identity]\n"
+                f"{agent.body}\n"
+                f"\n[user input]\n{ctx.user_input}"
+            ),
+        )
+        async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
+            yield event
+    else:
+        # No LLM available — emit the agent's body as a preview so the
+        # user can see what agent got picked and what its identity is.
+        # This mirrors the rule-only fallback used elsewhere in the
+        # engine (``_run_directive``).
+        yield TextChunk(
+            text=(
+                f"[agent {agent_name!r} preview, no LLM configured]\n"
+                f"  name: {agent.name}\n"
+                f"  genre: {agent.genre}\n"
+                f"  body length: {len(agent.body)} chars\n"
+                f"  description: {agent.description}\n"
+            )
+        )
+        yield Done(
+            reason="answered",
+            payload={
+                "agent": agent_name,
+                "genre": agent.genre,
+                "body_length": len(agent.body),
+                "llm_available": False,
+            },
+        )
 
 
 async def _run_directive(

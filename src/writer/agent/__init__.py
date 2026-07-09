@@ -1,22 +1,28 @@
-"""Agent orchestration — back-compat shim.
+"""Agent orchestration — back-compat shim (routing re-exports only).
 
 The previous ``writer.agent`` package mixed routing (``WriterCommandAgent``,
 now :class:`writer.routing.IntentRouter`) with role capabilities
-(``NovelAgent``, now :class:`writer.roles.StoryConsultant`). After the
+(``NovelAgent``, now :class:`writer.roles.StoryAgent`). After the
 refactor (per 备忘 16 / 本次重构 Phase 1):
 
 * Routing lives in :mod:`writer.routing`.
 * Roles live in :mod:`writer.roles`.
 * Workflows live in :mod:`writer.workflows`.
-* Skills (future) live in :mod:`writer.skills`.
+* Skills live in :mod:`writer.skills`.
+* Agents (new per ``fea-agent-mirror``) live in :mod:`writer.agents`.
 
-This module remains as a thin re-export shim so legacy imports such as
-``from writer.agent import NovelAgent`` continue to resolve while the rest
-of the codebase is migrated. New code should import directly from the
-new packages.
+This module remains as a thin re-export shim so legacy routing imports
+(``from writer.agent import IntentRouter``) continue to resolve while
+the rest of the codebase is migrated. New code should import directly
+from the new packages.
+
+The legacy ``NovelAgent`` alias was removed per the clean rename in
+``fea-agent-mirror``; use :class:`writer.roles.StoryAgent` directly.
+The ``WriterCommandAgent`` alias is kept for now (out of scope for the
+``fea-agent-mirror`` rename; touching it would expand the change into
+the router's protocol surface).
 """
 
-from writer.roles import OutlineResult, StoryConsultant
 from writer.routing import (
     ActionType,
     AgentAction,
@@ -25,23 +31,17 @@ from writer.routing import (
     RuleBasedIntentRouter,
 )
 
-# Back-compat aliases.
-# ``NovelAgent`` was the original facade exposed by ``writer.agent``; it is
-# now the same class as ``StoryConsultant``. ``WriterCommandAgent`` was the
-# original rule-based dispatcher; it is now the rule-based
-# ``IntentRouter``. Callers must use ``.route()`` (not ``.decide()``) on the
-# router alias.
-NovelAgent = StoryConsultant
+# Back-compat alias for the original rule-based dispatcher. Out of scope
+# for the ``fea-agent-mirror`` rename; preserved for any external code
+# that still imports ``WriterCommandAgent``. Callers must use
+# ``.route()`` (not ``.decide()``) on the router alias.
 WriterCommandAgent = RuleBasedIntentRouter
 
 __all__ = [
     "ActionType",
     "AgentAction",
     "IntentRouter",
-    "NovelAgent",
-    "OutlineResult",
     "Role",
     "RuleBasedIntentRouter",
-    "StoryConsultant",
     "WriterCommandAgent",
 ]

@@ -1,29 +1,32 @@
-"""Consultant prompt templates — outline / TOC / init_brief LLM calls.
+"""Agent prompt templates — outline / TOC / init_brief LLM calls.
 
 Centralizes every ChatPromptTemplate used by the four concrete
-consultants in :mod:`writer.roles`. The structure follows the convention
+agents in :mod:`writer.roles`. The structure follows the convention
 laid out in the prompts plan:
 
 * Each genre-specific outline template reuses the matching identity
   fragment from :mod:`writer.prompts.identity` so swapping identity
   wording only requires editing one file.
 * TOC and init-brief templates use the neutral
-  :data:`CONSULTANT_IDENTITY_STORY` because they do not currently
+  :data:`AGENT_IDENTITY_STORY` because they do not currently
   branch by genre (per the prompts plan, those branches are explicitly
   out of scope for this iteration).
 * :data:`FALLBACK_OUTLINE_CHAPTERS` holds the deterministic chapter
-  lists previously inlined in the three genre-specific Consultants.
+  lists previously inlined in the three genre-specific Agents.
   Centralizing them here keeps all prompt-shaped content in one place
-  and lets the genre Consultants shrink to ``class C(P): GENRE = "…"``
+  and lets the genre Agents shrink to ``class C(P): GENRE = "…"``
   declarations.
 
 The :func:`build_outline_user_message` helper stays in
 :mod:`writer.project.ideas` because it consumes the on-disk
 ``IdeasContext`` (a project-layer concern). It is intentionally not
-imported here so the import graph stays one-way — ``consultants.py``
+imported here so the import graph stays one-way — ``agents.py``
 must not pull from ``writer.project`` because :mod:`writer.project.ideas`
 re-exports :data:`OUTLINE_SYSTEM_PROMPT` from this module for backward
 compatibility.
+
+Renamed from ``consultants.py`` to ``agents.py`` per ``fea-agent-mirror``;
+the template wording and constants are intentionally preserved.
 """
 
 from __future__ import annotations
@@ -31,10 +34,10 @@ from __future__ import annotations
 from langchain_core.prompts import ChatPromptTemplate
 
 from writer.prompts.identity import (
-    CONSULTANT_IDENTITY_HISTORY,
-    CONSULTANT_IDENTITY_ROMANCE,
-    CONSULTANT_IDENTITY_STORY,
-    CONSULTANT_IDENTITY_XUANHUAN,
+    AGENT_IDENTITY_HISTORY,
+    AGENT_IDENTITY_ROMANCE,
+    AGENT_IDENTITY_STORY,
+    AGENT_IDENTITY_XUANHUAN,
 )
 
 # ---------------------------------------------------------------------------
@@ -45,7 +48,7 @@ OUTLINE_TEMPLATE_STORY: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            CONSULTANT_IDENTITY_STORY
+            AGENT_IDENTITY_STORY
             + "\n\n任务:基于项目的核心创意（及辅助素材），"
             "生成一份可落地的大纲种子，不是正文。"
             "\n约束:每条章节须体现冲突、转折或悬念；若提供了核心创意，"
@@ -59,7 +62,7 @@ OUTLINE_TEMPLATE_HISTORY: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            CONSULTANT_IDENTITY_HISTORY
+            AGENT_IDENTITY_HISTORY
             + "\n\n任务:基于项目的核心创意（及辅助素材），"
             "生成一份具备历史纵深的大纲种子，不是正文。"
             "\n约束:每条章节须含「史实锚点」与「虚构补充」两层元素；"
@@ -73,7 +76,7 @@ OUTLINE_TEMPLATE_ROMANCE: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            CONSULTANT_IDENTITY_ROMANCE
+            AGENT_IDENTITY_ROMANCE
             + "\n\n任务:基于项目的核心创意（及辅助素材），"
             "生成一份以情感节拍为主轴的大纲种子，不是正文。"
             "\n约束:章节使用「节拍<N>」前缀，按 GMC（Goal/Motivation/Conflict）"
@@ -88,7 +91,7 @@ OUTLINE_TEMPLATE_XUANHUAN: ChatPromptTemplate = ChatPromptTemplate.from_messages
     [
         (
             "system",
-            CONSULTANT_IDENTITY_XUANHUAN
+            AGENT_IDENTITY_XUANHUAN
             + "\n\n任务:基于项目的核心创意（及辅助素材），"
             "生成一份以境界推进为骨架的大纲种子，不是正文。"
             "\n约束:章节使用「境界<N> <境界名>」前缀，每个境界须给"
@@ -107,7 +110,7 @@ TOC_TEMPLATE: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            CONSULTANT_IDENTITY_STORY
+            AGENT_IDENTITY_STORY
             + "\n\n任务:基于已有大纲，生成可执行的章节目录，不是正文。",
         ),
         (
@@ -128,7 +131,7 @@ INIT_BRIEF_TEMPLATE: ChatPromptTemplate = ChatPromptTemplate.from_messages(
     [
         (
             "system",
-            CONSULTANT_IDENTITY_STORY
+            AGENT_IDENTITY_STORY
             + "\n\n任务:用户刚创建小说项目，请从自然语言描述中提炼核心创意与写作基本要求。",
         ),
         (

@@ -11,6 +11,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from pydantic import PrivateAttr
 
+from writer.agents import builtin_agent_registry
 from writer.config import Settings
 from writer.engine import (
     Done,
@@ -24,7 +25,7 @@ from writer.engine import (
 from writer.engine.config import build_engine_config
 from writer.engine.deps import _DefaultEngineDeps
 from writer.llm.agent import MAX_LOOP_STEPS, LLMToolLoop
-from writer.roles import StoryConsultant
+from writer.roles import StoryAgent
 from writer.routing import AgentAction, IntentRouter
 from writer.skills import built_directive_registry
 from writer.tools import ToolRuntime, built_tool_registry
@@ -289,10 +290,11 @@ def _noop_deps() -> _DefaultEngineDeps:
 
     return _DefaultEngineDeps(
         router=_UnknownToolRouter(),
-        story_consultant=StoryConsultant(_settings()),
+        story_agent=StoryAgent(_settings()),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
         tool_loop=None,
     )
 
@@ -374,10 +376,11 @@ async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() ->
 
     deps = _DefaultEngineDeps(
         router=_UnknownToolRouter(),
-        story_consultant=StoryConsultant(settings),
+        story_agent=StoryAgent(settings),
         tool_registry=registry,
         tool_runtime=runtime,
         directive_registry=built_directive_registry(),
+        agent_registry=builtin_agent_registry(),
         tool_loop=tool_loop,
     )
     ctx = _ctx()

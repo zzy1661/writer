@@ -10,7 +10,7 @@ from pathlib import Path
 # ``from writer.project.ideas import OUTLINE_SYSTEM_PROMPT`` keep
 # working without modification. The local file stays focused on
 # project-layer concerns (filesystem layout, IdeasContext assembly).
-from writer.prompts.consultants import OUTLINE_TEMPLATE_STORY
+from writer.prompts.agents import OUTLINE_TEMPLATE_STORY
 
 CORE_IDEA_FILENAME = "核心创意.md"
 _SKIP_FILENAMES = frozenset({CORE_IDEA_FILENAME, "README.md"})
