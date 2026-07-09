@@ -8,13 +8,17 @@ cancellation.
 
 Phase 2 wiring (per 本次重构 Phase 2):
 
-* ``run_command`` for ``/大纲`` dispatches to
-  :meth:`writer.roles.StoryAgent.draft_outline` and streams the
-  outline as ``TextChunk`` events before a terminal ``Done('answered')``.
+* ``run_command`` for ``/大纲`` dispatches to the Markdown-paradigm
+  agent directive (``writer/skills/_shipped/大纲/SKILL.md``) via
+  ``_run_directive``; the LLM consumes the directive body and uses
+  the tool registry to write the outline. There is no Python-side
+  ``draft_outline`` anymore — the helper was deleted in
+  ``chg-remove-roles`` after ``fea-agent-mirror`` made it dead code.
 * ``start_workflow`` for ``write_chapter`` / ``review_chapter`` (and any
   future registered workflow) dispatches to
   :meth:`writer.engine.deps.EngineDeps.run_workflow` and streams the
-  workflow's chunks before ``Done('workflow_pending')``.
+  workflow's chunks before ``Done('workflow_completed')`` (or
+  ``Done('aborted')`` on failure / pending-rewrite signal).
 * All other action types short-circuit to a terminal ``Done`` (MVP).
 
 Phase 3 wiring (this module, per change
@@ -341,7 +345,15 @@ async def _run_init_brief_command(
     if not cfg.fast_mode:
         yield TextChunk(text="[engine] /init → apply_init_brief\n")
 
-    result = apply_init_brief(ctx.project_root, brief, deps.story_agent)
+    # ``writer.agents.process_init_brief`` is the only Python-side
+    # capability that survives the ``chg-remove-roles`` cleanup; we
+    # call it via :func:`writer.project.init_brief.apply_init_brief` so
+    # the engine boundary does not need to know about Settings.
+    from writer.config import get_settings
+
+    result = apply_init_brief(
+        ctx.project_root, brief, settings=get_settings()
+    )
     yield TextChunk(
         text=f"已写入 创意/核心创意.md（来源: {result.source}）\n"
         "已更新 AGENT.md 基本要求\n"
@@ -450,12 +462,65 @@ async def _run_workflow(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done]:
-    """Run a registered workflow stub and stream its chunks."""
+    """Run a registered workflow and dispatch on its :class:`WorkflowResult`.
+
+    Maps ``result.status`` to a ``DoneReason``:
+
+    * ``"completed"`` → ``Done(reason="workflow_completed", payload=...)``
+      with the workflow's ``artifacts`` (paths stringified) and
+      ``metrics`` in the payload so the CLI can render them.
+    * ``"failed"`` → ``Done(reason="aborted", payload={"workflow": name, "error": ...})``
+      so the existing engine boundary's aborted branch handles the
+      error UX consistently.
+    * ``"pending"`` → ``Done(reason="aborted", payload={"workflow": name, "decision": "needs_rewrite"})``
+      (PR3+). The previous PR1 deprecation branch for ``workflow_pending``
+      is removed; workflows that need a rewrite signal it via
+      ``status="pending"`` but the engine surfaces it through the
+      ``aborted`` reason (with a ``decision`` metric so consumers
+      can distinguish rewrite-needed from genuine failures).
+
+    The legacy ``[engine] 工作流 X 启动`` log chunk is kept in non-fast
+    mode for diagnostic parity with the previous stub path.
+    """
     if not cfg.fast_mode:
         yield TextChunk(text=f"[engine] 工作流 {name} 启动\n")
-    for chunk in deps.run_workflow(name, ctx):
+    result = deps.run_workflow(name, ctx)
+    for chunk in result.chunks:
         yield TextChunk(text=chunk)
-    yield Done(reason="workflow_pending", payload={"workflow": name})
+    if result.status == "completed":
+        yield Done(
+            reason="workflow_completed",
+            payload={
+                "workflow": name,
+                "artifacts": {k: str(v) for k, v in result.artifacts.items()},
+                "metrics": dict(result.metrics),
+            },
+        )
+        return
+    if result.status == "pending":
+        # PR3+: pending = the workflow delivered a result that
+        # signals "this needs upstream action" (e.g. needs_rewrite
+        # from review_chapter). The engine surfaces it as ``aborted``
+        # with a ``decision`` metric so the REPL can show a useful
+        # message. ``workflow_pending`` is no longer a valid
+        # ``DoneReason``.
+        decision = str(result.metrics.get("decision", "needs_rewrite"))
+        yield Done(
+            reason="aborted",
+            payload={
+                "workflow": name,
+                "decision": decision,
+                "artifacts": {k: str(v) for k, v in result.artifacts.items()},
+                "metrics": dict(result.metrics),
+            },
+        )
+        return
+    # status == "failed"
+    error_msg = str(result.metrics.get("error", "")) or f"工作流 {name} 失败"
+    yield Done(
+        reason="aborted",
+        payload={"workflow": name, "error": error_msg},
+    )
 
 
 async def _run_agent(
@@ -474,11 +539,12 @@ async def _run_agent(
     configured) so the model can use the tool registry to read
     project state before producing a structured outline.
 
-    Without an LLM (``deps.tool_loop is None``) the helper falls back
-    to a deterministic four-act outline using the agent's genre —
-    same fallback as :class:`writer.roles.StoryAgent._draft_outline_fallback`.
-    The CLI renders the agent name in the terminal ``Done`` payload
-    so the user sees which agent produced the response.
+    Without an LLM (``deps.tool_loop is None``) the helper emits a
+    preview TextChunk describing the picked agent (no real outline is
+    produced — the previous ``writer.roles.StoryAgent._draft_outline_fallback``
+    was deleted in ``chg-remove-roles``). The CLI renders the agent
+    name in the terminal ``Done`` payload so the user sees which agent
+    produced the response.
 
     Errors:
 

@@ -18,11 +18,11 @@ DoneReason = Literal[
     "answered",
     "command_pending",
     "tool_pending",
-    "workflow_pending",
     "ask_user",
     "aborted",
     "tool_completed",
     "tool_loop_completed",
+    "workflow_completed",
 ]
 
 

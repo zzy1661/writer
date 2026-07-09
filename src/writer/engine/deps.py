@@ -8,19 +8,12 @@ future LLM-backed implementations).
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from writer.agents import AgentRegistry, built_agent_registry
 from writer.config import Settings, get_settings
-from writer.roles import (
-    HistoryAgent,
-    RomanceAgent,
-    StoryAgent,
-    XuanhuanAgent,
-)
 from writer.routing import (
     AgentAction,
     CompositeRouter,
@@ -31,47 +24,17 @@ from writer.routing import (
 from writer.skills import DirectiveRegistry, built_directive_registry
 from writer.tools import ToolRegistry, ToolRuntime, built_tool_registry
 from writer.tools.errors import WorkflowNotFoundError
-from writer.workflows import WORKFLOWS, WorkflowStub
+from writer.workflows import WORKFLOWS, WorkflowResult, WorkflowStub
 
 if TYPE_CHECKING:
     from writer.engine.context import EngineContext
     from writer.llm.agent import LLMToolLoop
+    from writer.llm.prose import LLMProseClient
 
 # Sentinel project_root used when no project is initialized (S0 path).
 # Tools that need file access will fail their safe_path check; tools that
 # don't (foreshadow_search, chapter_locate, wordcount) still work.
 _NO_PROJECT_ROOT = Path("/__no_project__")
-
-
-# Maps the four supported canonical genres onto their Agent classes.
-# Anything outside the whitelist (and ``"other"``) falls through to the
-# default :class:`StoryAgent` per the ``fea-genre-aware-init`` spec.
-_GENRE_AGENT: dict[str, type[StoryAgent]] = {
-    "历史": HistoryAgent,
-    "言情": RomanceAgent,
-    "玄幻": XuanhuanAgent,
-}
-
-
-def _agent_for_genre(
-    settings: Settings, genre: str
-) -> StoryAgent:
-    """Pure factory — pick an Agent subclass by canonical genre key.
-
-    No filesystem IO. Falls back to :class:`StoryAgent` for unknown,
-    empty, or ``"other"`` values. Used by both ``production_deps`` and
-    :meth:`writer.session.EngineSession.set_project_root` (after
-    :meth:`refresh_project_genre` has read the AGENT.md ``题材:`` line).
-
-    Added 2026-07-07 to fix arch-optimizer M1: ``EngineSession`` needs
-    to rebuild its agent when the bound project changes genre,
-    which requires a helper that doesn't re-read AGENT.md (the session
-    has already read it). Renamed from ``_consultant_for_genre`` to
-    ``_agent_for_genre`` per ``fea-agent-mirror`` (2026-07-09).
-    """
-    canonical = (genre or "").strip()
-    agent_cls = _GENRE_AGENT.get(canonical, StoryAgent)
-    return agent_cls(settings)
 
 
 @runtime_checkable
@@ -82,9 +45,6 @@ class EngineDeps(Protocol):
 
     * :attr:`router` — front-desk dispatcher (per 备忘 15; Protocol
       :class:`writer.routing.IntentRouter`).
-    * :attr:`story_agent` — the role that handles short creative
-      commands such as ``/大纲`` (per 备忘 04). Renamed from
-      ``story_consultant`` per ``fea-agent-mirror``.
     * :attr:`agent_registry` — :class:`writer.agents.AgentRegistry`
       for resolving agent names to their YAML-loaded definitions.
       Rebuilt on project change via :meth:`rebind_agent_registry`
@@ -103,6 +63,12 @@ class EngineDeps(Protocol):
       (Markdown SKILL.md directives). Rebuilt on project change via
       :meth:`rebind_directive_registry` (per ``chg-markdown-skills``).
 
+    ``story_agent`` was removed in ``chg-remove-roles`` (2026-07-09):
+    the four ``*Agent`` Python classes became dead code once
+    ``fea-agent-mirror`` moved LLM-facing identity to Markdown; the
+    only surviving Python-side capability (``process_init_brief``)
+    reads ``Settings`` directly and does not need a per-role instance.
+
     Future expansion points (intentionally not declared yet):
     * ``workflow_starter``: richer async workflow entrypoint
       (per 备忘 04; the current sync ``run_workflow`` is the MVP bridge)
@@ -111,24 +77,29 @@ class EngineDeps(Protocol):
     """
 
     router: IntentRouter
-    story_agent: StoryAgent
     agent_registry: AgentRegistry
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry
     tool_loop: LLMToolLoop | None
+    prose_client: LLMProseClient | None
+    # Optional override for the review LLM. When set, ``write_chapter``
+    # uses this LLM for the structured ReviewVerdict call instead of
+    # constructing a fresh ``ChatOpenAI`` from settings. Tests inject
+    # recording fakes here; production leaves it None.
+    review_llm: Any
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
         ...
 
-    def run_workflow(self, name: str, ctx: EngineContext) -> Iterable[str]:
+    def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
         ...
 
     def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
         """Return a new (or in-place mutated) ``EngineDeps`` with the runtime swapped.
         Called by :meth:`writer.session.EngineSession.set_project_root` to
         point the existing deps at a new project root without rebuilding
-        router / story_agent / tool_registry. Implementations are
+        router / tool_registry. Implementations are
         free to return a new instance (default impl uses ``dataclasses
         .replace``) or mutate ``self`` — both are valid as long as the
         returned value is used as the new deps.
@@ -140,31 +111,12 @@ class EngineDeps(Protocol):
         """
         ...
 
-    def rebind_story_agent(
-        self, new_agent: StoryAgent
-    ) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the agent swapped.
-
-        Symmetric to :meth:`rebind_tool_runtime`. Called by
-        :meth:`writer.session.EngineSession.set_project_root` after
-        :meth:`refresh_project_genre` has read the new project's
-        ``AGENT.md`` ``题材:`` line — Agent classes
-        (History / Romance / Xuanhuan / Story fallback) are picked at
-        construction time, so a genre change requires a fresh
-        agent instance.
-
-        Renamed from ``rebind_story_consultant`` per ``fea-agent-mirror``
-        (2026-07-09). Symmetric to :meth:`rebind_agent_registry`.
-        """
-        ...
-
     def rebind_skill_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
         """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
-        Symmetric to :meth:`rebind_tool_runtime` and
-        :meth:`rebind_story_agent`. Called by
+        Symmetric to :meth:`rebind_tool_runtime`. Called by
         :meth:`writer.session.EngineSession.set_project_root` after
         the new project's ``.writer/skills/`` has been scanned — the
         registry MUST be rebuilt on project change so project-level
@@ -186,8 +138,7 @@ class EngineDeps(Protocol):
     ) -> EngineDeps:
         """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
 
-        Symmetric to :meth:`rebind_tool_runtime` and
-        :meth:`rebind_story_agent`. Called by
+        Symmetric to :meth:`rebind_tool_runtime`. Called by
         :meth:`writer.session.EngineSession.set_project_root` after
         the new project's ``.writer/skills/`` has been scanned — the
         registry MUST be rebuilt on project change so project-level
@@ -226,18 +177,19 @@ class _DefaultEngineDeps:
     """
 
     router: IntentRouter
-    story_agent: StoryAgent
     agent_registry: AgentRegistry
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry
     tool_loop: LLMToolLoop | None = None
+    prose_client: LLMProseClient | None = None
+    review_llm: Any = None
     _workflows: dict[str, WorkflowStub] = field(default_factory=dict)
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
         return self.router.route(user_input, project_state)
 
-    def run_workflow(self, name: str, ctx: EngineContext) -> Iterable[str]:
+    def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
         runner = self._workflows.get(name)
         if runner is None:
             # Raised as a domain exception (per arch-optimizer m18) so the
@@ -248,20 +200,20 @@ class _DefaultEngineDeps:
             raise WorkflowNotFoundError(
                 f"未知工作流 {name!r}; available: {available}"
             )
-        return runner(ctx)
+        # The default wiring dispatches to the package-level
+        # :func:`writer.workflows.run_workflow` adapter, which inspects
+        # the registered callable's signature and passes ``deps`` (this
+        # instance) for PR2+ workflows. The adapter also wraps any
+        # legacy ``Iterable[str]`` returns into :class:`WorkflowResult`.
+        from writer.workflows import run_workflow as _run_workflow_dispatch
+
+        return _run_workflow_dispatch(name, ctx, self)
 
     def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
         # Use ``dataclasses.replace`` so the production wiring stays
         # effectively immutable; tests that need mutation can still
         # override the method.
         return replace(self, tool_runtime=new_runtime)
-
-    def rebind_story_agent(
-        self, new_agent: StoryAgent
-    ) -> EngineDeps:
-        # Symmetric to ``rebind_tool_runtime``; uses ``dataclasses.replace``
-        # to keep the production wiring effectively immutable.
-        return replace(self, story_agent=new_agent)
 
     def rebind_skill_registry(
         self, new_registry: DirectiveRegistry
@@ -274,10 +226,9 @@ class _DefaultEngineDeps:
     def rebind_directive_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
-        # Symmetric to ``rebind_tool_runtime`` / ``rebind_story_agent``;
-        # uses ``dataclasses.replace`` to keep the production wiring
-        # effectively immutable. Per chg-markdown-skills: project-level
-        # directives live in the project directory, so this MUST be
+        # Symmetric to ``rebind_tool_runtime``; uses ``dataclasses.replace``
+        # to keep the production wiring effectively immutable. Per chg-markdown-skills:
+        # project-level directives live in the project directory, so this MUST be
         # called whenever the bound project changes.
         return replace(self, directive_registry=new_registry)
 
@@ -328,19 +279,10 @@ def production_deps(
     project_root: Path | None = None,
     primary_router: IntentRouter | None = None,
     agent_registry: AgentRegistry | None = None,
-    story_agent: StoryAgent | None = None,
-    genre: str = "other",
 ) -> EngineDeps:
     """Default dependency wiring used by the REPL and tests.
 
-    Pure factory: no filesystem IO behind the caller's back. The
-    ``genre`` argument MUST be supplied by the caller — the session
-    layer (``EngineSession.__post_init__``) and the CLI
-    (``init_project``) are the only two sites that know the project's
-    genre, and they read ``AGENT.md`` themselves before delegating
-    here. Defaults to ``"other"`` so the simple / S0 paths (tests that
-    only care about the deps surface, etc.) keep working without a
-    genre lookup.
+    Pure factory: no filesystem IO behind the caller's back.
 
     Tests can pass an explicit :class:`writer.config.Settings` to avoid
     the global settings lookup; production callers (REPL, CLI) leave it
@@ -366,16 +308,15 @@ def production_deps(
             Defaults to :func:`writer.agents.built_agent_registry`
             scoped to ``project_root``. Added 2026-07-09 per
             ``fea-agent-mirror``.
-        story_agent: Optional override for the active agent (typically
-            a :class:`StoryAgent` / :class:`HistoryAgent` /
-            :class:`RomanceAgent` / :class:`XuanhuanAgent`). Defaults
-            to :func:`_agent_for_genre` against the passed ``genre``.
-        genre: Canonical genre key for picking the Agent subclass
-            (one of ``"历史" / "言情 / "玄幻"``, everything else
-            falls through to :class:`StoryAgent`). Added 2026-07-08
-            to make ``production_deps`` a pure factory (M2 of the
-            genre-aware init sprint). Callers that have not yet read
-            ``AGENT.md`` should pass ``"other"``.
+
+    Removed in ``chg-remove-roles`` (2026-07-09):
+        * ``story_agent=`` kwarg — ``writer.roles.StoryAgent`` and its
+          three subclasses are gone; ``EngineDeps.story_agent`` was
+          the only consumer.
+        * ``genre=`` kwarg — was used by the deleted
+          ``_agent_for_genre`` factory; the only surviving consumer
+          (``EngineSession.refresh_project_genre``) reads ``AGENT.md``
+          itself before the session constructs deps.
     """
 
     resolved = settings if settings is not None else get_settings()
@@ -397,6 +338,24 @@ def production_deps(
             runtime=tool_runtime,
         )
 
+    # Resolve the prose client. Always populated (never None): the
+    # Real variant is wired when the API key is configured, otherwise
+    # the Deterministic variant. ``production_deps`` is the only place
+    # that decides which one to use — engine / workflow code branches
+    # on ``deps.prose_client.name`` (``"real"`` vs ``"deterministic"``)
+    # rather than on API-key presence. Per real-writing-pipeline PR2.
+    from writer.llm.prose import (
+        DeterministicProseClient,
+        RealProseClient,
+    )
+
+    if resolved.has_api_key:
+        from writer.llm.provider import get_llm as _get_llm
+
+        prose_client: LLMProseClient = RealProseClient(llm=_get_llm(resolved))
+    else:
+        prose_client = DeterministicProseClient()
+
     # Resolve agent registry: caller override wins, else build from
     # project_root (which falls back to the S0 sentinel; the loader
     # treats missing directories as "no project layer").
@@ -406,23 +365,18 @@ def production_deps(
         else built_agent_registry(project_root=root)
     )
 
-    # Resolve story agent: caller override wins, else pick by genre.
-    resolved_story_agent = (
-        story_agent if story_agent is not None else _agent_for_genre(resolved, genre)
-    )
-
     return _DefaultEngineDeps(
         router=_select_router(
             resolved,
             primary=primary_router,
             agent_registry=resolved_agent_registry,
         ),
-        story_agent=resolved_story_agent,
         agent_registry=resolved_agent_registry,
         tool_registry=tool_registry,
         tool_runtime=tool_runtime,
         directive_registry=built_directive_registry(project_root=root),
         tool_loop=tool_loop,
+        prose_client=prose_client,
         _workflows=dict(WORKFLOWS),
     )
 

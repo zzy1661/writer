@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from writer.engine.context import EngineContext
-from writer.workflows import WORKFLOWS, run_workflow
+from writer.engine.deps import production_deps
+from writer.workflows import WORKFLOWS, WorkflowResult, run_workflow
 from writer.workflows.write_chapter import run as run_write_chapter
 
 
@@ -20,11 +21,15 @@ def test_workflow_stubs_are_callable() -> None:
 
 def test_run_workflow_returns_chunks_for_known_name() -> None:
     ctx = EngineContext(user_input="some input")
+    deps = production_deps()
 
-    chunks = list(run_workflow("write_chapter", ctx))
+    result = run_workflow("write_chapter", ctx, deps)
 
-    assert len(chunks) > 0
-    assert any("write_chapter" in chunk for chunk in chunks)
+    # PR1: ``run_workflow`` returns a ``WorkflowResult``; consumers
+    # access ``.chunks`` instead of iterating the return value.
+    assert isinstance(result, WorkflowResult)
+    assert len(result.chunks) > 0
+    assert any("write_chapter" in chunk for chunk in result.chunks)
 
 
 def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
@@ -36,24 +41,33 @@ def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
         project_state="S2",
         session_id="rewrite-test",
     )
+    deps = production_deps(project_root=tmp_path)
 
-    chunks = run_write_chapter(ctx)
-    text = "".join(chunks)
+    result = run_write_chapter(ctx, deps)
+    text = "".join(result.chunks)
 
-    assert "write_chapter → proofread → review_gate → write_chapter" in text
-    assert "retry_count=2" in text
+    # PR2: 5-node graph produces a longer trace than the PR1 4-node
+    # version; the rewrite loop is still observable via retry_count.
+    assert "draft_chapter" in text
+    assert "review_gate" in text
+    assert "retry_count" in text
 
 
-def test_run_workflow_returns_explanatory_chunk_for_unknown_name() -> None:
+def test_run_workflow_returns_failed_result_for_unknown_name() -> None:
     ctx = EngineContext(user_input="x")
+    deps = production_deps()
 
-    chunks = list(run_workflow("nonexistent_workflow", ctx))
+    result = run_workflow("nonexistent_workflow", ctx, deps)
 
-    assert len(chunks) == 1
-    message = chunks[0]
+    # PR1 contract: unknown name -> WorkflowResult(status="failed", ...)
+    # so the engine surfaces Done(aborted). The error message lives
+    # in the first chunk; the registry also surfaces available keys.
+    assert result.status == "failed"
+    assert result.metrics.get("error") == "unknown_workflow"
+    assert len(result.chunks) == 1
+    message = result.chunks[0]
     assert "未知工作流" in message
     assert "nonexistent_workflow" in message
-    # Sorted keys should appear in the explanation
     for key in sorted(WORKFLOWS):
         assert key in message
 
@@ -69,8 +83,13 @@ def test_run_workflow_passes_context_to_stub() -> None:
     WORKFLOWS["__test_probe__"] = fake_stub
     try:
         ctx = EngineContext(user_input="probe", session_id="sid-123")
-        chunks = list(run_workflow("__test_probe__", ctx))
-        assert chunks == ["ok"]
+        deps = production_deps()
+        result = run_workflow("__test_probe__", ctx, deps)
+        # PR1: legacy ``Iterable[str]`` callables are wrapped into
+        # ``WorkflowResult(status="pending", chunks=...)`` so the test
+        # now checks the chunks list and the captured context.
+        assert result.chunks == ("ok",)
+        assert result.status == "pending"
         assert captured["ctx"] is ctx
     finally:
         WORKFLOWS.pop("__test_probe__", None)

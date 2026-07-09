@@ -1,5 +1,10 @@
 """Novel project workspace and state helpers."""
 
+from writer.project.chapter_summaries import (
+    SUMMARIES_FILE,
+    ChapterSummariesError,
+    append_summary,
+)
 from writer.project.genre import (
     GENRE_OPTIONS,
     format_genre_line,
@@ -30,13 +35,16 @@ from writer.project.workspace import NovelWorkspace, create_new_workspace, creat
 
 __all__ = [
     "COMMAND_ALLOWED",
+    "ChapterSummariesError",
     "CommandCheck",
     "GENRE_OPTIONS",
     "NovelWorkspace",
     "ProjectSnapshot",
     "ProjectState",
     "STATE_DESCRIPTIONS",
+    "SUMMARIES_FILE",
     "append_agent_requirements",
+    "append_summary",
     "count_chapters",
     "create_new_workspace",
     "create_workspace",

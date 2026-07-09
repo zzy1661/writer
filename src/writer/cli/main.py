@@ -27,7 +27,6 @@ from writer.engine import (
     ToolResult,
     run_engine,
 )
-from writer.engine.deps import production_deps
 from writer.project import (
     STATE_DESCRIPTIONS,
     ProjectState,
@@ -289,6 +288,14 @@ async def _run_engine(
                         description = ""
                     label = f"{state_value}（{description}）" if description else state_value
                     console.print(f"[yellow]当前状态: {label}[/yellow]")
+                # PR3: a workflow that returned status="pending" (e.g.
+                # review_chapter with decision=needs_rewrite) surfaces
+                # as aborted with a decision metric. Tell the user
+                # what the workflow decided so they know to re-run
+                # /创作 with a clearer task.
+                if r == "aborted" and payload is not None and "decision" in payload:
+                    decision = str(payload["decision"])
+                    console.print(f"[yellow]工作流判定: {decision}[/yellow]")
                 # Per LLM tool-loop addition (2026-07-08): when the LLM
                 # tool loop hits its ``MAX_LOOP_STEPS`` budget the engine
                 # yields ``Done(tool_loop_completed)`` with a payload
@@ -303,6 +310,25 @@ async def _run_engine(
                     console.print(
                         f"[dim]LLM 工具循环已结束（{calls} 次调用）；最近结果: {tail}[/dim]"
                     )
+                # Per real-writing-pipeline PR1 (2026-07-09): when a
+                # workflow returns ``WorkflowResult(status="completed")``
+                # the engine emits ``Done(reason="workflow_completed")``
+                # with artifacts + metrics in the payload. Render them
+                # so the user sees what the workflow produced without
+                # re-running it.
+                if r == "workflow_completed" and payload is not None:
+                    artifacts = payload.get("artifacts") or {}
+                    metrics = payload.get("metrics") or {}
+                    if artifacts:
+                        lines = "\n".join(
+                            f"  [dim]{key}[/dim] {value}" for key, value in artifacts.items()
+                        )
+                        console.print(f"[dim]artifacts:\n{lines}[/dim]")
+                    if metrics:
+                        metric_lines = ", ".join(
+                            f"{key}={value}" for key, value in metrics.items()
+                        )
+                        console.print(f"[dim]metrics: {metric_lines}[/dim]")
                 session.record_turn(user_input, r)
                 session.clear_pending_interrupt()
             case ErrorEvent(message=m):
@@ -603,8 +629,11 @@ def _maybe_apply_init_brief(
 
     load_project_settings(project_root)
     refresh_settings()
-    deps = production_deps(project_root=project_root, genre=genre)
-    result = apply_init_brief(project_root, user_brief.strip(), deps.story_agent)
+    # ``process_init_brief`` (the only surviving Python-side capability
+    # after ``chg-remove-roles``) is invoked through
+    # :func:`writer.project.init_brief.apply_init_brief`; no
+    # ``deps.story_agent`` is needed.
+    result = apply_init_brief(project_root, user_brief.strip(), settings=get_settings())
     console.print(f"[green]已写入 创意/核心创意.md[/green]（来源: {result.source}）")
     console.print("[green]已更新 AGENT.md 基本要求[/green]")
 

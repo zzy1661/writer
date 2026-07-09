@@ -1,4 +1,11 @@
-"""Tests for EngineDeps wiring (router selection, tool registry, runtime)."""
+"""Tests for EngineDeps wiring (router selection, tool registry, runtime).
+
+Per ``chg-remove-roles`` (2026-07-09): the ``genre=`` kwarg on
+``production_deps`` and the ``StoryAgent``-by-genre test cases are gone.
+``EngineDeps.story_agent`` was deleted along with the
+``writer.roles.StoryAgent`` class — genre-aware LLM dispatch now flows
+through ``writer.agents.AgentRegistry`` (Markdown frontmatter) instead.
+"""
 
 from __future__ import annotations
 
@@ -115,101 +122,3 @@ def test_production_deps_respects_explicit_primary_router_with_api_key() -> None
     assert deps.router.primary is sentinel
     # Fallback is the LLM router; primary must remain the sentinel
     assert isinstance(deps.router.fallback, LlmIntentRouter)
-
-
-# ---------------------------------------------------------------------------
-# Genre-aware Agent dispatch (fea-genre-aware-init Block 5)
-# ---------------------------------------------------------------------------
-
-
-def _seed_genre(tmp_path: Path, genre: str) -> Path:
-    """Materialise a project root with ``AGENT.md`` carrying the given genre."""
-
-    root = tmp_path / "novel"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "AGENT.md").write_text(
-        f"# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n- 题材: {genre}\n\n",
-        encoding="utf-8",
-    )
-    return root
-
-
-def test_production_deps_picks_history_agent_for_genre_history(
-    tmp_path: Path,
-) -> None:
-    from writer.roles import HistoryAgent
-
-    root = _seed_genre(tmp_path, "历史")
-    deps = production_deps(
-        _settings(with_key=False), project_root=root, genre="历史"
-    )
-
-    assert isinstance(deps.story_agent, HistoryAgent)
-
-
-def test_production_deps_picks_romance_agent_for_genre_romance(
-    tmp_path: Path,
-) -> None:
-    from writer.roles import RomanceAgent
-
-    root = _seed_genre(tmp_path, "言情")
-    deps = production_deps(
-        _settings(with_key=False), project_root=root, genre="言情"
-    )
-
-    assert isinstance(deps.story_agent, RomanceAgent)
-
-
-def test_production_deps_picks_xuanhuan_agent_for_genre_xuanhuan(
-    tmp_path: Path,
-) -> None:
-    from writer.roles import XuanhuanAgent
-
-    root = _seed_genre(tmp_path, "玄幻")
-    deps = production_deps(
-        _settings(with_key=False), project_root=root, genre="玄幻"
-    )
-
-    assert isinstance(deps.story_agent, XuanhuanAgent)
-
-
-def test_production_deps_falls_back_to_story_agent_without_genre(
-    tmp_path: Path,
-) -> None:
-    """Missing or unrecognised ``题材:`` line → StoryAgent fallback."""
-
-    from writer.roles import StoryAgent
-
-    # Empty AGENT.md (no 题材 line)
-    root = tmp_path / "novel"
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "AGENT.md").write_text(
-        "# novel\n\n## 当前状态\n\n- state: S1\n", encoding="utf-8"
-    )
-
-    deps = production_deps(
-        _settings(with_key=False), project_root=root, genre="other"
-    )
-
-    assert isinstance(deps.story_agent, StoryAgent)
-
-
-def test_production_deps_falls_back_when_project_root_is_none() -> None:
-    from writer.roles import StoryAgent
-
-    deps = production_deps(
-        _settings(with_key=False), project_root=None, genre="other"
-    )
-
-    assert isinstance(deps.story_agent, StoryAgent)
-
-
-def test_production_deps_falls_back_for_unknown_genre_label(tmp_path: Path) -> None:
-    from writer.roles import StoryAgent
-
-    root = _seed_genre(tmp_path, "都市悬疑")
-    deps = production_deps(
-        _settings(with_key=False), project_root=root, genre="都市悬疑"
-    )
-
-    assert isinstance(deps.story_agent, StoryAgent)

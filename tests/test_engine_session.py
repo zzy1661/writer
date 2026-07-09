@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID
 
 from writer.agents import builtin_agent_registry
-from writer.config import get_settings
 from writer.engine import Interrupt
 from writer.engine.context import EngineContext
 from writer.engine.deps import EngineDeps
-from writer.roles import HistoryAgent, StoryAgent, XuanhuanAgent
+from writer.llm.prose import DeterministicProseClient
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
 from writer.session import EngineSession, TurnRecord, compose_pending_input
 from writer.skills import DirectiveRegistry, built_directive_registry
 from writer.tools import ToolRuntime, built_tool_registry
+from writer.workflows.types import WorkflowResult
 
 # ---------------------------------------------------------------------------
 # Identity & defaults
@@ -135,47 +134,6 @@ def test_session_set_project_root_same_path_is_noop(tmp_path: Path) -> None:
     assert session.deps.tool_runtime is runtime_after_first
 
 
-def test_session_set_project_root_rebuilds_story_agent_on_genre_change(
-    tmp_path: Path,
-) -> None:
-    """Switching projects across genres must rebuild ``deps.story_agent``.
-
-    Per arch-optimizer M1 (2026-07-07): the old code only refreshed
-    ``session.project_genre`` (the field) but never rebuilt ``deps
-    .story_agent`` (the instance). This test pins the new
-    contract — a REPL session that runs ``/init 历史`` then ``/init
-    玄幻`` ends up with an :class:`XuanhuanAgent` in deps, not
-    the stale :class:`HistoryAgent` from the previous project.
-    """
-
-    def _seed_genre(root: Path, genre: str) -> None:
-        root.mkdir(parents=True, exist_ok=True)
-        (root / "AGENT.md").write_text(
-            f"# novel\n\n## 当前状态\n\n- state: S1\n"
-            f"- label: 初始化\n- 题材: {genre}\n\n",
-            encoding="utf-8",
-        )
-
-    history_root = tmp_path / "history"
-    xuanhuan_root = tmp_path / "xuanhuan"
-    _seed_genre(history_root, "历史")
-    _seed_genre(xuanhuan_root, "玄幻")
-
-    session = EngineSession()
-    session.set_project_root(history_root)
-    assert isinstance(
-        session.deps.story_agent, HistoryAgent
-    ), f"expected HistoryAgent, got {type(session.deps.story_agent).__name__}"
-
-    session.set_project_root(xuanhuan_root)
-    assert isinstance(
-        session.deps.story_agent, XuanhuanAgent
-    ), (
-        f"expected XuanhuanAgent after switching genres, "
-        f"got {type(session.deps.story_agent).__name__}"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Turn history
 # ---------------------------------------------------------------------------
@@ -269,13 +227,13 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
     to the ``EngineDeps`` Protocol so we no longer duck-type
     ``is_dataclass(self.deps)`` inside ``set_project_root``. This test
     verifies the new contract: a plain class (NOT ``@dataclass``)
-    implementing all 4 fields + 3 methods of ``EngineDeps`` can be
+    implementing all 5 fields + 4 methods of ``EngineDeps`` can be
     injected into ``EngineSession`` and ``set_project_root`` swaps
     ``tool_runtime`` cleanly.
 
-    The old code skipped the duck-typed branch and rebuilt the whole
-    production_deps (losing router / story_agent) for any
-    Protocol-only stub — the test below would have failed before M6.
+    Updated 2026-07-09 (``chg-remove-roles``): the
+    ``rebind_story_agent`` method + ``story_agent`` field are gone
+    (the ``writer.roles.StoryAgent`` class was deleted).
     """
 
     class PlainDeps:
@@ -283,7 +241,6 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
         def __init__(self) -> None:
             self.router = RuleBasedIntentRouter()
-            self.story_agent = StoryAgent(get_settings())
             self.agent_registry = builtin_agent_registry()
             self.tool_registry = built_tool_registry()
             self.tool_runtime = ToolRuntime(
@@ -293,25 +250,26 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
             # Required by the :class:`EngineDeps` Protocol since the
             # 2026-07-08 LLM tool-loop addition (``deps.tool_loop``).
             self.tool_loop = None
+            # Required by the Protocol since 2026-07-09
+            # (real-writing-pipeline PR2 — ``deps.prose_client``).
+            # The session tests don't exercise prose; the
+            # ``DeterministicProseClient`` is the safe default.
+            self.prose_client = DeterministicProseClient()
+            # PR2: ``deps.review_llm`` is an optional review-LLM
+            # override (test surface). Leaving ``None`` makes the
+            # workflow fall back to ``get_llm(settings)``.
+            self.review_llm = None
 
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)
 
-        def run_workflow(self, name: str, ctx: EngineContext) -> Iterable[str]:
-            return []
+        def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
+            # PR1: return a real WorkflowResult (no more Iterable[str]).
+            # Default to completed so engine emits workflow_completed.
+            return WorkflowResult(status="completed", chunks=())
 
         def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
             self.tool_runtime = new_runtime
-            return self
-
-        def rebind_story_agent(
-            self, new_agent: StoryAgent
-        ) -> EngineDeps:
-            # Mirror M1's production wiring: in-place mutation is
-            # allowed by the Protocol. The session-level test below
-            # asserts this method is *called* during set_project_root,
-            # not that it returns a new object.
-            self.story_agent = new_agent
             return self
 
         def rebind_directive_registry(

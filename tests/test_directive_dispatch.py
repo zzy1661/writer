@@ -25,6 +25,7 @@ from writer.engine import (
 from writer.engine.config import build_engine_config
 from writer.engine.deps import EngineDeps
 from writer.engine.loop import _run_directive
+from writer.llm.prose import DeterministicProseClient
 from writer.project import ProjectState, create_workspace
 from writer.routing import AgentAction
 from writer.skills import (
@@ -32,6 +33,7 @@ from writer.skills import (
     built_directive_registry,
 )
 from writer.skills.directive_discovery import resolve_references
+from writer.workflows.types import WorkflowResult
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -78,6 +80,10 @@ async def test_run_directive_preview_emits_metadata() -> None:
 
     class _StubDeps:
         tool_loop = None  # rule-only deployment
+        # PR2: ``deps.prose_client`` is a new Protocol field; the rule-
+        # only directive path doesn't touch it but the stub still needs
+        # the attribute so the engine's isinstance check passes.
+        prose_client = DeterministicProseClient()
 
     async for event in _run_directive(
         directive,
@@ -186,35 +192,39 @@ def _stub_deps(project_root: Path) -> EngineDeps:
     Reuses ``built_directive_registry(project_root=...)`` so the
     engine's directive lookup reflects the project's seeded
     SKILL.md packages.
+
+    Updated 2026-07-09 (``chg-remove-roles``): ``story_agent`` /
+    ``rebind_story_agent`` removed — the ``writer.roles.StoryAgent``
+    class is gone.
     """
-    from writer.config import get_settings
-    from writer.roles import StoryAgent
+    from writer.agents import builtin_agent_registry
     from writer.routing import RuleBasedIntentRouter
     from writer.tools import ToolRuntime, built_tool_registry
 
     class _Deps:
         def __init__(self) -> None:
             self.router = RuleBasedIntentRouter()
-            self.story_agent = StoryAgent(get_settings())
+            self.agent_registry = builtin_agent_registry()
             self.tool_registry = built_tool_registry()
             self.tool_runtime = ToolRuntime(project_root=project_root)
             self.directive_registry = built_directive_registry(
                 project_root=project_root
             )
             self.tool_loop = None
+            # PR2: ``deps.prose_client`` is a new Protocol field.
+            self.prose_client = DeterministicProseClient()
 
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)
 
-        def run_workflow(self, name: str, ctx: EngineContext):
-            return []
+        def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
+            # PR1: return a real WorkflowResult. The dispatcher test
+            # only cares that the workflow path is exercised, not the
+            # status (the engine emits ``workflow_completed`` after).
+            return WorkflowResult(status="completed", chunks=())
 
         def rebind_tool_runtime(self, new_runtime):
             self.tool_runtime = new_runtime
-            return self
-
-        def rebind_story_agent(self, new_agent):
-            self.story_agent = new_agent
             return self
 
         def rebind_directive_registry(self, new_registry):
@@ -223,6 +233,10 @@ def _stub_deps(project_root: Path) -> EngineDeps:
 
         def rebind_skill_registry(self, new_registry):
             self.directive_registry = new_registry
+            return self
+
+        def rebind_agent_registry(self, new_registry):
+            self.agent_registry = new_registry
             return self
 
     return _Deps()
