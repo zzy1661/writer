@@ -97,23 +97,29 @@ class SafeListDir:
 
 
 def _check_whitelist(target: Path, runtime: ToolRuntime) -> None:
-    """拒绝首段不在写入白名单中的路径。
+    """拒绝祖先路径不在写入白名单中的目标。
 
-    ``Path.parts[0]`` 是相对于 ``project_root`` 的最顶层段；
-    项目根处的 AGENT.md 去掉根后 parts 为 ``()``，因此落入空串桶，
-    在此被拒绝 —— 这发生在 AGENT.md guard 之前，guard 后续通过
-    :func:`_guard_agent_md` 的豁免路径再允许它。见 :meth:`SafeWriteFile.run`。
+    白名单语义:任一祖先(含 ``rel`` 自身)在 ``allowed_write_paths``
+    中即放行。这样 ``.writer/cache/foo.md`` 的祖先序列
+    ``(".writer/cache", ".writer")`` 中 ``.writer/cache`` 命中白名单
+    即放行。项目根处的 AGENT.md 去掉根后 ``parts`` 为 ``()``，
+    跳过检查，留给上层 AGENT.md guard。见 :meth:`SafeWriteFile.run`。
     """
 
     try:
         rel = target.relative_to(runtime.project_root)
     except ValueError as err:
         raise ToolDeniedError(f"路径越界: {target}") from err
-    first = rel.parts[0] if rel.parts else ""
-    if first not in runtime.allowed_write_paths:
-        raise ToolDeniedError(
-            f"写入路径 {target.name!r} 不在白名单 {sorted(runtime.allowed_write_paths)} 内"
-        )
+    if not rel.parts:
+        # rel == project_root 自身,跳过检查,留给 AGENT.md guard
+        return
+    whitelist = runtime.allowed_write_paths
+    for ancestor in [rel, *rel.parents]:
+        if ancestor.as_posix() in whitelist:
+            return
+    raise ToolDeniedError(
+        f"写入路径 {target.name!r} 不在白名单 {sorted(whitelist)} 内"
+    )
 
 
 def _atomic_write(target: Path, content: str) -> None:

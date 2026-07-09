@@ -12,7 +12,7 @@ from pathlib import Path
 from writer.tools.errors import ToolDeniedError
 
 # 写入 / 编辑工具的默认路径白名单（per chg-add-write-edit-glob D2）。
-# 当路径的第一段（相对于 project_root）属于该集合时即通过。
+# 当路径的祖先（相对于 project_root）属于该集合时即通过。
 # ``AGENT.md`` *不在*白名单中 —— 它走 :func:`writer.tools.builtin.file_tools._guard_agent_md`
 # 中的专用 3-stage guard。
 DEFAULT_WRITE_WHITELIST: frozenset[str] = frozenset(

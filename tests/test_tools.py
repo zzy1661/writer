@@ -350,6 +350,69 @@ def test_safe_write_file_rejects_outside_whitelist(tmp_path: Path) -> None:
         outside.unlink(missing_ok=True)
 
 
+def test_whitelist_matches_subpath(tmp_path: Path) -> None:
+    """Bug 4: `.writer/cache/*` 写入应被允许（祖先路径在白名单内）。"""
+    runtime = ToolRuntime(project_root=tmp_path)
+
+    result = SafeWriteFile().run(
+        runtime, path=".writer/cache/foo.md", content="hi"
+    )
+
+    assert result.metadata["mode"] == "create"
+    assert (tmp_path / ".writer" / "cache" / "foo.md").read_text(
+        encoding="utf-8"
+    ) == "hi"
+
+
+def test_whitelist_matches_deep_subpath(tmp_path: Path) -> None:
+    """Bug 4: `manuscript/<nested>/chapter.md` 写入应被允许。"""
+    runtime = ToolRuntime(project_root=tmp_path)
+
+    SafeWriteFile().run(
+        runtime, path="manuscript/novel1/chapter.md", content="deep"
+    )
+
+    assert (tmp_path / "manuscript" / "novel1" / "chapter.md").read_text(
+        encoding="utf-8"
+    ) == "deep"
+
+
+def test_whitelist_matches_agents_subpath(tmp_path: Path) -> None:
+    """Bug 4: `.writer/agents/<name>.md` 写入应被允许。"""
+    runtime = ToolRuntime(project_root=tmp_path)
+
+    SafeWriteFile().run(
+        runtime, path=".writer/agents/历史.md", content="agent body"
+    )
+
+    assert (tmp_path / ".writer" / "agents" / "历史.md").read_text(
+        encoding="utf-8"
+    ) == "agent body"
+
+
+def test_whitelist_rejects_unrelated_subpath(tmp_path: Path) -> None:
+    """Bug 4: 与白名单不相关的子路径仍应被拒绝。"""
+    runtime = ToolRuntime(project_root=tmp_path)
+
+    with pytest.raises(ToolDeniedError, match="白名单"):
+        SafeWriteFile().run(runtime, path="secrets/api_key", content="x")
+
+
+def test_whitelist_rejects_root_only(tmp_path: Path) -> None:
+    """Bug 4: `AGENT.md` 走 `_guard_agent_md` 旁路,白名单检查不触发拒绝。"""
+    runtime = ToolRuntime(project_root=tmp_path)
+    (tmp_path / "manuscript").mkdir()
+
+    # AGENT.md 写入需要 ## 当前状态 段
+    content = "# Project\n\n## 当前状态\n\n- state: S0\n"
+    result = SafeWriteFile().run(
+        runtime, path="AGENT.md", content=content, mode="overwrite"
+    )
+
+    assert result.metadata["mode"] == "overwrite"
+    assert (tmp_path / "AGENT.md").exists()
+
+
 def test_safe_write_file_rejects_oversize_content(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path, max_file_size=10)
     (tmp_path / "manuscript").mkdir()
@@ -582,6 +645,13 @@ def test_safe_glob_sort_by_mtime_returns_newest_first(tmp_path: Path) -> None:
 def test_runtime_default_whitelist_when_none(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path)
     assert runtime.allowed_write_paths == DEFAULT_WRITE_WHITELIST
+
+
+def test_runtime_default_whitelist_includes_dot_writer_cache(tmp_path: Path) -> None:
+    """Bug 4: 验证默认白名单字面含 `.writer/cache` 与 `.writer/agents`(8 项)。"""
+    assert ".writer/cache" in DEFAULT_WRITE_WHITELIST
+    assert ".writer/agents" in DEFAULT_WRITE_WHITELIST
+    assert len(DEFAULT_WRITE_WHITELIST) == 8
 
 
 def test_runtime_explicit_frozenset_preserved(tmp_path: Path) -> None:
