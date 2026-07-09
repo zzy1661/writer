@@ -1,9 +1,8 @@
-"""Dependency injection boundary for the agent engine.
+"""Agent 引擎的依赖注入边界。
 
-The engine never instantiates its collaborators directly — every external
-boundary is declared here as a ``Protocol``. This matches Claude Code §十
-"最小接口 DI": we only inject what gets swapped (tests, alternate routers,
-future LLM-backed implementations).
+引擎从不直接实例化协作者——所有外部边界都以 ``Protocol`` 在此处声明。
+这与 Claude Code §十「最小接口 DI」一致：只注入会被替换的部分
+（测试、备用路由器、未来 LLM 实现）。
 """
 
 from __future__ import annotations
@@ -31,49 +30,46 @@ if TYPE_CHECKING:
     from writer.llm.agent import LLMToolLoop
     from writer.llm.prose import LLMProseClient
 
-# Sentinel project_root used when no project is initialized (S0 path).
-# Tools that need file access will fail their safe_path check; tools that
-# don't (foreshadow_search, chapter_locate, wordcount) still work.
+# 未初始化项目（S0 路径）时使用的哨兵 project_root。
+# 需要文件访问的工具会在 safe_path 检查处失败；
+# 不需要路径的工具（foreshadow_search / chapter_locate / wordcount）仍可工作。
 _NO_PROJECT_ROOT = Path("/__no_project__")
 
 
 @runtime_checkable
 class EngineDeps(Protocol):
-    """Minimum surface the engine loop depends on.
+    """引擎循环所依赖的最小表面。
 
-    Current fields:
+    当前字段：
 
-    * :attr:`router` — front-desk dispatcher (per 备忘 15; Protocol
-      :class:`writer.routing.IntentRouter`).
-    * :attr:`agent_registry` — :class:`writer.agents.AgentRegistry`
-      for resolving agent names to their YAML-loaded definitions.
-      Rebuilt on project change via :meth:`rebind_agent_registry`
-      (per ``fea-agent-mirror``).
-    * :attr:`tool_registry` — :class:`writer.tools.ToolRegistry` for
-      resolving tool names to implementations (per 备忘 13).
-    * :attr:`tool_runtime` — :class:`writer.tools.ToolRuntime` carrying
-      per-session guards handed to every tool invocation.
-    * :attr:`tool_loop` — optional ReAct-style LLM tool loop. ``None``
-      in rule-only deployments (no API key) so the engine still works
-      via ``_run_tool`` with zero LLM calls; populated when the API
-      key is configured. Forward-referenced as a string to keep the
-      engine package free of direct ``writer.llm.*`` imports.
-    * :attr:`directive_registry` — :class:`writer.skills.DirectiveRegistry`
-      mapping slash commands to :class:`writer.skills.SkillDirective`
-      (Markdown SKILL.md directives). Rebuilt on project change via
-      :meth:`rebind_directive_registry` (per ``chg-markdown-skills``).
+    * :attr:`router` — 前台派发器（per 备忘 15；Protocol
+      :class:`writer.routing.IntentRouter`）。
+    * :attr:`agent_registry` — :class:`writer.agents.AgentRegistry`，
+      负责把 agent 名称解析为 YAML 加载的定义。Project 切换时通过
+      :meth:`rebind_agent_registry` 重建（per ``fea-agent-mirror``）。
+    * :attr:`tool_registry` — :class:`writer.tools.ToolRegistry`，
+      负责把工具名称解析为实现（per 备忘 13）。
+    * :attr:`tool_runtime` — :class:`writer.tools.ToolRuntime`，
+      携带每次工具调用都会经过的会话级守卫。
+    * :attr:`tool_loop` — 可选 ReAct 风格的 LLM 工具循环。仅规则部署
+      （无 API key）时为 ``None``，引擎仍可通过 ``_run_tool`` 工作
+      而零 LLM 调用；配置 API key 时填充。以字符串前向引用，避免
+      engine 包对 ``writer.llm.*`` 的直接 import。
+    * :attr:`directive_registry` — :class:`writer.skills.DirectiveRegistry`，
+      将斜杠命令映射到 :class:`writer.skills.SkillDirective`
+      （Markdown SKILL.md 指令）。Project 切换时通过
+      :meth:`rebind_directive_registry` 重建（per ``chg-markdown-skills``）。
 
-    ``story_agent`` was removed in ``chg-remove-roles`` (2026-07-09):
-    the four ``*Agent`` Python classes became dead code once
-    ``fea-agent-mirror`` moved LLM-facing identity to Markdown; the
-    only surviving Python-side capability (``process_init_brief``)
-    reads ``Settings`` directly and does not need a per-role instance.
+    ``story_agent`` 已在 ``chg-remove-roles``（2026-07-09）中移除：
+    四个 ``*Agent`` Python 类在 ``fea-agent-mirror`` 把面向 LLM 的身份
+    迁移到 Markdown 之后就已成为死代码；唯一幸存的 Python-side 能力
+    （``process_init_brief``）直接读取 ``Settings``，不需要 per-role 实例。
 
-    Future expansion points (intentionally not declared yet):
-    * ``workflow_starter``: richer async workflow entrypoint
-      (per 备忘 04; the current sync ``run_workflow`` is the MVP bridge)
-    * ``interrupt_handler``: InterruptHandler (per 备忘 14)
-    * ``stop_hooks``: StopHookRegistry (Claude Code §十二·12.3)
+    未来扩展点（暂不声明）：
+    * ``workflow_starter``：更丰富的异步工作流入口（per 备忘 04；
+      当前 sync 的 ``run_workflow`` 是 MVP 桥接）
+    * ``interrupt_handler``：InterruptHandler（per 备忘 14）
+    * ``stop_hooks``：StopHookRegistry（Claude Code §十二·12.3）
     """
 
     router: IntentRouter
@@ -83,10 +79,9 @@ class EngineDeps(Protocol):
     directive_registry: DirectiveRegistry
     tool_loop: LLMToolLoop | None
     prose_client: LLMProseClient | None
-    # Optional override for the review LLM. When set, ``write_chapter``
-    # uses this LLM for the structured ReviewVerdict call instead of
-    # constructing a fresh ``ChatOpenAI`` from settings. Tests inject
-    # recording fakes here; production leaves it None.
+    # review LLM 的可选覆盖。设置后，``write_chapter`` 在结构化
+    # ReviewVerdict 调用中使用此 LLM，而不是从 settings 重新构造
+    # ``ChatOpenAI``。测试在此注入 recording fake；生产保持 None。
     review_llm: Any
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -96,84 +91,76 @@ class EngineDeps(Protocol):
         ...
 
     def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the runtime swapped.
-        Called by :meth:`writer.session.EngineSession.set_project_root` to
-        point the existing deps at a new project root without rebuilding
-        router / tool_registry. Implementations are
-        free to return a new instance (default impl uses ``dataclasses
-        .replace``) or mutate ``self`` — both are valid as long as the
-        returned value is used as the new deps.
+        """返回一个新的（或就地变更后的） ``EngineDeps``，其中 runtime 已替换。
 
-        Added 2026-07-05 to fix arch-optimizer M6: the old code
-        duck-typed ``is_dataclass(self.deps) and any(f.name == ...)``,
-        which broke the moment a test injected a non-dataclass
-        ``EngineDeps`` implementation.
+        由 :meth:`writer.session.EngineSession.set_project_root` 调用，
+        让既有 deps 指向新的 project root 而无需重建 router / tool_registry。
+        实现可以自由返回新实例（默认实现用 ``dataclasses.replace``）
+        或就地变更 ``self`` ——只要返回值作为新的 deps 使用，两种都合法。
+
+        2026-07-05 增补以修复 arch-optimizer M6：原代码用鸭子类型
+        ``is_dataclass(self.deps) and any(f.name == ...)``，
+        在测试注入非 dataclass 的 ``EngineDeps`` 实现时立刻失败。
         """
         ...
 
     def rebind_skill_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
+        """返回一个新的（或就地变更后的） ``EngineDeps``，其中 directive registry 已替换。
 
-        Symmetric to :meth:`rebind_tool_runtime`. Called by
-        :meth:`writer.session.EngineSession.set_project_root` after
-        the new project's ``.writer/skills/`` has been scanned — the
-        registry MUST be rebuilt on project change so project-level
-        directive overrides (per ``chg-markdown-skills``) take effect
-        on the next REPL turn.
+        与 :meth:`rebind_tool_runtime` 对称。由
+        :meth:`writer.session.EngineSession.set_project_root` 在扫描新
+        项目的 ``.writer/skills/`` 之后调用 —— 必须在 project 切换时重建，
+        才能让项目级 directive 覆盖（per ``chg-markdown-skills``）
+        在下一个 REPL 轮次生效。
 
-        Kept as an alias of :meth:`rebind_directive_registry` for
-        back-compat with downstream code that still uses the older
-        name.
+        保留为 :meth:`rebind_directive_registry` 的别名，以兼容下游
+        仍在使用旧名的代码。
 
-        Added 2026-07-08 alongside the project-skills capability.
-        Renamed to :meth:`rebind_directive_registry` on 2026-07-09
-        (chg-markdown-skills).
+        2026-07-08 与 project-skills 能力同期增补。2026-07-09
+        （chg-markdown-skills）更名为 :meth:`rebind_directive_registry`。
         """
         ...
 
     def rebind_directive_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the directive registry swapped.
+        """返回一个新的（或就地变更后的） ``EngineDeps``，其中 directive registry 已替换。
 
-        Symmetric to :meth:`rebind_tool_runtime`. Called by
-        :meth:`writer.session.EngineSession.set_project_root` after
-        the new project's ``.writer/skills/`` has been scanned — the
-        registry MUST be rebuilt on project change so project-level
-        directive overrides (per ``chg-markdown-skills``) take effect
-        on the next REPL turn.
+        与 :meth:`rebind_tool_runtime` 对称。由
+        :meth:`writer.session.EngineSession.set_project_root` 在扫描新
+        项目的 ``.writer/skills/`` 之后调用 —— 必须在 project 切换时重建，
+        才能让项目级 directive 覆盖（per ``chg-markdown-skills``）
+        在下一个 REPL 轮次生效。
 
-        Added 2026-07-09 (chg-markdown-skills). The prior
-        :meth:`rebind_skill_registry` is preserved as an alias.
+        2026-07-09（chg-markdown-skills）增补。原先的
+        :meth:`rebind_skill_registry` 保留为别名。
         """
         ...
 
     def rebind_agent_registry(
         self, new_registry: AgentRegistry
     ) -> EngineDeps:
-        """Return a new (or in-place mutated) ``EngineDeps`` with the agent registry swapped.
+        """返回一个新的（或就地变更后的） ``EngineDeps``，其中 agent registry 已替换。
 
-        Symmetric to :meth:`rebind_directive_registry`. Called by
-        :meth:`writer.session.EngineSession.set_project_root` after
-        the new project's ``.writer/agents/`` has been scanned — the
-        registry MUST be rebuilt on project change so project-level
-        agent overrides (per ``fea-agent-mirror``) take effect on
-        the next REPL turn.
+        与 :meth:`rebind_directive_registry` 对称。由
+        :meth:`writer.session.EngineSession.set_project_root` 在扫描新
+        项目的 ``.writer/agents/`` 之后调用 —— 必须在 project 切换时重建，
+        才能让项目级 agent 覆盖（per ``fea-agent-mirror``）
+        在下一个 REPL 轮次生效。
 
-        Added 2026-07-09 (``fea-agent-mirror``).
+        2026-07-09（``fea-agent-mirror``）增补。
         """
         ...
 
 
 @dataclass
 class _DefaultEngineDeps:
-    """Production wiring with the rule-based router and stock workflows.
+    """使用规则路由器与内置工作流的生产装配。
 
-    Defined as a dataclass rather than a hand-written class so adding
-    fields later (tool registry, real workflow starter, …) is a one-line
-    change instead of a constructor rewrite.
+    用 dataclass 而非手写类实现，是为了以后新增字段（tool registry、
+    真正的工作流启动器…）只需一行改动而无需重写构造函数。
     """
 
     router: IntentRouter
@@ -192,54 +179,49 @@ class _DefaultEngineDeps:
     def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
         runner = self._workflows.get(name)
         if runner is None:
-            # Raised as a domain exception (per arch-optimizer m18) so the
-            # engine's ``except ToolError`` branch in ``_engine_loop`` can
-            # surface it as an ``ErrorEvent`` instead of pretending the
-            # unknown name produced a legitimate workflow chunk.
+            # 作为领域异常抛出（per arch-optimizer m18），让引擎
+            # ``_engine_loop`` 中的 ``except ToolError`` 分支将其作为
+            # ``ErrorEvent`` 暴露，而不是假装未知名称产生了合法工作流块。
             available = sorted(self._workflows)
             raise WorkflowNotFoundError(
                 f"未知工作流 {name!r}; available: {available}"
             )
-        # The default wiring dispatches to the package-level
-        # :func:`writer.workflows.run_workflow` adapter, which inspects
-        # the registered callable's signature and passes ``deps`` (this
-        # instance) for PR2+ workflows. The adapter also wraps any
-        # legacy ``Iterable[str]`` returns into :class:`WorkflowResult`.
+        # 默认装配派发到包级的
+        # :func:`writer.workflows.run_workflow` 适配器，它会检查已注册
+        # 可调用对象的签名并传入 ``deps``（本实例）给 PR2+ 工作流。
+        # 该适配器还会把任何遗留的 ``Iterable[str]`` 返回包装为
+        # :class:`WorkflowResult`。
         from writer.workflows import run_workflow as _run_workflow_dispatch
 
         return _run_workflow_dispatch(name, ctx, self)
 
     def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
-        # Use ``dataclasses.replace`` so the production wiring stays
-        # effectively immutable; tests that need mutation can still
-        # override the method.
+        # 使用 ``dataclasses.replace`` 让生产装配保持事实上的不可变；
+        # 需要变更的测试可以覆写本方法。
         return replace(self, tool_runtime=new_runtime)
 
     def rebind_skill_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
-        # Back-compat alias: per chg-markdown-skills the canonical name
-        # is ``rebind_directive_registry`` but older test stubs may
-        # still call the older name.
+        # 向后兼容别名：per chg-markdown-skills，规范名为
+        # ``rebind_directive_registry``，但旧的测试 stub 可能仍在调用旧名。
         return replace(self, directive_registry=new_registry)
 
     def rebind_directive_registry(
         self, new_registry: DirectiveRegistry
     ) -> EngineDeps:
-        # Symmetric to ``rebind_tool_runtime``; uses ``dataclasses.replace``
-        # to keep the production wiring effectively immutable. Per chg-markdown-skills:
-        # project-level directives live in the project directory, so this MUST be
-        # called whenever the bound project changes.
+        # 与 ``rebind_tool_runtime`` 对称；使用 ``dataclasses.replace``
+        # 保持生产装配事实上的不可变。Per chg-markdown-skills：
+        # 项目级 directive 位于项目目录内，因此绑定项目变更时必须调用本方法。
         return replace(self, directive_registry=new_registry)
 
     def rebind_agent_registry(
         self, new_registry: AgentRegistry
     ) -> EngineDeps:
-        # Symmetric to ``rebind_directive_registry``; uses
-        # ``dataclasses.replace`` to keep the production wiring
-        # effectively immutable. Per ``fea-agent-mirror``: project-level
-        # agents live in the project directory, so this MUST be called
-        # whenever the bound project changes.
+        # 与 ``rebind_directive_registry`` 对称；使用
+        # ``dataclasses.replace`` 保持生产装配事实上的不可变。
+        # Per ``fea-agent-mirror``：项目级 agent 位于项目目录内，
+        # 因此绑定项目变更时必须调用本方法。
         return replace(self, agent_registry=new_registry)
 
 
@@ -249,19 +231,17 @@ def _select_router(
     primary: IntentRouter | None = None,
     agent_registry: AgentRegistry | None = None,
 ) -> IntentRouter:
-    """Return ``CompositeRouter`` when API key is configured, else bare rule router.
+    """在配置了 API key 时返回 ``CompositeRouter``，否则返回纯规则路由器。
 
-    ``primary`` lets callers (esp. tests) inject a custom rule router
-    without rewriting this factory; defaults to a fresh
-    :class:`RuleBasedIntentRouter`. Added 2026-07-05 per arch-optimizer
-    M5: the previous code hard-coded ``RuleBasedIntentRouter()`` inside
-    the factory, so a future "RuleBasedIntentRouterV2" would silently
-    miss the wiring.
+    ``primary`` 让调用者（尤其是测试）可以注入自定义规则路由器而无需
+    重写本工厂；默认新建一个 :class:`RuleBasedIntentRouter`。
+    2026-07-05 按 arch-optimizer M5 增补：原代码把
+    ``RuleBasedIntentRouter()`` 硬编码在工厂内部，未来出现
+    "RuleBasedIntentRouterV2" 时会被静默错过装配。
 
-    ``agent_registry`` (added 2026-07-09 per ``fea-agent-mirror``) is
-    forwarded to the LLM router so its system prompt can include the
-    list of available agents for parent-LLM dispatch. The rule-based
-    router ignores it (rules operate on slash commands only).
+    ``agent_registry``（2026-07-09 按 ``fea-agent-mirror`` 增补）会
+    透传给 LLM 路由器，让它的 system prompt 可以包含父 LLM 派发所需的
+    可用 agent 列表。基于规则的路由器忽略它（规则仅处理斜杠命令）。
     """
 
     rule = primary or RuleBasedIntentRouter()
@@ -280,43 +260,38 @@ def production_deps(
     primary_router: IntentRouter | None = None,
     agent_registry: AgentRegistry | None = None,
 ) -> EngineDeps:
-    """Default dependency wiring used by the REPL and tests.
+    """REPL 与测试使用的默认依赖装配。
 
-    Pure factory: no filesystem IO behind the caller's back.
+    纯工厂：不在调用方背后做文件系统 IO。
 
-    Tests can pass an explicit :class:`writer.config.Settings` to avoid
-    the global settings lookup; production callers (REPL, CLI) leave it
-    ``None`` to fall back to :func:`writer.config.get_settings`.
+    测试可以显式传入 :class:`writer.config.Settings` 以避免全局
+    配置查找；生产调用方（REPL、CLI）保持 ``None``，回退到
+    :func:`writer.config.get_settings`。
 
     Args:
-        settings: Override for global settings (mainly for tests).
-        project_root: Optional override for the tool runtime's root. When
-            ``None`` (the S0 path), a sentinel root is used so
-            ``safe_path`` still rejects escapes; path-free tools
-            (``foreshadow_search`` etc.) keep working. Also passed
-            to :func:`writer.skills.built_skill_registry` so the
-            initial skill registry already reflects the bound
-            project's ``.writer/skills/`` overrides (per
-            ``chg-project-skills``); and to
-            :func:`writer.agents.built_agent_registry` for the
-            ``.writer/agents/`` layer (per ``fea-agent-mirror``).
-        primary_router: Optional override for the rule router used as
-            the primary in the ``CompositeRouter`` (when API key is
-            set) or as the bare router (when not). Defaults to a fresh
-            :class:`RuleBasedIntentRouter`. Added 2026-07-05 per M5.
-        agent_registry: Optional override for the agent registry.
-            Defaults to :func:`writer.agents.built_agent_registry`
-            scoped to ``project_root``. Added 2026-07-09 per
-            ``fea-agent-mirror``.
+        settings: 全局配置的覆盖（主要用于测试）。
+        project_root: tool runtime root 的可选覆盖。为 ``None``
+            （S0 路径）时使用哨兵 root，让 ``safe_path`` 仍能拒绝越界；
+            不需要路径的工具（``foreshadow_search`` 等）继续可用。
+            也会传给 :func:`writer.skills.built_skill_registry`，
+            让初始 skill registry 已反映已绑定项目 ``.writer/skills/``
+            的覆盖（per ``chg-project-skills``）；同时传给
+            :func:`writer.agents.built_agent_registry` 处理
+            ``.writer/agents/`` 层（per ``fea-agent-mirror``）。
+        primary_router: 在 ``CompositeRouter`` 中作为主路由器
+            （配置了 API key 时）或作为独立路由器（未配置时）的
+            可选覆盖。默认新建一个 :class:`RuleBasedIntentRouter`。
+            2026-07-05 按 M5 增补。
+        agent_registry: agent registry 的可选覆盖。默认是
+            :func:`writer.agents.built_agent_registry` 限定到
+            ``project_root``。2026-07-09 按 ``fea-agent-mirror`` 增补。
 
-    Removed in ``chg-remove-roles`` (2026-07-09):
-        * ``story_agent=`` kwarg — ``writer.roles.StoryAgent`` and its
-          three subclasses are gone; ``EngineDeps.story_agent`` was
-          the only consumer.
-        * ``genre=`` kwarg — was used by the deleted
-          ``_agent_for_genre`` factory; the only surviving consumer
-          (``EngineSession.refresh_project_genre``) reads ``AGENT.md``
-          itself before the session constructs deps.
+    在 ``chg-remove-roles``（2026-07-09）中删除：
+        * ``story_agent=`` kwarg —— ``writer.roles.StoryAgent`` 及其三个
+          子类已删除；``EngineDeps.story_agent`` 是唯一消费者。
+        * ``genre=`` kwarg —— 由已删除的 ``_agent_for_genre`` 工厂使用；
+          唯一幸存的消费者（``EngineSession.refresh_project_genre``）
+          在 session 构造 deps 之前自行读取 ``AGENT.md``。
     """
 
     resolved = settings if settings is not None else get_settings()
@@ -325,11 +300,10 @@ def production_deps(
     tool_runtime = ToolRuntime(project_root=root)
     tool_loop: LLMToolLoop | None = None
     if resolved.has_api_key:
-        # Lazy import so rule-only deployments (no API key) never load
-        # the LLM client stack — and so the engine package keeps no
-        # runtime dependency on ``writer.llm.agent``. The forward
-        # reference in :class:`EngineDeps.tool_loop` keeps mypy happy
-        # without importing the module at type-check time either.
+        # 延迟 import：纯规则部署（无 API key）永不加载 LLM 客户端栈；
+        # engine 包也不对 ``writer.llm.agent`` 产生运行时依赖。
+        # :class:`EngineDeps.tool_loop` 中的前向引用使 mypy 在类型
+        # 检查时也不需要 import 该模块。
         from writer.llm.agent import LLMToolLoop
 
         tool_loop = LLMToolLoop(
@@ -338,12 +312,11 @@ def production_deps(
             runtime=tool_runtime,
         )
 
-    # Resolve the prose client. Always populated (never None): the
-    # Real variant is wired when the API key is configured, otherwise
-    # the Deterministic variant. ``production_deps`` is the only place
-    # that decides which one to use — engine / workflow code branches
-    # on ``deps.prose_client.name`` (``"real"`` vs ``"deterministic"``)
-    # rather than on API-key presence. Per real-writing-pipeline PR2.
+    # 解析 prose client。始终填充（永不为 None）：配置了 API key 时装配
+    # Real 变体，否则是 Deterministic 变体。``production_deps`` 是唯一
+    # 决定使用哪一个的地方 —— engine / workflow 代码根据
+    # ``deps.prose_client.name``（``"real"`` vs ``"deterministic"``）
+    # 分支，而不是判断是否存在 API key。Per real-writing-pipeline PR2。
     from writer.llm.prose import (
         DeterministicProseClient,
         RealProseClient,
@@ -356,9 +329,8 @@ def production_deps(
     else:
         prose_client = DeterministicProseClient()
 
-    # Resolve agent registry: caller override wins, else build from
-    # project_root (which falls back to the S0 sentinel; the loader
-    # treats missing directories as "no project layer").
+    # 解析 agent registry：调用方显式传入优先，否则从 project_root
+    # 构建（project_root 回退到 S0 哨兵；loader 把缺失目录视为「无项目层」）。
     resolved_agent_registry = (
         agent_registry
         if agent_registry is not None

@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Runtime settings loaded from environment variables."""
+    """从环境变量加载的运行时配置。"""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -25,9 +25,9 @@ class Settings(BaseSettings):
 
 
 def load_env_file(path: Path | None) -> bool:
-    """Load ``.env`` from ``path`` (file or directory) without overriding existing env.
+    """从 ``path``（文件或目录）加载 ``.env``，不覆盖现有环境变量。
 
-    Returns ``True`` when a file was found and loaded.
+    找到并加载文件时返回 ``True``。
     """
 
     if path is None:
@@ -42,10 +42,10 @@ def load_env_file(path: Path | None) -> bool:
 
 
 def load_writer_config(path: Path | None) -> bool:
-    """Load ``.writer/config`` from a project root with highest priority.
+    """从项目根加载 ``.writer/config``，优先级最高。
 
-    The file uses the same ``WRITER_*`` key format as ``.env``. Values
-    loaded here override any previously loaded environment variables.
+    该文件使用与 ``.env`` 相同的 ``WRITER_*`` 键格式。这里加载的
+    值覆盖任何先前加载的环境变量。
     """
 
     if path is None:
@@ -60,7 +60,7 @@ def load_writer_config(path: Path | None) -> bool:
 
 
 def load_project_settings(project_root: Path | None) -> None:
-    """Load project-level env files in priority order (low → high)."""
+    """按优先级（低 → 高）加载项目级 env 文件。"""
 
     if project_root is None:
         return
@@ -69,7 +69,7 @@ def load_project_settings(project_root: Path | None) -> None:
 
 
 def refresh_settings() -> Settings:
-    """Clear the settings cache and rebuild from the current environment."""
+    """清空 settings 缓存并从当前环境重建。"""
 
     get_settings.cache_clear()
     return get_settings()

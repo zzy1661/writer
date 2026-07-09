@@ -1,4 +1,4 @@
-"""Post-init creative brief processing."""
+"""post-init 创意梗概处理。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ _MAX_PROJECT_NAME_LEN = 30
 
 
 def extract_init_brief_text(user_input: str) -> str:
-    """Return brief text from a REPL ``/init ...`` line (may be empty)."""
+    """从一行 REPL ``/init ...`` 中返回梗概文本（可为空）。"""
 
     rest = user_input.removeprefix("/init").strip()
     if rest.startswith("--brief"):
@@ -24,7 +24,7 @@ def extract_init_brief_text(user_input: str) -> str:
 
 
 def looks_like_creative_brief(text: str) -> bool:
-    """Heuristic: args read as a story pitch, not a directory name."""
+    """启发式：参数看起来像故事概要而非目录名。"""
 
     normalized = text.strip()
     if not normalized:
@@ -37,7 +37,7 @@ def looks_like_creative_brief(text: str) -> bool:
 
 
 def looks_like_project_name(text: str) -> bool:
-    """Heuristic: short token suitable as a workspace directory name."""
+    """启发式：适合作为 workspace 目录名的短 token。"""
 
     normalized = text.strip()
     if not normalized or normalized.startswith(("-", "--")):
@@ -55,9 +55,9 @@ def should_run_init_brief(
     project_root: Path | None,
     project_state: str | ProjectState,
 ) -> bool:
-    """Whether ``/init`` should run the creative brief flow on the bound project."""
+    """``/init`` 是否应在已绑定项目上跑创意梗概流程。"""
 
-    del project_state  # ``detect_state(project_root)`` is authoritative when bound.
+    del project_state  # 已绑定时 ``detect_state(project_root)`` 是权威。
 
     rest = extract_init_brief_text(user_input)
     if not rest:
@@ -80,11 +80,11 @@ def apply_init_brief(
     settings: Settings,
     llm=None,
 ) -> InitBriefResult:
-    """Expand a natural-language brief and write project files.
+    """把自然语言梗概展开并写入项目文件。
 
-    The Python-side capability lives in :func:`writer.agents.process_init_brief`
-    (per ``chg-remove-roles``: the ``writer.roles.StoryAgent`` class was deleted
-    once its other methods became dead code after ``fea-agent-mirror``).
+    Python-side 能力位于 :func:`writer.agents.process_init_brief`（per
+    ``chg-remove-roles``：``writer.roles.StoryAgent`` 类在
+    ``fea-agent-mirror`` 让其方法变成死代码后被删除）。
     """
 
     result = process_init_brief(brief, settings=settings, llm=llm)

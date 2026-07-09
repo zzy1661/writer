@@ -1,8 +1,8 @@
-"""Built-in writer tools (per 备忘 13).
+"""内置 writer 工具（per 备忘 13）。
 
-This sub-package keeps individual tool implementations close to the
-project root while the registry lives in ``writer.tools``. Add new
-tools here and register them in ``built_tool_registry()``.
+本子包让单个工具实现贴近项目根目录，而 registry 位于
+``writer.tools`` 中。新增工具请在此加入并在
+``built_tool_registry()`` 中注册。
 """
 
 from __future__ import annotations
@@ -39,16 +39,15 @@ __all__ = [
 
 
 def built_tool_registry() -> ToolRegistry:
-    """Return a fresh ``ToolRegistry`` populated with every built-in tool."""
+    """返回一个填充了所有内置工具的新 ``ToolRegistry``。"""
 
     from writer.tools.registry import ToolRegistry as _ToolRegistry
 
-    # Implementations use named keyword-only parameters (per 备忘 13: needed
-    # for LangChain ``StructuredTool.args_schema`` to introspect the
-    # signature), which mypy's strict mode treats as a *narrower* call
-    # surface than the Protocol's ``**kwargs: Any``. The cast is safe —
-    # ``Tool`` is ``@runtime_checkable`` and the registry validates names
-    # at construction time.
+    # 实现使用命名 keyword-only 参数（per 备忘 13：LangChain
+    # ``StructuredTool.args_schema`` 需要通过 introspection 读取签名），
+    # mypy 的 strict 模式把这视为比 Protocol 的 ``**kwargs: Any`` 更窄的
+    # 调用表面。cast 是安全的 —— ``Tool`` 是 ``@runtime_checkable``，
+    # registry 在构造时校验名称。
     return _ToolRegistry(
         tools=cast(
             list[Tool],

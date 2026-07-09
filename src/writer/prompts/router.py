@@ -1,17 +1,16 @@
-"""Router prompt template — translates user input into an :class:`AgentAction`.
+"""Router prompt 模板 —— 把用户输入翻译成 :class:`AgentAction`。
 
-Originally lived inline in :mod:`writer.routing.llm_router`; moved here
-so the prompt surface is auditable in one place. The legacy import path
-``from writer.routing.llm_router import COMMAND_AGENT_PROMPT`` is
-preserved as a thin re-export alias so callers (and tests) need not
-change.
+最初以行内方式位于 :mod:`writer.routing.llm_router` 中；移到这里
+让 prompt 表面可以在一个地方审计。旧 import 路径
+``from writer.routing.llm_router import COMMAND_AGENT_PROMPT`` 保留
+为薄 re-export 别名，让调用方（与测试）无需更改。
 
-The template takes two inputs:
+模板接受两个输入：
 
-* ``project_state`` — the current :class:`writer.project.ProjectState`
-  identifier (``"S0"`` / ``"S3"`` / …); the model uses this to reject
-  commands that are not legal in the current lifecycle stage.
-* ``user_input`` — the raw user turn text.
+* ``project_state`` —— 当前 :class:`writer.project.ProjectState`
+  标识符（``"S0"`` / ``"S3"`` / …）；模型用它在当前生命周期阶段
+  不合法的命令时拒绝。
+* ``user_input`` —— 原始用户轮次文本。
 """
 
 from __future__ import annotations

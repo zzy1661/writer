@@ -1,10 +1,8 @@
-"""Provider-compatible structured LLM output helpers.
+"""Provider 兼容的结构化 LLM 输出辅助函数。
 
-Some OpenAI-compatible providers (notably DeepSeek at the time this
-module was added) reject the ``response_format`` payload emitted by
-LangChain's native structured-output path. This helper keeps the same
-Pydantic boundary while asking the model for plain JSON and validating
-the result locally.
+一些 OpenAI 兼容 provider（尤其是添加本模块时的 DeepSeek）会拒绝
+LangChain 原生结构化输出路径产出的 ``response_format`` payload。本
+辅助函数保持同一 Pydantic 边界，但向模型请求纯 JSON 并在本地校验结果。
 """
 
 from __future__ import annotations
@@ -24,15 +22,14 @@ _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORE
 
 
 class StructuredOutputError(ValueError):
-    """Raised when a JSON-prompt structured LLM response cannot be validated."""
+    """JSON-prompt 结构化 LLM 响应无法校验时抛出。"""
 
 
 def needs_json_prompt_structured_output(settings: Settings) -> bool:
-    """Return True for providers that should avoid native ``response_format``.
+    """对于应避免原生 ``response_format`` 的 provider 返回 True。
 
-    The check is intentionally configuration-based rather than model-class
-    based: OpenAI-compatible providers all use ``ChatOpenAI`` locally, so
-    the base URL / model name are the stable signals available at runtime.
+    校验刻意基于配置而非 model 类：本地 OpenAI 兼容 provider 都用
+    ``ChatOpenAI``，所以运行时可用的稳定信号是 base URL / model 名。
     """
 
     marker = f"{settings.base_url} {settings.model}".lower()
@@ -44,7 +41,7 @@ def invoke_structured_json[ModelT: BaseModel](
     messages: Sequence[BaseMessage],
     schema: type[ModelT],
 ) -> ModelT:
-    """Invoke ``llm`` and parse a Pydantic model from a plain JSON response."""
+    """调用 ``llm`` 并从纯 JSON 响应解析一个 Pydantic 模型。"""
 
     response = llm.invoke([_json_contract_message(schema), *messages])
     text = _message_content_to_text(response.content)

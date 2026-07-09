@@ -1,56 +1,55 @@
-"""Error types raised by the tool layer.
+"""Tool 层抛出的错误类型。
 
-Five tiers (per 备忘 07; ``ToolNotADirectoryError`` and
-``WorkflowNotFoundError`` added 2026-07-05 to keep builtin tools and
-workflow dispatch on the same exception hierarchy):
-* ``ToolDeniedError`` — the runtime rejected the call (path traversal,
-  shell disabled, dangerous command …).
-* ``ToolNotFoundError`` — the registry has no tool with that name.
-* ``ToolNotADirectoryError`` — the path resolved but is not a directory.
-* ``ToolOutputTooLargeError`` — the tool produced something that would
-  blow up the LLM context (rare today; reserved for future use).
-* ``WorkflowNotFoundError`` — ``EngineDeps.run_workflow`` got an unknown name.
+五个层级（per 备忘 07；``ToolNotADirectoryError`` 与
+``WorkflowNotFoundError`` 在 2026-07-05 增补，以让 builtin 工具与
+工作流派发共用同一个异常层次）：
+* ``ToolDeniedError`` —— runtime 拒绝了调用（路径穿越、shell 被
+  禁用、危险命令…）。
+* ``ToolNotFoundError`` —— registry 中没有该名称的工具。
+* ``ToolNotADirectoryError`` —— 路径解析到了但不是目录。
+* ``ToolOutputTooLargeError`` —— 工具产生了会把 LLM 上下文撑爆
+  的输出（目前罕见；为未来保留）。
+* ``WorkflowNotFoundError`` —— ``EngineDeps.run_workflow`` 收到
+  未知名称。
 
-All five derive from ``ToolError`` so callers can catch them uniformly
-and the engine's existing ``except ToolError`` branch in ``_engine_loop``
-remains the single funnel for surfacing failures.
+五者都派生自 ``ToolError``，调用方可以统一捕获；引擎 ``_engine_loop``
+中现有的 ``except ToolError`` 分支仍然是暴露失败的唯一漏斗。
 """
 
 from __future__ import annotations
 
 
 class ToolError(Exception):
-    """Base class for every tool-layer failure."""
+    """所有 tool 层失败的基类。"""
 
 
 class ToolDeniedError(ToolError):
-    """The runtime refused the operation (typically path / permission)."""
+    """runtime 拒绝本次操作（通常是路径 / 权限）。"""
 
 
 class ToolNotFoundError(ToolError):
-    """The registry has no tool registered under this name."""
+    """registry 中没有以该名称注册的工具。"""
 
 
 class ToolOutputTooLargeError(ToolError):
-    """A tool produced output that exceeds safety thresholds."""
+    """工具产生了超过安全阈值的输出。"""
 
 
 class ToolNotADirectoryError(ToolError):
-    """The path resolved but is not a directory (file where dir was expected).
+    """路径解析到了但不是目录（期望目录的位置是文件）。
 
-    Added 2026-07-05 to keep all builtin tools on the same exception
-    hierarchy (per arch-optimizer M7). Before this, ``SafeListDir`` raised
-    stdlib ``NotADirectoryError``, which the engine's ``except ToolError``
-    branch in ``_engine_loop`` could not catch.
+    2026-07-05 增补，让所有 builtin 工具位于同一异常层次
+    （per arch-optimizer M7）。在此之前，``SafeListDir`` 抛出 stdlib
+    ``NotADirectoryError``，引擎 ``_engine_loop`` 中的 ``except ToolError``
+    分支捕获不到。
     """
 
 
 class WorkflowNotFoundError(ToolError):
-    """``EngineDeps.run_workflow`` was called with an unknown workflow name.
+    """``EngineDeps.run_workflow`` 收到未知工作流名称。
 
-    Added 2026-07-05 to surface unknown workflows as a domain error
-    (per arch-optimizer m18) instead of returning a placeholder string
-    that looked like a legitimate workflow chunk to the user.
+    2026-07-05 增补，把未知工作流作为领域错误暴露（per arch-optimizer m18），
+    而不是返回看起来像合法工作流块的占位字符串。
     """
 
 

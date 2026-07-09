@@ -1,10 +1,10 @@
-"""Path-safe file IO tools.
+"""路径安全的文件 IO 工具。
 
-``SafeReadFile``, ``SafeListDir``, ``SafeWriteFile`` and ``SafeEditFile``
-route their targets through ``ToolRuntime.safe_path`` to reject escapes
-from ``project_root``. Reads truncate to ``max_file_size``; writes refuse
-to escape the runtime's ``allowed_write_paths`` whitelist and apply a
-3-stage guard on ``AGENT.md`` (see ``_guard_agent_md``).
+``SafeReadFile``、``SafeListDir``、``SafeWriteFile`` 和 ``SafeEditFile``
+把所有目标路径走 ``ToolRuntime.safe_path``，以拒绝逃出 ``project_root``
+的越界。读取按 ``max_file_size`` 截断；写入拒绝逃出 runtime
+``allowed_write_paths`` 白名单，并对 ``AGENT.md`` 应用 3-stage guard
+（见 ``_guard_agent_md``）。
 """
 
 from __future__ import annotations
@@ -30,19 +30,17 @@ if TYPE_CHECKING:
     from writer.tools.runtime import ToolRuntime
 
 
-# Genre regex duplicated from writer.project.read_genre_from_agent so the
-# guard can both *extract* and *insert* without a circular import back into
-# writer.project (tools layer should not import writer.project.* broadly;
-# state.py is the allowed exception for this shared constant).
+# 题材正则从 writer.project.read_genre_from_agent 复制，让 guard 既能
+# *抽取*又能*插入*，无需回到 writer.project 形成循环（tools 层不应
+# 广泛 import writer.project.*；state.py 是这个共享常量的允许例外）。
 _GENRE_LINE_RE = re.compile(r"^- 题材:\s*(.+?)\s*$", re.MULTILINE)
 
 
 class SafeReadFile:
-    """Read a UTF-8 text file inside ``project_root``.
+    """读取 ``project_root`` 内的 UTF-8 文本文件。
 
-    Over-long content is truncated to the runtime's ``max_file_size``
-    and flagged via ``ToolResult.truncated`` so callers can re-query
-    with a narrower window.
+    超长内容按 runtime 的 ``max_file_size`` 截断，并通过
+    ``ToolResult.truncated`` 标记，方便调用方用更窄的窗口重新查询。
     """
 
     name = "safe_read_file"
@@ -66,10 +64,10 @@ class SafeReadFile:
 
 
 class SafeListDir:
-    """List directory entries under ``project_root``.
+    """列出 ``project_root`` 下的目录条目。
 
-    Returns one entry per line prefixed by a ``d``/``f`` marker. Hidden
-    files (``.*``) are skipped to keep the result LLM-friendly.
+    每行一条，前缀 ``d``/``f`` 标记。隐藏文件（``.*``）会被跳过，
+    让结果对 LLM 友好。
     """
 
     name = "safe_list_dir"
@@ -94,18 +92,17 @@ class SafeListDir:
 
 
 # ---------------------------------------------------------------------------
-# SafeWriteFile + helpers (per chg-add-write-edit-glob D1-D4)
+# SafeWriteFile + helpers（per chg-add-write-edit-glob D1-D4）
 # ---------------------------------------------------------------------------
 
 
 def _check_whitelist(target: Path, runtime: ToolRuntime) -> None:
-    """Reject paths whose first segment is not in the write whitelist.
+    """拒绝首段不在写入白名单中的路径。
 
-    ``Path.parts[0]`` is the topmost segment relative to ``project_root``;
-    AGENT.md at the project root has parts = ``()`` after stripping the root,
-    so it falls into the empty-string bucket and is rejected here *before*
-    the AGENT.md guard runs — the guard then re-allows it via the
-    :func:`_guard_agent_md` exemption path. See :meth:`SafeWriteFile.run`.
+    ``Path.parts[0]`` 是相对于 ``project_root`` 的最顶层段；
+    项目根处的 AGENT.md 去掉根后 parts 为 ``()``，因此落入空串桶，
+    在此被拒绝 —— 这发生在 AGENT.md guard 之前，guard 后续通过
+    :func:`_guard_agent_md` 的豁免路径再允许它。见 :meth:`SafeWriteFile.run`。
     """
 
     try:
@@ -120,11 +117,10 @@ def _check_whitelist(target: Path, runtime: ToolRuntime) -> None:
 
 
 def _atomic_write(target: Path, content: str) -> None:
-    """Write ``content`` to ``target`` atomically via tmp + ``os.replace``.
+    """通过 tmp + ``os.replace`` 原子地把 ``content`` 写入 ``target``。
 
-    The tmp suffix uses a short uuid slice to keep the visible filesystem
-    tidy in the rare crash path (operator can still inspect ``.tmp.*``
-    files manually if a power-loss leaves them behind).
+    tmp 后缀使用短 uuid 切片，让罕见的崩溃路径下文件系统保持整洁
+    （如果断电留下 tmp 文件，运维仍可手动检查 ``.tmp.*`` 文件）。
     """
 
     tmp = target.with_name(target.name + f".tmp.{uuid4().hex[:8]}")
@@ -138,10 +134,10 @@ def _atomic_write(target: Path, content: str) -> None:
 
 
 def _backup_original(target: Path, runtime: ToolRuntime) -> Path | None:
-    """Copy an existing file to ``.writer/backups/<relpath>.<ISO-ts>``.
+    """把已有文件复制到 ``.writer/backups/<relpath>.<ISO-ts>``。
 
-    Returns the backup path, or ``None`` if there was nothing to back up.
-    Creates the backups root on first use.
+    返回备份路径，若无可备份内容则返回 ``None``。首次使用时创建
+    backups 根。
     """
 
     if not target.exists():
@@ -159,19 +155,18 @@ def _backup_original(target: Path, runtime: ToolRuntime) -> Path | None:
 
 
 def _extract_genre_line(content: str) -> str | None:
-    """Return the ``- 题材: <genre>`` text (without leading dash) or ``None``."""
+    """返回 ``- 题材: <genre>`` 文本（不带前导 dash），或 ``None``。"""
 
     m = _GENRE_LINE_RE.search(content)
     return m.group(1).strip() if m else None
 
 
 def _insert_genre_line(content: str, genre: str) -> str:
-    """Insert ``- 题材: <genre>`` into the ``## 当前状态`` block.
+    """把 ``- 题材: <genre>`` 插入 ``## 当前状态`` 段。
 
-    Appends the line right after the section header so the file remains
-    parseable by :func:`writer.project.read_genre_from_agent`. If the
-    section header is missing this is a no-op (the AGENT.md guard will
-    already have rejected the write, but we keep this defensive).
+    把该行追加在段头之后，让文件仍可被
+    :func:`writer.project.read_genre_from_agent` 解析。若段头缺失，
+    本函数为 no-op（AGENT.md guard 已拒绝该写入，但此处保持防御性）。
     """
 
     needle = f"{CURRENT_STATE_SECTION_HEADER}\n"
@@ -183,15 +178,15 @@ def _insert_genre_line(content: str, genre: str) -> str:
 def _guard_agent_md(
     target: Path, content: str, mode: str
 ) -> tuple[str, dict[str, object]]:
-    """Apply the 3-stage AGENT.md guard; return ``(maybe_patched, meta)``.
+    """应用 3-stage AGENT.md guard；返回 ``(可能的修补后内容, meta)``。
 
-    Guard 1: ``mode`` MUST be ``overwrite``.
-    Guard 2: ``content`` MUST contain the ``## 当前状态`` section.
-    Guard 3: if existing file has ``题材: <g>`` and new content lacks it,
-    the genre line is merged in.
+    Guard 1：``mode`` 必须为 ``overwrite``。
+    Guard 2：``content`` 必须包含 ``## 当前状态`` 段。
+    Guard 3：若现有文件含 ``题材: <g>`` 且新内容缺失该行，
+    则把题材行合并进来。
 
-    Returns the (possibly patched) content plus metadata dict for
-    ``ToolResult.metadata``.
+    返回（可能经过修补的）内容和供 ``ToolResult.metadata`` 使用的
+    元数据字典。
     """
 
     if target.name != "AGENT.md":
@@ -226,17 +221,17 @@ def _sha256_first8(text: str) -> str:
 
 
 class SafeWriteFile:
-    """Write UTF-8 text files inside ``project_root``.
+    """在 ``project_root`` 内写入 UTF-8 文本文件。
 
-    ``mode`` controls intent:
-    - ``create`` (default): refuse if file exists.
-    - ``overwrite``: atomic replace; pre-write backup unless ``backup=False``.
-    - ``append``: tail-add; non-atomic, no backup.
+    ``mode`` 控制意图：
+    - ``create``（默认）：文件已存在则拒绝。
+    - ``overwrite``：原子替换；除 ``backup=False`` 外做写前备份。
+    - ``append``：尾部追加；非原子、无备份。
 
-    All writes pass through the runtime's path whitelist
-    (see :data:`writer.tools.runtime.DEFAULT_WRITE_WHITELIST`). Writes to
-    ``AGENT.md`` additionally pass the 3-stage guard in :func:`_guard_agent_md`.
-    Content larger than ``runtime.max_file_size`` is rejected.
+    所有写入都经过 runtime 的路径白名单
+    （见 :data:`writer.tools.runtime.DEFAULT_WRITE_WHITELIST`）。
+    对 ``AGENT.md`` 的写入还要过 :func:`_guard_agent_md` 的 3-stage guard。
+    超过 ``runtime.max_file_size`` 的内容会被拒绝。
     """
 
     name = "safe_write_file"
@@ -255,19 +250,18 @@ class SafeWriteFile:
         backup: bool = True,
     ) -> ToolResult:
         target = runtime.safe_path(path)
-        # AGENT.md bypasses the whitelist (its first segment is empty);
-        # all other paths go through the normal whitelist check.
+        # AGENT.md 绕过白名单（其首段为空）；其余路径走常规白名单检查。
         if target.name != "AGENT.md":
             _check_whitelist(target, runtime)
 
-        # Size gate applies to the *new* content, regardless of mode.
+        # 大小门槛作用于 *新* 内容，与 mode 无关。
         if len(content.encode("utf-8")) > runtime.max_file_size:
             raise ToolOutputTooLargeError(
                 f"写入内容 {len(content)} 字节超出 max_file_size={runtime.max_file_size}"
             )
 
-        # AGENT.md guard runs AFTER size check so a too-large AGENT.md
-        # write fails fast with the clearer "too large" error.
+        # AGENT.md guard 在 size 检查之后运行，让过大的 AGENT.md
+        # 写入以更明确的"过大"错误快速失败。
         content, agent_meta = _guard_agent_md(target, content, mode)
 
         metadata: dict[str, object] = {
@@ -292,7 +286,7 @@ class SafeWriteFile:
             target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("a", encoding="utf-8") as fh:
                 fh.write(content)
-        else:  # pragma: no cover — Literal exhaustiveness guard
+        else:  # pragma: no cover — Literal 完备性 guard
             raise ToolDeniedError(f"未知 mode: {mode}")
 
         metadata["bytes_written"] = len(content.encode("utf-8"))
@@ -306,7 +300,7 @@ class SafeWriteFile:
 
 
 # ---------------------------------------------------------------------------
-# SafeEditFile + helpers (per chg-add-write-edit-glob D5)
+# SafeEditFile + helpers（per chg-add-write-edit-glob D5）
 # ---------------------------------------------------------------------------
 
 
@@ -316,12 +310,11 @@ def _apply_edit(
     new_string: str,
     replace_all: bool,
 ) -> tuple[str, int]:
-    """Apply the Edit; return ``(new_content, replace_count)``.
+    """应用编辑；返回 ``(new_content, replace_count)``。
 
-    Uniqueness is enforced by the caller via ``replace_all`` — this helper
-    trusts the flag and just does the substitution. Splitting the policy
-    (count + decide) from the mechanism (substitute) keeps the test
-    surface clean.
+    唯一性由调用方通过 ``replace_all`` 强制 —— 本 helper 信任该标志
+    只做替换。把策略（计数 + 决策）与机制（替换）分开，让测试表面
+    保持清爽。
     """
 
     count = content.count(old_string)
@@ -331,11 +324,10 @@ def _apply_edit(
 
 
 def _unified_diff(old_content: str, new_content: str, path: str) -> str:
-    """Tiny unified diff built from :func:`difflib.unified_diff``.
+    """基于 :func:`difflib.unified_diff` 的小巧 unified diff。
 
-    Returns the empty string if both contents are identical. We avoid the
-    full difflib machinery in the import-time path by doing the work in
-    a private helper — the tool imports :mod:`difflib` lazily here.
+    两个内容相同时返回空串。我们通过私有 helper 完成工作，避免在
+    import 时引入完整 difflib —— 工具在此延迟 import :mod:`difflib`。
     """
 
     if old_content == new_content:
@@ -352,13 +344,12 @@ def _unified_diff(old_content: str, new_content: str, path: str) -> str:
 
 
 class SafeEditFile:
-    """Exact string replace — Claude Code Edit semantics.
+    """精确字符串替换 —— Claude Code Edit 语义。
 
-    The tool requires ``old_string`` to be unique unless ``replace_all=True``.
-    On a hit, the new content is written atomically with an optional backup.
-    ``dry_run=True`` returns the would-be diff in metadata without touching
-    disk; combined with the AGENT.md guard this makes LLM-driven edits
-    reviewable before commit.
+    除非 ``replace_all=True``，否则要求 ``old_string`` 唯一。命中时，
+    新内容以可选备份原子写入。``dry_run=True`` 通过 metadata 返回
+    拟定的 diff 而不触盘；与 AGENT.md guard 一起，让 LLM 驱动的编辑
+    在提交前可审阅。
     """
 
     name = "safe_edit_file"
@@ -423,10 +414,9 @@ class SafeEditFile:
                 metadata=metadata,
             )
 
-        # AGENT.md guard: pass through the same 3-stage check that
-        # SafeWriteFile uses. The new content is what the file will be
-        # AFTER the edit; the existing file already has the genre line
-        # (the edit wouldn't reach this point otherwise for AGENT.md).
+        # AGENT.md guard：与 SafeWriteFile 走相同的 3-stage 检查。
+        # 新内容是编辑*之后*的内容；AGENT.md 的编辑能走到这里
+        # 说明现有文件已有题材行。
         if target.name == "AGENT.md":
             new_content, agent_meta = _guard_agent_md(target, new_content, "overwrite")
             metadata.update(agent_meta)

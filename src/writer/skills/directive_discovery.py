@@ -1,19 +1,18 @@
-"""Project-level and shipped-directive discovery.
+"""项目级与内置 directive 发现。
 
-Public surface (per chg-markdown-skills):
+公开 API（per chg-markdown-skills）：
 
-* :func:`discover_directives` — scan a project's
-  ``<project_root>/.writer/skills/*/SKILL.md`` directories and load
-  every well-formed ``SkillDirective``.
-* :func:`discover_shipped_directives` — list the 4 built-in directives
-  shipped at ``src/writer/skills/_shipped/`` via ``importlib.resources``.
-* :func:`discover_entry_point_directives` — entry-point plugin hook
-  (mirrors the prior ``discover_entry_point_skills`` policy).
+* :func:`discover_directives` —— 扫描项目的
+  ``<project_root>/.writer/skills/*/SKILL.md`` 目录，并加载
+  每个格式良好的 ``SkillDirective``。
+* :func:`discover_shipped_directives` —— 通过 ``importlib.resources``
+  列出位于 ``src/writer/skills/_shipped/`` 的 4 个内置 directives。
+* :func:`discover_entry_point_directives` —— entry-point 插件钩子
+  （镜像原先 ``discover_entry_point_skills`` 的策略）。
 
-All failures are logged at WARNING and skipped — a single broken
-directive MUST NOT prevent other directives from loading and MUST NOT
-prevent the REPL from starting. This mirrors the prior
-``discover_entry_point_skills`` behaviour verbatim.
+所有失败以 WARNING 记录并跳过 —— 一个损坏的 directive *不得* 阻止
+其他 directives 加载，*也不得* 阻止 REPL 启动。这与原先
+``discover_entry_point_skills`` 的行为逐字一致。
 """
 
 from __future__ import annotations
@@ -35,30 +34,27 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-#: Frontmatter pattern: ``---\n<yaml>---\n<body>``. We require both
-#: delimiters to be present (the file MUST be a complete YAML doc).
-#: Multiline frontmatter is supported; the closing ``---`` MUST be on
-#: its own line.
+#: Frontmatter 模式：``---\n<yaml>---\n<body>``。要求两个分隔符都
+#: 存在（文件必须是完整的 YAML 文档）。支持多行 frontmatter；
+#: 闭合的 ``---`` 必须独占一行。
 _FRONTMATTER_PATTERN = re.compile(
     r"\A---\s*\n(?P<front>.*?)\n---\s*\n(?P<body>.*)\Z",
     re.DOTALL,
 )
 
-#: ``@reference path/to/file.md`` references inside a SKILL.md body.
-#: Captures the relative path (no whitespace) between ``@reference``
-#: and either whitespace or end-of-line.
+#: SKILL.md body 内的 ``@reference path/to/file.md`` 引用。
+#: 捕获 ``@reference`` 与空白或行尾之间的相对路径（不含空白）。
 _REFERENCE_PATTERN = re.compile(r"@reference\s+(?P<path>[^\s]+)")
 
 
 def discover_directives(project_root: Path) -> list[SkillDirective]:
-    """Discover and load project-level directives.
+    """发现并加载项目级 directives。
 
-    Scans ``<project_root>/.writer/skills/*/SKILL.md``, returning a
-    list of validated :class:`SkillDirective` instances sorted by
-    command for deterministic ordering.
+    扫描 ``<project_root>/.writer/skills/*/SKILL.md``，返回按命令
+    排序的已校验 :class:`SkillDirective` 实例列表，保证顺序确定性。
 
-    Hidden directories (``_draft`` / ``.hidden``) and entries without
-    a ``SKILL.md`` file are skipped silently.
+    隐藏目录（``_draft`` / ``.hidden``）和没有 ``SKILL.md`` 文件的
+    条目会被静默跳过。
     """
 
     directives: list[SkillDirective] = []
@@ -93,19 +89,18 @@ def discover_directives(project_root: Path) -> list[SkillDirective]:
 
 
 def discover_shipped_directives() -> list[SkillDirective]:
-    """Discover the 4 built-in directives shipped at
-    ``writer.skills._shipped/<command>/SKILL.md``.
+    """发现位于 ``writer.skills._shipped/<command>/SKILL.md`` 的
+    4 个内置 directives。
 
-    Uses ``importlib.resources.files()`` so the loader works regardless
-    of whether the package is installed from a wheel, an sdist, or
-    imported directly from a source checkout.
+    使用 ``importlib.resources.files()`` 让 loader 在 wheel 安装、
+    sdist 安装或源码 checkout 直接 import 时都能工作。
     """
 
     directives: list[SkillDirective] = []
     try:
-        # Python 3.12+: ``files()`` returns a ``Traversable``.
+        # Python 3.12+：``files()`` 返回 ``Traversable``。
         root = importlib.resources.files("writer.skills._shipped")
-    except Exception as exc:  # noqa: BLE001 — packaging environments vary
+    except Exception as exc:  # noqa: BLE001 — 打包环境差异较大
         log.warning(
             "Cannot locate shipped directives package: %s: %s; "
             "shipped layer will be empty",
@@ -137,25 +132,24 @@ def discover_shipped_directives() -> list[SkillDirective]:
 
 
 def discover_entry_point_directives() -> list[SkillDirective]:
-    """Discover directives registered via Python entry points.
+    """通过 Python entry points 发现已注册的 directives。
 
-    Plugins register directives by adding an entry to
-    ``[project.entry-points."writer.directives"]`` in their
-    ``pyproject.toml``:
+    插件通过在 ``pyproject.toml`` 的
+    ``[project.entry-points."writer.directives"]`` 增加条目来注册
+    directives：
 
     .. code-block:: toml
 
        [project.entry-points."writer.directives"]
        my_directive = "my_pkg.my_mod:MyDirective"
 
-    Each entry point may resolve to:
+    每个 entry point 可解析为：
 
-    * a :class:`SkillDirective` class — instantiated with no arguments;
-    * a pre-built :class:`SkillDirective` instance — used as-is.
+    * :class:`SkillDirective` 类 —— 以无参方式实例化；
+    * 预先构造好的 :class:`SkillDirective` 实例 —— 直接使用。
 
-    Anything that fails to resolve (missing distribution, import
-    error, bad attribute, schema invalid) is logged at WARNING and
-    skipped so a broken plugin never blocks the REPL from starting.
+    任何解析失败（distribution 缺失、import 错误、属性错误、schema
+    无效）都以 WARNING 记录并跳过，让损坏的插件永远不阻塞 REPL 启动。
     """
 
     discovered: list[SkillDirective] = []
@@ -214,7 +208,7 @@ def discover_entry_point_directives() -> list[SkillDirective]:
 
 
 def _parse_skill_md(skill_md_path: Path) -> SkillDirective | None:
-    """Parse one ``SKILL.md`` file on the regular filesystem."""
+    """解析常规文件系统上的一个 ``SKILL.md`` 文件。"""
 
     try:
         text = skill_md_path.read_text(encoding="utf-8")
@@ -256,13 +250,12 @@ def _parse_skill_md(skill_md_path: Path) -> SkillDirective | None:
 
 
 def _parse_traversable_skill_md(traversable) -> SkillDirective | None:
-    """Parse one shipped SKILL.md accessed via ``importlib.resources``.
+    """解析通过 ``importlib.resources`` 访问的一个内置 SKILL.md。
 
-    ``importlib.resources`` returns ``Traversable`` objects (not real
-    paths). We read via ``.read_text(encoding='utf-8')`` and pass the
-    parent ``Traversable`` (instead of a ``Path``) to the references
-    loader so the same code works for both regular filesystem and
-    package resources.
+    ``importlib.resources`` 返回 ``Traversable`` 对象（不是真实路径）。
+    我们通过 ``.read_text(encoding='utf-8')`` 读取，并把父
+    ``Traversable``（而非 ``Path``）传给 references loader，
+    让同一段代码对常规文件系统和包资源都能工作。
     """
 
     try:
@@ -297,10 +290,9 @@ def _parse_traversable_skill_md(traversable) -> SkillDirective | None:
     references = _load_traversable_references(traversable.parent)
     scripts = _list_traversable_scripts(traversable.parent)
 
-    # For shipped directives, ``root`` is a Traversable — we keep it as
-    # the stringified path so downstream code can still log it. The
-    # engine does NOT execute scripts for shipped directives (they're
-    # only seeded as reference templates).
+    # 对内置 directives，``root`` 是 Traversable —— 我们保留其字符串
+    # 化路径，让下游代码仍能记录它。引擎不为内置 directives 执行脚本
+    # （它们只作为引用模板被播种）。
     return SkillDirective(
         command=meta["command"],
         description=meta["description"],
@@ -313,10 +305,10 @@ def _parse_traversable_skill_md(traversable) -> SkillDirective | None:
 
 
 def _parse_frontmatter_and_body(text: str) -> tuple[str, str] | None:
-    """Extract YAML frontmatter and Markdown body from a SKILL.md file.
+    """从 SKILL.md 文件中抽取 YAML frontmatter 和 Markdown body。
 
-    Returns ``(frontmatter_str, body_str)`` or ``None`` when the file
-    has no proper ``---\\n...\\n---\\n`` envelope.
+    返回 ``(frontmatter_str, body_str)``，若文件没有正确的
+    ``---\n...\n---\n`` 包络则返回 ``None``。
     """
 
     match = _FRONTMATTER_PATTERN.match(text)
@@ -326,7 +318,7 @@ def _parse_frontmatter_and_body(text: str) -> tuple[str, str] | None:
 
 
 def _validate_frontmatter(front_str: str) -> dict:
-    """Parse + validate the YAML frontmatter. Raises ``SkillError``."""
+    """解析并校验 YAML frontmatter。抛 ``SkillError``。"""
 
     import yaml  # local import: top-level yaml import is heavy
 
@@ -357,16 +349,16 @@ def _validate_frontmatter(front_str: str) -> dict:
         msg = "requires_states must be a non-empty list"
         raise SkillError(msg)
 
-    # Resolve requires_states strings to ProjectState enum members.
-    # ProjectState is a StrEnum where the value is the canonical S0..S5
-    # string and the NAME is the human-readable identifier. We accept
-    # either form so SKILL.md frontmatter can use whichever is clearer:
-    #   ``requires_states: [INITIALIZED, HAS_OUTLINE]``  ← name form
-    #   ``requires_states: [S1, S2]``                    ← value form
-    # Local import: avoid forcing project.state on every skills import.
+    # 把 requires_states 字符串解析为 ProjectState enum 成员。
+    # ProjectState 是 StrEnum，value 是规范的 S0..S5 字符串，NAME
+    # 是人类可读标识符。我们接受两种形式，让 SKILL.md frontmatter
+    # 可以选择更清楚的那个：
+    #   ``requires_states: [INITIALIZED, HAS_OUTLINE]``  ← 名称形式
+    #   ``requires_states: [S1, S2]``                    ← value 形式
+    # 本地 import：避免每次 skills import 都强制加载 project.state。
     from writer.project.state import ProjectState  # noqa: PLC0415
 
-    # Build a name → ProjectState map once for the name-form lookup.
+    # 一次性构造 name → ProjectState 映射，用于 name-form 查找。
     name_to_state = {member.name: member for member in ProjectState}
 
     resolved_states: set = set()
@@ -395,7 +387,7 @@ def _validate_frontmatter(front_str: str) -> dict:
 
 
 def _validate(directive: SkillDirective) -> None:
-    """Light validation for entry-point / programmatically-built directives."""
+    """对 entry-point / 程序化构建的 directive 做轻量校验。"""
 
     if not isinstance(directive.command, str) or not directive.command.startswith("/"):
         msg = f"directive command must start with '/'; got {directive.command!r}"
@@ -412,10 +404,10 @@ def _validate(directive: SkillDirective) -> None:
 
 
 def _load_references(skill_dir: Path) -> dict[str, str]:
-    """Load every ``*.md`` under ``<skill_dir>/references/``.
+    """加载 ``<skill_dir>/references/`` 下所有 ``*.md``。
 
-    Returns ``{relpath: content}`` keyed by relative path. Non-md files
-    are skipped silently. Missing ``references/`` directory → ``{}``.
+    返回按相对路径为键的 ``{relpath: content}``。非 md 文件静默
+    跳过；``references/`` 目录缺失时返回 ``{}``。
     """
 
     refs_dir = skill_dir / "references"
@@ -440,7 +432,7 @@ def _load_references(skill_dir: Path) -> dict[str, str]:
 
 
 def _list_scripts(skill_dir: Path) -> list[str]:
-    """List relative paths of files under ``<skill_dir>/scripts/``."""
+    """列出 ``<skill_dir>/scripts/`` 下文件的相对路径。"""
 
     scripts_dir = skill_dir / "scripts"
     if not scripts_dir.is_dir():
@@ -458,7 +450,7 @@ def _list_scripts(skill_dir: Path) -> list[str]:
 
 
 def _load_traversable_references(parent_traversable) -> dict[str, str]:
-    """Load references from a ``Traversable`` (importlib.resources)."""
+    """从 ``Traversable``（importlib.resources）加载 references。"""
 
     refs_dir = parent_traversable / "references"
     try:
@@ -489,7 +481,7 @@ def _load_traversable_references(parent_traversable) -> dict[str, str]:
 
 
 def _list_traversable_scripts(parent_traversable) -> list[str]:
-    """List scripts from a ``Traversable`` (importlib.resources)."""
+    """从 ``Traversable``（importlib.resources）列出 scripts。"""
 
     scripts_dir = parent_traversable / "scripts"
     try:
@@ -520,20 +512,18 @@ def _list_traversable_scripts(parent_traversable) -> list[str]:
 
 
 def resolve_references(body: str, references: dict[str, str]) -> list[tuple[str, str]]:
-    """Resolve ``@reference path/to/file.md`` mentions in a directive body.
+    """解析 directive body 中的 ``@reference path/to/file.md`` 引用。
 
-    Returns ``[(relpath, content)]`` for every reference that exists in
-    the directive's ``references`` dict. Unknown references are silently
-    skipped — the engine logs them as a WARNING and continues.
+    对 directive ``references`` 字典中存在的每个引用，返回
+    ``[(relpath, content)]``。未知引用静默跳过 —— 引擎以 WARNING
+    记录后继续。
 
-    Path normalization: ``references`` keys are stored relative to the
-    ``references/`` subdirectory (e.g. ``template.md``), but SKILL.md
-    bodies often write the full path (``references/template.md``). The
-    ``references/`` prefix is stripped on lookup so authors can use
-    either form.
+    路径规范化：``references`` 键按相对于 ``references/`` 子目录存储
+    （例如 ``template.md``），但 SKILL.md body 通常写完整路径
+    （``references/template.md``）。查找时去掉 ``references/`` 前缀，
+    让作者两种写法都能用。
 
-    Order: the order in which the references appear in the body.
-    Deduplication: a reference mentioned multiple times appears once.
+    顺序：按引用在 body 中出现的顺序。去重：同一引用多次出现只保留一份。
     """
 
     if not references:
@@ -543,9 +533,8 @@ def resolve_references(body: str, references: dict[str, str]) -> list[tuple[str,
     out: list[tuple[str, str]] = []
     for match in _REFERENCE_PATTERN.finditer(body):
         relpath = match["path"]
-        # Allow both ``@reference template.md`` and
-        # ``@reference references/template.md`` to look up the same
-        # ``template.md`` key.
+        # 同时支持 ``@reference template.md`` 和
+        # ``@reference references/template.md`` 查同一个 ``template.md`` 键。
         normalized = (
             relpath[len("references/") :]
             if relpath.startswith("references/")

@@ -1,17 +1,16 @@
-"""Project-level and shipped-agent discovery.
+"""项目级与内置 agent 发现。
 
-Public surface (per ``fea-agent-mirror``):
+公开 API（per ``fea-agent-mirror``）：
 
-* :func:`discover_agents` — scan a project's
-  ``<project_root>/.writer/agents/*.md`` files and load every
-  well-formed :class:`Agent`.
-* :func:`discover_shipped_agents` — list the 4 built-in agents
-  shipped at ``writer/agents/_shipped/`` via ``importlib.resources``.
-* :func:`discover_entry_point_agents` — entry-point plugin hook.
+* :func:`discover_agents` —— 扫描项目的
+  ``<project_root>/.writer/agents/*.md`` 文件，并加载每个格式良好的
+  :class:`Agent`。
+* :func:`discover_shipped_agents` —— 通过 ``importlib.resources`` 列出
+  位于 ``writer/agents/_shipped/`` 的 4 个内置 agent。
+* :func:`discover_entry_point_agents` —— entry-point 插件钩子。
 
-All failures are logged at WARNING and skipped — a single broken
-agent MUST NOT prevent other agents from loading and MUST NOT
-prevent the REPL from starting.
+所有失败以 WARNING 记录并跳过 —— 一个损坏的 agent *不得* 阻止其他
+agent 加载，*也不得* 阻止 REPL 启动。
 """
 
 from __future__ import annotations
@@ -25,10 +24,9 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 
-#: Frontmatter pattern: ``---\n<yaml>---\n<body>``. We require both
-#: delimiters to be present (the file MUST be a complete YAML doc).
-#: Multiline frontmatter is supported; the closing ``---`` MUST be
-#: on its own line.
+#: Frontmatter 模式：``---\n<yaml>---\n<body>``。要求两个分隔符都
+#: 存在（文件必须是完整的 YAML 文档）。支持多行 frontmatter；
+#: 闭合的 ``---`` 必须独占一行。
 _FRONTMATTER_PATTERN = re.compile(
     r"\A---\s*\n(?P<front>.*?)\n---\s*\n(?P<body>.*)\Z",
     re.DOTALL,
@@ -36,13 +34,12 @@ _FRONTMATTER_PATTERN = re.compile(
 
 
 def discover_agents(project_root: Path) -> list[object]:
-    """Discover and load project-level agents.
+    """发现并加载项目级 agent。
 
-    Scans ``<project_root>/.writer/agents/*.md`` (NOT a subdirectory
-    per-agent — agents are flat ``.md`` files at the top level,
-    mirroring Claude Code's ``.claude/agents/`` layout). Hidden files
-    (``_draft`` / ``.hidden``) and files without valid YAML
-    frontmatter are skipped silently (with a WARNING).
+    扫描 ``<project_root>/.writer/agents/*.md``（*不*是每个 agent 一个
+    子目录 —— agent 是顶层扁平 ``.md`` 文件，镜像 Claude Code 的
+    ``.claude/agents/`` 布局）。隐藏文件（``_draft`` / ``.hidden``）
+    和没有合法 YAML frontmatter 的文件会被静默跳过（并 WARNING）。
     """
 
     agents: list[object] = []
@@ -76,19 +73,17 @@ def discover_agents(project_root: Path) -> list[object]:
 
 
 def discover_shipped_agents() -> list[object]:
-    """Discover the 4 built-in agents shipped at
-    ``writer.agents._shipped/<name>.md``.
+    """发现位于 ``writer.agents._shipped/<name>.md`` 的 4 个内置 agent。
 
-    Uses ``importlib.resources.files()`` so the loader works regardless
-    of whether the package is installed from a wheel, an sdist, or
-    imported directly from a source checkout.
+    使用 ``importlib.resources.files()`` 让 loader 在 wheel 安装、
+    sdist 安装或源码 checkout 直接 import 时都能工作。
     """
 
     agents: list[object] = []
     try:
-        # Python 3.12+: ``files()`` returns a ``Traversable``.
+        # Python 3.12+：``files()`` 返回 ``Traversable``。
         root = importlib.resources.files("writer.agents._shipped")
-    except Exception as exc:  # noqa: BLE001 — packaging environments vary
+    except Exception as exc:  # noqa: BLE001 — 打包环境差异较大
         log.warning(
             "Cannot locate shipped agents package: %s: %s; "
             "shipped layer will be empty",
@@ -119,25 +114,24 @@ def discover_shipped_agents() -> list[object]:
 
 
 def discover_entry_point_agents() -> list[object]:
-    """Discover agents registered via Python entry points.
+    """通过 Python entry points 发现已注册的 agent。
 
-    Plugins register agents by adding an entry to
-    ``[project.entry-points."writer.agents"]`` in their
-    ``pyproject.toml``:
+    插件通过在 ``pyproject.toml`` 的
+    ``[project.entry-points."writer.agents"]`` 增加条目来注册
+    agent：
 
     .. code-block:: toml
 
        [project.entry-points."writer.agents"]
        my_agent = "my_pkg.my_mod:MyAgent"
 
-    Each entry point may resolve to:
+    每个 entry point 可解析为：
 
-    * an :class:`Agent` class — instantiated with no arguments;
-    * a pre-built :class:`Agent` instance — used as-is.
+    * :class:`Agent` 类 —— 以无参方式实例化；
+    * 预先构造好的 :class:`Agent` 实例 —— 直接使用。
 
-    Anything that fails to resolve (missing distribution, import
-    error, bad attribute, schema invalid) is logged at WARNING and
-    skipped so a broken plugin never blocks the REPL from starting.
+    任何解析失败（distribution 缺失、import 错误、属性错误、schema
+    无效）都以 WARNING 记录并跳过，让损坏的插件永远不阻塞 REPL 启动。
     """
 
     from writer.agents.protocol import Agent  # noqa: PLC0415
@@ -199,11 +193,11 @@ def discover_entry_point_agents() -> list[object]:
 
 
 def parse_agent_file(path: Path) -> object:
-    """Parse one agent ``.md`` file on the regular filesystem.
+    """解析常规文件系统上的一个 agent ``.md`` 文件。
 
-    Exposed as a top-level helper so tests can call it directly. Raises
-    :class:`writer.agents.registry.AgentRegistryError` on schema
-    errors (missing required keys, empty body, bad name).
+    作为顶层辅助函数暴露，让测试可以直接调用。schema 错误（缺少
+    必填键、body 为空、name 不合法）时抛
+    :class:`writer.agents.registry.AgentRegistryError`。
     """
 
     from writer.agents.registry import AgentRegistryError  # noqa: PLC0415
@@ -218,7 +212,7 @@ def parse_agent_file(path: Path) -> object:
 
 
 def _parse_agent_file(path: Path) -> object | None:
-    """Wrapper that logs on failure (used by the discovery loop)."""
+    """失败时记 log 的包装（供发现循环使用）。"""
 
     from writer.agents.registry import AgentRegistryError  # noqa: PLC0415
 
@@ -230,11 +224,11 @@ def _parse_agent_file(path: Path) -> object | None:
 
 
 def _parse_traversable_agent(traversable) -> object | None:
-    """Parse one shipped agent ``.md`` accessed via ``importlib.resources``.
+    """解析通过 ``importlib.resources`` 访问的一个内置 agent ``.md``。
 
-    ``importlib.resources`` returns ``Traversable`` objects (not real
-    paths). We read via ``.read_text(encoding='utf-8')`` and use the
-    stringified path as the agent's ``root``.
+    ``importlib.resources`` 返回 ``Traversable`` 对象（不是真实路径）。
+    我们通过 ``.read_text(encoding='utf-8')`` 读取，并把字符串化的
+    路径作为 agent 的 ``root``。
     """
 
     from writer.agents.registry import AgentRegistryError  # noqa: PLC0415
@@ -261,9 +255,9 @@ def _parse_traversable_agent(traversable) -> object | None:
 
 
 def _build_agent_from_text(text: str, *, root: Path) -> object:
-    """Build an :class:`Agent` from raw ``.md`` text + root path.
+    """从原始 ``.md`` 文本 + root 路径构造一个 :class:`Agent`。
 
-    Raises :class:`AgentRegistryError` on any schema violation.
+    任何 schema 违反抛 :class:`AgentRegistryError`。
     """
 
     from writer.agents.protocol import Agent  # noqa: PLC0415
@@ -287,7 +281,7 @@ def _build_agent_from_text(text: str, *, root: Path) -> object:
 
 
 def _parse_frontmatter_and_body(text: str) -> tuple[str, str] | None:
-    """Extract YAML frontmatter and Markdown body from an agent file."""
+    """从 agent 文件中抽取 YAML frontmatter 和 Markdown body。"""
 
     match = _FRONTMATTER_PATTERN.match(text)
     if match is None:
@@ -296,7 +290,7 @@ def _parse_frontmatter_and_body(text: str) -> tuple[str, str] | None:
 
 
 def _validate_frontmatter(front_str: str, *, source: str) -> dict:
-    """Parse + validate the YAML frontmatter. Raises :class:`AgentRegistryError`."""
+    """解析并校验 YAML frontmatter。抛 :class:`AgentRegistryError`。"""
 
     import yaml  # local import: top-level yaml import is heavy
 

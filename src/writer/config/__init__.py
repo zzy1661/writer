@@ -1,4 +1,4 @@
-"""Configuration helpers."""
+"""配置辅助函数。"""
 
 from writer.config.settings import (
     Settings,

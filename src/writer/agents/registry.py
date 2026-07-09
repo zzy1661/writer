@@ -1,28 +1,26 @@
-"""Agent registry — lookup table for name-bound agents.
+"""Agent registry —— 名称绑定 agent 的查找表。
 
-Last-write-wins semantics: when the same ``name`` appears more than
-once across layers (shipped / project / entry-point), the later layer
-replaces the earlier one. This Replace semantics lets users override
-any shipped agent by adding a same-named project agent.
+Last-write-wins 语义：当相同的 ``name`` 跨层（shipped / project /
+entry-point）出现多次时，后者替换前者。这种 Replace 语义让用户
+可以通过添加同名 project agent 来覆盖任何内置 agent。
 
-Duplicate names within a single layer raise :class:`AgentRegistryError`
-at registry construction time. A malformed agent is also rejected
-up-front (see :func:`_validate`) so a typo (``description = 123``)
-cannot survive until the first LLM dispatch.
+单层内的重复名称在 registry 构造时抛 :class:`AgentRegistryError`。
+格式错乱的 agent 也会被前置拒绝（见 :func:`_validate`），让笔误
+（``description = 123``）无法存活到首次 LLM 派发。
 
-Public surface:
+公开 API：
 
-* :class:`AgentRegistry` — lookup table keyed by ``name``.
-* :func:`built_agent_registry` — factory assembling shipped + project
-  + entry-point layers (later wins on name collision).
-* :func:`builtin_agent_registry` — built-in agents only.
+* :class:`AgentRegistry` —— 以 ``name`` 为键的查找表。
+* :func:`built_agent_registry` —— 组装 shipped + project + entry-point
+  层的工厂（name 冲突时后者覆盖前者）。
+* :func:`builtin_agent_registry` —— 仅内置 agent。
 
-The :meth:`AgentRegistry.descriptions` view powers the parent LLM's
-dispatch decision (per :class:`writer.routing.LlmIntentRouter`):
+:meth:`AgentRegistry.descriptions` 视图为父 LLM 的派发决策提供数据
+（per :class:`writer.routing.LlmIntentRouter`）：
 
-* Each description is truncated to ≤ 200 characters.
-* The total list is capped at 16 agents (a soft warning, not an error)
-  so the router's system prompt never explodes.
+* 每个 description 被截断到 ≤ 200 字符。
+* 总列表上限 16 个 agent（软警告而非错误），让 router 的 system prompt
+  不会爆炸。
 """
 
 from __future__ import annotations
@@ -38,39 +36,36 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-#: Entry-point group name for third-party agent plugins.
+#: 第三方 agent 插件的 entry-point 组名。
 ENTRY_POINT_GROUP = "writer.agents"
 
 
-#: Maximum characters per description in :meth:`AgentRegistry.descriptions`.
+#: :meth:`AgentRegistry.descriptions` 中每个 description 的最大字符数。
 DESCRIPTION_MAX_CHARS = 200
 
-#: Maximum number of agents returned by :meth:`AgentRegistry.descriptions`.
+#: :meth:`AgentRegistry.descriptions` 返回的最大 agent 数。
 DESCRIPTIONS_MAX_AGENTS = 16
 
-#: Allow-list of canonical genre keys (per ``fea-agent-mirror`` Decision 7).
+#: 规范题材 key 的 allow-list（per ``fea-agent-mirror`` Decision 7）。
 _VALID_GENRES: frozenset[str] = frozenset({"other", "历史", "言情", "玄幻"})
 
-#: Pattern for the ``name`` field — lowercase, starts with a letter,
-#: then letters / digits / underscore.
+#: ``name`` 字段的模式 —— 小写字母开头，后跟字母 / 数字 / 下划线。
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class AgentRegistryError(ValueError):
-    """Raised when an agent registration is invalid (bad name, duplicate, schema)."""
+    """agent 注册无效时抛出（错误名称、重复、schema 问题）。"""
 
 
 def _validate(agent: object) -> None:
-    """Enforce the agent metadata contract at registration time.
+    """在注册时强制 agent 元数据契约。
 
-    Catching problems early keeps a typo (``description = 123``) from
-    surviving until the first LLM dispatch, where it would surface
-    as a confusing render glitch.
+    及早捕获问题，避免笔误（``description = 123``）一路存活到首次
+    LLM 派发 —— 那里会以令人困惑的渲染异常暴露。
     """
 
-    # Lazy import to avoid top-level circulars (this module is imported
-    # by writer.agents.__init__ which may be loaded before the protocol
-    # is fully resolved during package init).
+    # 延迟 import 避免顶层循环（本模块由 writer.agents.__init__ import，
+    # 后者在包初始化时可能在 protocol 完整解析前被加载）。
     from writer.agents.protocol import Agent
 
     if not isinstance(agent, Agent):
@@ -98,17 +93,15 @@ def _validate(agent: object) -> None:
 
 
 class AgentRegistry:
-    """Lookup table for name-bound agents.
+    """名称绑定 agent 的查找表。
 
-    Duplicate names are resolved with **last-write-wins** semantics:
-    when the same ``name`` appears more than once across layers
-    (shipped / project / entry-point), the later layer replaces the
-    earlier one. This Replace semantics lets users override any
-    shipped agent by adding a same-named project agent.
+    重复名称按 **last-write-wins** 语义解决：当相同的 ``name`` 跨层
+    （shipped / project / entry-point）出现多次时，后者替换前者。
+    这种 Replace 语义让用户可以通过添加同名 project agent 来覆盖
+    任何内置 agent。
 
-    Per-agent validation raises :class:`AgentRegistryError` (via
-    :func:`_validate`) — a malformed agent is always a hard error and
-    will abort registry construction.
+    逐 agent 校验会抛 :class:`AgentRegistryError`（通过 :func:`_validate`）——
+    格式错乱的 agent 始终是硬错误，会中止 registry 构造。
     """
 
     def __init__(
@@ -134,11 +127,11 @@ class AgentRegistry:
         return self._by_name.get(name)
 
     def require(self, name: str) -> Agent:
-        """Return the agent for ``name`` or raise :class:`AgentRegistryError`.
+        """返回 ``name`` 对应的 agent，否则抛 :class:`AgentRegistryError`。
 
-        Mirrors :meth:`writer.skills.registry.DirectiveRegistry.run`-style
-        strictness: missing names surface as a clear error rather than
-        ``None`` so the engine's ``Done(aborted)`` payload is informative.
+        镜像 :meth:`writer.skills.registry.DirectiveRegistry.run` 风格的
+        严格性：缺失名称作为明确错误而非 ``None`` 暴露，让引擎的
+        ``Done(aborted)`` payload 有信息量。
         """
 
         agent = self._by_name.get(name)
@@ -149,22 +142,21 @@ class AgentRegistry:
         return agent
 
     def all(self) -> list[Agent]:
-        """Return all registered agents, sorted by name."""
+        """返回所有已注册 agent，按名称排序。"""
 
         return [self._by_name[name] for name in sorted(self._by_name)]
 
     def names(self) -> list[str]:
-        """Return sorted agent names (stable across runs)."""
+        """返回排序后的 agent 名称（跨运行稳定）。"""
 
         return sorted(self._by_name)
 
     def descriptions(self) -> list[dict[str, str]]:
-        """Return ``[{name, description, genre}, …]`` for LLM dispatch.
+        """返回 ``[{name, description, genre}, …]`` 给 LLM 派发。
 
-        Each description is truncated to :data:`DESCRIPTION_MAX_CHARS`;
-        the total list is capped at :data:`DESCRIPTIONS_MAX_AGENTS`
-        (with a WARNING log on truncation). The original ``Agent``
-        objects are NOT mutated — this is a read view.
+        每个 description 截断到 :data:`DESCRIPTION_MAX_CHARS`；总列表
+        上限 :data:`DESCRIPTIONS_MAX_AGENTS`（截断时记 WARNING）。原始
+        ``Agent`` 对象*不*被修改 —— 这是只读视图。
         """
 
         out: list[dict[str, str]] = []
@@ -207,10 +199,9 @@ __all__ = [
 
 
 def builtin_agent_registry() -> AgentRegistry:
-    """Built-in agents only — no project layer, no entry-point plugins.
+    """仅内置 agent —— 不含项目层、不含 entry-point 插件。
 
-    Used as the default by callers that don't have a project bound
-    (e.g. tests, ``S0`` path).
+    被未绑定项目的调用方（测试、S0 路径）作为默认使用。
     """
 
     from writer.agents.agent_discovery import discover_shipped_agents  # noqa: PLC0415
@@ -222,22 +213,20 @@ def builtin_agent_registry() -> AgentRegistry:
 def built_agent_registry(
     project_root: Path | None = None,
 ) -> AgentRegistry:
-    """Built-in agents + project-level agents + entry-point plugins.
+    """内置 agent + 项目级 agent + entry-point 插件。
 
-    Layers (Replace semantics — later wins on name collision):
+    分层（Replace 语义 —— name 冲突时后者覆盖前者）：
 
-    1. :func:`discover_shipped_agents` — the 4 shipped agents.
-    2. :func:`discover_agents(project_root)` — only when
-       ``project_root`` is provided.
-    3. :func:`discover_entry_point_agents` — Python entry-point
-       plugins.
+    1. :func:`discover_shipped_agents` —— 4 个内置 agent。
+    2. :func:`discover_agents(project_root)` —— 仅当提供
+       ``project_root`` 时启用。
+    3. :func:`discover_entry_point_agents` —— Python entry-point
+       插件。
 
-    The ``project_root=None`` path preserves the legacy behaviour (no
-    project layer; back-compat for tests and callers that do not have
-    a project bound). The function never raises for missing project
-    files (the loader swallows per-file errors as warnings) and never
-    raises for missing entry-point plugins. A truly empty registry
-    (no built-ins, no project, no plugins) is still valid.
+    ``project_root=None`` 路径保留既有行为（无项目层；为测试和未绑定
+    项目的调用方保留兼容性）。本函数从不为缺失的项目文件抛异常
+    （loader 把单文件错误吞为 warning），从不为缺失的 entry-point
+    插件抛异常。真正的空 registry（无内置、无项目、无插件）依然合法。
     """
 
     from writer.agents.agent_discovery import (  # noqa: PLC0415
@@ -260,11 +249,10 @@ def built_agent_registry(
 
 
 def _check_builtin_sources_drift() -> None:
-    """Log a WARNING if any shipped agent file's sha256 no longer matches.
+    """当任何内置 agent 文件的 sha256 不再匹配时记录 WARNING。
 
-    Soft check — the registry still loads the file (drift is a
-    maintenance signal, not a hard failure). See
-    :class:`writer.agents.builtin_sources.BUILTIN_AGENT_SOURCES`.
+    软检查 —— registry 仍会加载该文件（漂移是维护信号而非硬失败）。
+    见 :class:`writer.agents.builtin_sources.BUILTIN_AGENT_SOURCES`。
     """
 
     try:

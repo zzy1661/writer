@@ -1,21 +1,20 @@
-"""Cross-turn session state container.
+"""跨轮次会话状态容器。
 
-The ``EngineSession`` is created once at REPL startup and reused for every
-turn. It owns:
+``EngineSession`` 在 REPL 启动时构造一次，并在每轮复用。它持有：
 
-- **Identity** (frozen): ``session_id`` (UUID) and ``started_at`` (datetime).
-- **Project context** (mutable): ``project_root`` (Path | None) and the
-  latest state detected from disk.
-- **deps** (mutable): the ``EngineDeps`` instance, built once at
-  construction. ``tool_runtime`` is swapped via :meth:`set_project_root`
-  while router / tool_registry are preserved.
-- **turns** (mutable): append-only list of :class:`TurnRecord`.
-- **pending_interrupt** (mutable): the most recent ``Interrupt`` event
-  emitted by the engine, cleared when the next turn completes.
+- **身份**（冻结）：``session_id``（UUID）和 ``started_at``（datetime）。
+- **项目上下文**（可变）：``project_root``（Path | None）和从磁盘
+  检测到的最新状态。
+- **deps**（可变）：``EngineDeps`` 实例，在构造时构建一次。
+  ``tool_runtime`` 通过 :meth:`set_project_root` 替换，router /
+  tool_registry 保持不变。
+- **turns**（可变）：仅追加的 :class:`TurnRecord` 列表。
+- **pending_interrupt**（可变）：引擎产出的最近一个 ``Interrupt`` 事件，
+  在下一轮完成时清空。
 
-EngineSession does NOT replace the per-turn ``EngineContext`` — that stays
-as the immutable input contract for ``run_engine``. EngineSession sits
-*outside* the engine and feeds it one context per turn.
+EngineSession 并*不*替代每轮的 ``EngineContext`` —— 后者保持不变，
+作为 ``run_engine`` 的不可变输入契约。EngineSession 位于引擎*外部*，
+每轮喂给引擎一个 context。
 """
 
 from __future__ import annotations
@@ -33,7 +32,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class TurnRecord:
-    """One turn's outcome: what the user said and how the engine ended."""
+    """一轮的结局：用户说了什么，引擎如何结束。"""
 
     turn_index: int
     user_input: str
@@ -46,75 +45,69 @@ _SENTINEL_PROJECT_ROOT = Path("/__no_project__")
 
 @dataclass
 class EngineSession:
-    """Cross-turn session state container (per 备忘 16 line 374 reservation)."""
+    """跨轮次会话状态容器（per 备忘 16 line 374 reservation）。"""
 
-    # Frozen identity — set once at construction, never mutated.
+    # 冻结的身份 —— 构造时设置一次，永不修改。
     session_id: UUID = field(default_factory=uuid4)
     started_at: datetime = field(
         default_factory=lambda: datetime.now(UTC)
     )
 
-    # Project context (mutable).
+    # 项目上下文（可变）。
     project_root: Path | None = None
     project_state: str = "S0"
     project_genre: str = "other"
 
-    # Deps — built once at construction; tool_runtime swap on project_root change.
+    # Deps —— 构造时构建一次；project_root 变更时替换 tool_runtime。
     deps: EngineDeps = field(default=None)  # type: ignore[assignment]
 
-    # Append-only turn history.
+    # 仅追加的轮次历史。
     turns: list[TurnRecord] = field(default_factory=list)
 
-    # Pending Interrupt from the previous turn; cleared after consumption.
+    # 上一轮的待处理 Interrupt；消费后清空。
     pending_interrupt: Interrupt | None = None
 
     def __post_init__(self) -> None:
-        # Lazy-import to avoid circular imports (engine.deps imports
-        # writer.routing which is allowed to import nothing from session).
+        # 延迟 import 以避免循环 import（engine.deps 引入
+        # writer.routing，后者从 session 什么也不允许 import）。
         if self.deps is None:
             from writer.engine.deps import production_deps
 
             if self.project_root is not None:
-                # Refresh ``project_genre`` so the very first ``/状态`` read
-                # shows the right value; ``production_deps`` itself no longer
-                # reads ``AGENT.md`` (per ``chg-remove-roles``).
+                # 刷新 ``project_genre`` 让首次 ``/状态`` 读到正确值；
+                # ``production_deps`` 本身不再读取 ``AGENT.md``
+                # （per ``chg-remove-roles``）。
                 self.refresh_project_genre()
-            # ``production_deps`` is responsible for also wiring
-            # ``directive_registry`` with the bound project (per
-            # chg-markdown-skills) so the very first ``/大纲`` etc.
-            # lookup sees the project-level overrides. We do NOT
-            # post-hoc rebuild here — the session's
-            # ``set_project_root`` handles later project changes.
+            # ``production_deps`` 同时负责把 ``directive_registry`` 与
+            # 已绑定项目接线（per chg-markdown-skills），让首次 ``/大纲`` 等
+            # 查找能看到项目级覆盖。我们*不*在此事后重建 —— 后续 project
+            # 变更由 session 的 ``set_project_root`` 处理。
             self.deps = production_deps(project_root=self.project_root)
 
     # ------------------------------------------------------------------
-    # project_root + deps management
+    # project_root + deps 管理
     # ------------------------------------------------------------------
 
     def set_project_root(self, new_root: Path | None) -> None:
-        """Update ``project_root`` and rebuild ``deps``-level collaborators.
+        """更新 ``project_root`` 并重建 ``deps`` 层的协作者。
 
-        Router / tool_registry are preserved across the swap.
-        ``tool_runtime`` is rebuilt because it holds the project_root
-        that gates ``safe_path`` checks.
+        Router / tool_registry 在替换过程中保持不变。``tool_runtime``
+        被重建，因为它持有用于 ``safe_path`` 检查的 project_root。
 
-        Removed in ``chg-remove-roles``: the ``_agent_for_genre`` +
-        ``rebind_story_agent`` block. ``writer.roles.StoryAgent`` (and
-        the ``EngineDeps.story_agent`` field) is gone, so the session
-        no longer needs to rebuild a Python-side capability on
-        project / genre change. Genre awareness for LLM dispatch is
-        carried by ``writer.agents.AgentRegistry`` (rebuilt below).
+        在 ``chg-remove-roles`` 中移除：``_agent_for_genre`` +
+        ``rebind_story_agent`` 块。``writer.roles.StoryAgent``（以及
+        ``EngineDeps.story_agent`` 字段）已删除，因此 session 不再需要在
+        project / genre 变更时重建 Python-side 能力。LLM 派发的题材感知
+        由 ``writer.agents.AgentRegistry`` 承载（见下文重建）。
 
-        ``directive_registry`` is also rebuilt (per ``chg-markdown-skills``)
-        so the new project's ``.writer/skills/`` overrides become
-        visible on the next REPL turn.
+        ``directive_registry`` 同样被重建（per ``chg-markdown-skills``），
+        让新项目的 ``.writer/skills/`` 覆盖在下一 REPL 轮次可见。
 
-        Setting ``new_root`` to the same path is a no-op (no rebuild).
-        Setting ``new_root=None`` falls back to the S0 sentinel root.
+        把 ``new_root`` 设为同一路径是 no-op（不重建）。
+        把 ``new_root`` 设为 ``None`` 回退到 S0 哨兵根。
 
-        The actual swaps go through :meth:`EngineDeps.rebind_*` so we
-        never need to know whether the concrete ``EngineDeps`` is a
-        dataclass, a plain object, or a test fake.
+        实际替换通过 :meth:`EngineDeps.rebind_*` 进行，让我们永远不必
+        关心具体 ``EngineDeps`` 是 dataclass、普通对象还是测试 fake。
         """
 
         if new_root == self.project_root:
@@ -137,24 +130,22 @@ class EngineSession:
         self.refresh_project_state()
         self.refresh_project_genre()
 
-        # Rebuild the directive registry so the new project's
-        # ``.writer/skills/`` overrides take effect on the next turn.
-        # ``built_directive_registry`` is invoked with the resolved
-        # sentinel (not ``None``) for S0 so any future S0 directive
-        # stub can rely on a real path; in practice the sentinel is
-        # not a directory so ``discover_directives`` returns ``[]``.
+        # 重建 directive registry，让新项目的 ``.writer/skills/``
+        # 覆盖在下一轮次生效。``built_directive_registry`` 对 S0
+        # 使用解析后的哨兵调用（而不是 ``None``），以便未来 S0 directive
+        # stub 可以依赖真实路径；实际上哨兵不是目录，``discover_directives``
+        # 返回 ``[]``。
         new_registry = built_directive_registry(project_root=resolved)
         self.deps = self.deps.rebind_directive_registry(new_registry)
 
-        # Rebuild the agent registry so the new project's
-        # ``.writer/agents/`` overrides (per ``fea-agent-mirror``)
-        # take effect on the next REPL turn. Symmetric to the
-        # directive registry rebind above.
+        # 重建 agent registry，让新项目的 ``.writer/agents/``
+        # 覆盖（per ``fea-agent-mirror``）在下一 REPL 轮次生效。
+        # 与上方的 directive registry rebind 对称。
         new_agent_registry = built_agent_registry(project_root=resolved)
         self.deps = self.deps.rebind_agent_registry(new_agent_registry)
 
     def refresh_project_state(self) -> str:
-        """Refresh ``project_state`` from files on disk and return it."""
+        """从磁盘文件刷新 ``project_state`` 并返回它。"""
 
         from writer.project import detect_state
 
@@ -162,19 +153,17 @@ class EngineSession:
         return self.project_state
 
     def refresh_project_genre(self) -> str:
-        """Refresh ``project_genre`` from ``(project_root / AGENT.md)``.
+        """从 ``(project_root / AGENT.md)`` 刷新 ``project_genre``。
 
-        Returns the refreshed value (``"other"`` when missing or empty).
-        The method never raises — a torn AGENT.md just falls back to
-        ``"other"``. Called automatically from
-        :meth:`set_project_root` and on demand by callers that want to
-        re-read after an external ``AGENT.md`` edit.
+        返回刷新后的值（缺失或为空时为 ``"other"``）。本方法不会抛异常
+        —— 残缺的 AGENT.md 仅回退到 ``"other"``。由
+        :meth:`set_project_root` 自动调用，也由希望在外部编辑
+        ``AGENT.md`` 后重新读取的调用方按需调用。
 
-        Note (per ``chg-remove-roles``): this value is no longer wired
-        into a Python-side ``StoryAgent`` subclass. ``/状态`` still
-        surfaces it; LLM dispatch routes through the Markdown
-        ``writer.agents.AgentRegistry``, which reads genre from each
-        agent's ``AGENT.md`` frontmatter (or project override).
+        注（per ``chg-remove-roles``）：该值不再接入 Python-side
+        ``StoryAgent`` 子类。``/状态`` 仍展示它；LLM 派发通过
+        Markdown ``writer.agents.AgentRegistry`` 路由，后者从每个
+        agent 的 ``AGENT.md`` frontmatter（或项目覆盖）读取题材。
         """
 
         if self.project_root is None:
@@ -188,11 +177,11 @@ class EngineSession:
         return self.project_genre
 
     # ------------------------------------------------------------------
-    # Turn history
+    # 轮次历史
     # ------------------------------------------------------------------
 
     def record_turn(self, user_input: str, done_reason: DoneReason) -> TurnRecord:
-        """Append a :class:`TurnRecord` and return it."""
+        """追加一条 :class:`TurnRecord` 并返回它。"""
 
         record = TurnRecord(
             turn_index=len(self.turns),
@@ -204,7 +193,7 @@ class EngineSession:
         return record
 
     # ------------------------------------------------------------------
-    # Pending Interrupt lifecycle
+    # Pending Interrupt 生命周期
     # ------------------------------------------------------------------
 
     def set_pending_interrupt(self, interrupt: Interrupt) -> None:
@@ -215,20 +204,19 @@ class EngineSession:
 
 
 # ----------------------------------------------------------------------
-# Module-level helpers
+# 模块级辅助函数
 # ----------------------------------------------------------------------
 
 
 def compose_pending_input(original: str, pending: Interrupt | None) -> str:
-    """Return the user input string to feed the engine for a turn.
+    """返回本轮喂给引擎的用户输入字符串。
 
-    If ``pending`` is set, the prompt is prepended with a visible marker
-    so the LLM router sees both the prior question and the user's
-    answer. When ``pending`` is ``None``, the original input is returned
-    unchanged.
+    若 ``pending`` 已设置，则在 prompt 前添加可见标记，让 LLM 路由器
+    同时看到上一个问题和用户的回答。当 ``pending`` 为 ``None`` 时，
+    返回原输入。
 
-    The output is plain text — markers are bracketed so they remain
-    visible in REPL logs and console prints.
+    输出为纯文本 —— 标记用方括号包裹，以便在 REPL 日志和控制台
+    打印中保持可见。
     """
 
     if pending is None:

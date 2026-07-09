@@ -1,8 +1,7 @@
-"""Routing layer — maps user input to a structured :class:`AgentAction`.
+"""路由层 —— 把用户输入映射为结构化 :class:`AgentAction`。
 
-Public surface lives in :mod:`writer.routing.intent_router`; this package
-shallow re-exports it so callers can simply ``from writer.routing import
-IntentRouter``.
+公开 API 位于 :mod:`writer.routing.intent_router`；本包做浅层 re-export，
+让调用方可以简单地 ``from writer.routing import IntentRouter``。
 """
 
 from writer.routing.composite_router import CompositeRouter

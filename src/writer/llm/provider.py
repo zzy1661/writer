@@ -1,12 +1,11 @@
-"""LLM provider factory.
+"""LLM provider 工厂。
 
-Builds a LangChain ``ChatOpenAI`` from :class:`writer.config.Settings`. The
-factory is the only place in the codebase that instantiates an LLM, so
-swapping providers (Anthropic, local vLLM, Azure OpenAI) is a one-file
-change.
+从 :class:`writer.config.Settings` 构建 LangChain ``ChatOpenAI``。
+工厂是代码库中唯一实例化 LLM 的地方，因此替换 provider（Anthropic、
+本地 vLLM、Azure OpenAI）只需改一个文件。
 
-OpenAI-compatible endpoints (DeepSeek, Moonshot, etc.) are supported via
-``Settings.base_url``; ``ChatOpenAI`` honors that field directly.
+通过 ``Settings.base_url`` 支持 OpenAI 兼容端点（DeepSeek、Moonshot 等）；
+``ChatOpenAI`` 直接遵守该字段。
 """
 
 from __future__ import annotations
@@ -18,14 +17,14 @@ from writer.config import Settings
 
 
 class LLMConfigError(ValueError):
-    """Raised when ``Settings`` lacks the values needed to build an LLM."""
+    """``Settings`` 缺少构建 LLM 所需的值时抛出。"""
 
 
 def get_llm(settings: Settings) -> ChatOpenAI:
-    """Instantiate ``ChatOpenAI`` from ``settings``.
+    """从 ``settings`` 实例化 ``ChatOpenAI``。
 
     Raises:
-        LLMConfigError: if ``settings.has_api_key`` is False.
+        LLMConfigError: 若 ``settings.has_api_key`` 为 False。
     """
 
     if not settings.has_api_key:

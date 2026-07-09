@@ -1,17 +1,17 @@
-"""LLM provider package.
+"""LLM provider 包。
 
-Single source of truth for instantiating the language model consumed by
-``IntentRouter`` (and later, roles/workflows). All router / role code must
-import ``ChatOpenAI`` from here, never directly from ``langchain_openai``,
-so the choice of provider stays in one place.
+实例化语言模型的单一真理来源，被 ``IntentRouter``（以及未来的
+roles / workflows）消费。所有 router / role 代码必须从这里导入
+``ChatOpenAI``，而不是直接从 ``langchain_openai``，让 provider 的
+选择保持在一处。
 
-Three LLM call paths are exposed:
+暴露三条 LLM 调用路径：
 
-* :mod:`writer.llm.structured` — short structured-output calls
-  (Pydantic schema validated against a JSON response).
-* :mod:`writer.llm.agent` — :class:`LLMToolLoop` ReAct-style tool calls.
-* :mod:`writer.llm.prose` — :class:`LLMProseClient` for long-form prose
-  generation (chapter drafts, review reports).
+* :mod:`writer.llm.structured` —— 短结构化输出调用（针对 JSON 响应
+  校验 Pydantic schema）。
+* :mod:`writer.llm.agent` —— :class:`LLMToolLoop` ReAct 风格的工具调用。
+* :mod:`writer.llm.prose` —— :class:`LLMProseClient` 长篇散文生成
+  （章节草稿、审阅报告）。
 """
 
 from writer.llm.prose import (

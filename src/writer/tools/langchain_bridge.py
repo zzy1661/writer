@@ -1,14 +1,13 @@
-"""Bridge from writer ``Tool`` objects to LangChain ``BaseTool``.
+"""从 writer ``Tool`` 对象桥接到 LangChain ``BaseTool``。
 
-When LangGraph's ``ToolNode`` arrives (per 04) it will expect a list of
-LangChain ``BaseTool`` instances. This adapter produces them on demand
-without requiring every writer tool to also be a ``BaseTool`` subclass.
+当 LangGraph 的 ``ToolNode`` 到来时（per 04），它会期望一组
+LangChain ``BaseTool`` 实例。本适配器按需产出它们，无需让每个
+writer tool 同时也是 ``BaseTool`` 子类。
 
-The returned tool captures ``runtime`` in a closure, so a single
-registry can produce session-specific base tools in one call. Each
-wrapper also generates a typed ``args_schema`` from the writer tool's
-``run`` signature, which is the only reliable way to make LangChain
-unpack the input dict back into kwargs.
+返回的工具在闭包中捕获 ``runtime``，因此单个 registry 可以
+通过一次调用产出特定会话的 base tool。每个 wrapper 还会根据
+writer tool 的 ``run`` 签名生成一个类型化的 ``args_schema``，
+这是让 LangChain 把输入 dict 可靠地解包回 kwargs 的唯一稳妥办法。
 """
 
 from __future__ import annotations
@@ -27,11 +26,11 @@ if TYPE_CHECKING:
 
 
 def _build_args_schema(writer_tool: Tool) -> type[BaseModel] | None:
-    """Derive a Pydantic v2 model from a writer tool's ``run`` signature.
+    """从 writer tool 的 ``run`` 签名派生一个 Pydantic v2 模型。
 
-    Skips ``self`` and ``runtime`` (the latter is captured in the closure
-    of the bridge). All remaining keyword arguments become typed fields;
-    defaults are preserved if the writer supplied one.
+    跳过 ``self`` 和 ``runtime``（后者被桥接的闭包捕获）。其余
+    keyword 参数都成为类型化字段；如果 writer 提供了默认值，
+    默认值会被保留。
     """
 
     sig = inspect.signature(writer_tool.run)
@@ -62,20 +61,20 @@ def _build_args_schema(writer_tool: Tool) -> type[BaseModel] | None:
 def to_langchain_tools(
     registry: ToolRegistry, runtime: ToolRuntime
 ) -> list[BaseTool]:
-    """Wrap every registered writer tool as a LangChain ``BaseTool``.
+    """把每个已注册的 writer tool 包装为 LangChain ``BaseTool``。
 
-    The returned tools invoke the writer ``Tool.run(runtime, **kwargs)``
-    contract and surface ``ToolResult.output`` to LangChain. Structured
-    output (``truncated``, ``metadata``) is dropped at this seam — it's
-    recorded by LangGraph state separately (per 04).
+    返回的工具调用 writer ``Tool.run(runtime, **kwargs)`` 契约，并把
+    ``ToolResult.output`` 暴露给 LangChain。结构化输出（``truncated``、
+    ``metadata``）在此接缝处被丢弃 —— 它由 LangGraph state 单独
+    记录（per 04）。
     """
 
     def _make(writer_tool: Tool) -> BaseTool:
         def _invoke(**kwargs: object) -> str:
             return writer_tool.run(runtime, **kwargs).output
 
-        # ``__name__`` matters for LangChain tool discovery, and ``__doc__``
-        # becomes the tool description surfaced to the model.
+        # ``__name__`` 对 LangChain 工具发现很重要，``__doc__`` 成为
+        # 暴露给模型的工具描述。
         _invoke.__name__ = writer_tool.name
         _invoke.__doc__ = writer_tool.description
 

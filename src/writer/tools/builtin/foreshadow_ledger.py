@@ -1,22 +1,19 @@
-"""Project-local foreshadow ledger (伏笔.yaml) and structured query helpers.
+"""项目级伏笔 ledger（``伏笔.yaml``）与结构化查询辅助函数。
 
-Replaces the old RAG-based foreshadow lookup with a deterministic
-in-process query against a YAML ledger. The schema is documented in
-``openspec/changes/chg-remove-rag/specs/foreshadow-ledger/spec.md`` and
-intentionally human-editable: a writer should be able to maintain the
-ledger by hand without round-tripping through any LLM or vector store.
+用确定性的进程内查询取代了旧的基于 RAG 的伏笔查找。Schema 见
+``openspec/changes/chg-remove-rag/specs/foreshadow-ledger/spec.md``，
+刻意做成人类可手编：作者应当可以手工维护 ledger，无需经过任何
+LLM 或向量存储来回绕。
 
-Public surface:
+公开 API：
 
-* :func:`load_ledger` — read & validate the ledger; returns ``[]`` on
-  missing file. Raises :class:`ForeshadowLedgerSchemaError` on a
-  present-but-malformed file (the tool layer catches this and produces
-  a friendly ``ToolResult``).
-* :func:`query_ledger` — pure filter on a list of entries. All
-  arguments combine with **AND** semantics.
-* :class:`ForeshadowLedgerSchemaError` — domain exception surfaced from
-  :func:`load_ledger` only; the tool layer is responsible for mapping
-  it to a non-raising ``ToolResult``.
+* :func:`load_ledger` —— 读取并校验 ledger；文件缺失时返回 ``[]``。
+  文件存在但格式错乱时抛 :class:`ForeshadowLedgerSchemaError`
+  （工具层捕获后产出友好的 ``ToolResult``）。
+* :func:`query_ledger` —— 在条目列表上的纯过滤。所有参数使用
+  **AND** 语义组合。
+* :class:`ForeshadowLedgerSchemaError` —— 仅由 :func:`load_ledger`
+  抛出的领域异常；工具层负责把它映射成不抛异常的 ``ToolResult``。
 """
 
 from __future__ import annotations
@@ -27,31 +24,30 @@ from typing import Any, Literal
 
 import yaml
 
-#: Filename of the project-local ledger. Chinese filename chosen to match
-#: the project's existing convention (cf. ``技术难点与解决方案备忘/``,
-#: ``创意/核心创意.md``).
+#: 项目级 ledger 文件名。中文文件名匹配项目既有约定
+#: （参见 ``技术难点与解决方案备忘/``、``创意/核心创意.md``）。
 LEDGER_FILENAME = "伏笔.yaml"
 
-#: Fields every ledger entry MUST contain. ``paid_chapter`` is allowed
-#: to be ``None`` to indicate "laid but not yet paid off".
+#: 每条 ledger 条目必须包含的字段。``paid_chapter`` 允许为 ``None``，
+#: 表示「已埋伏但尚未回收」。
 _REQUIRED_FIELDS: frozenset[str] = frozenset(
     {"id", "tags", "status", "laid_chapter", "paid_chapter", "notes"}
 )
 
-#: Permitted values for the ``status`` field.
+#: ``status`` 字段允许的值。
 _VALID_STATUS: frozenset[str] = frozenset({"laid", "paid"})
 
-#: Canonical id pattern: ``F`` followed by one or more digits. Used only
-#: for human-friendly validation; ``query_ledger`` does not enforce it.
+#: 规范 id 模式：``F`` 后跟一位或多位数字。仅用于人类友好校验；
+#: ``query_ledger`` 不强制它。
 _ID_PATTERN = re.compile(r"^F\d+$")
 
 
 class ForeshadowLedgerSchemaError(Exception):
-    """Raised when ``伏笔.yaml`` exists but does not satisfy the schema.
+    """``伏笔.yaml`` 存在但不满足 schema 时抛出。
 
-    The :class:`ForeshadowSearch` tool catches this and converts it to
-    a ``ToolResult`` with ``metadata.error="schema"`` — the exception
-    itself never escapes the tool layer.
+    :class:`ForeshadowSearch` 工具捕获该异常，并把它转换为
+    ``metadata.error="schema"`` 的 ``ToolResult`` —— 异常本身永远
+    不会从工具层逃逸。
     """
 
     def __init__(self, message: str) -> None:
@@ -60,15 +56,14 @@ class ForeshadowLedgerSchemaError(Exception):
 
 
 def load_ledger(project_root: Path) -> list[dict[str, Any]]:
-    """Return the parsed ledger for ``project_root``.
+    """返回 ``project_root`` 解析后的 ledger。
 
-    Behavior:
+    行为：
 
-    * File missing → return ``[]`` (treated as an empty ledger, not an
-      error — a fresh project is allowed to have no foreshadows yet).
-    * File present but malformed → raise
-      :class:`ForeshadowLedgerSchemaError`. Callers (i.e. the tool
-      layer) MUST handle the exception and return a friendly result.
+    * 文件缺失 → 返回 ``[]``（视为空 ledger 而非错误 —— 新项目
+      允许暂时尚无伏笔）。
+    * 文件存在但格式错乱 → 抛 :class:`ForeshadowLedgerSchemaError`。
+      调用方（即工具层）必须处理该异常并返回友好的结果。
     """
 
     path = (project_root / LEDGER_FILENAME).resolve()
@@ -121,23 +116,21 @@ def query_ledger(
     chapter_range: tuple[int, int] | None = None,
     keyword: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Filter ``entries`` with structured criteria; all filters combine with AND.
+    """用结构化条件过滤 ``entries``；所有过滤条件以 AND 组合。
 
     Args:
-        id: Exact ``F\\d+`` lookup. When provided, only the entry with the
-            matching ``id`` is returned.
-        tags: ANY-of match. The entry passes if at least one of its
-            ``tags`` equals one of the given tags (OR semantics within
-            this argument, AND across arguments). Empty list is a no-op.
-        status: One of ``"laid"`` / ``"paid"`` / ``"all"``. ``"laid"``
-            includes entries with ``paid_chapter is None``; ``"paid"``
-            requires ``paid_chapter`` to be a non-null integer.
-        chapter_range: ``(lo, hi)`` inclusive bounds on ``laid_chapter``.
-        keyword: Substring match against ``id`` / any element of
-            ``tags`` / ``notes``. Case-sensitive.
+        id: 精确 ``F\\d+`` 查找。提供时仅返回 id 匹配的条目。
+        tags: ANY 匹配。条目的 ``tags`` 至少有一个等于所给 tags
+            之一时通过（本参数内为 OR 语义，跨参数为 AND 语义）。
+            空列表是 no-op。
+        status: 取值 ``"laid"`` / ``"paid"`` / ``"all"``。``"laid"``
+            包含 ``paid_chapter is None`` 的条目；``"paid"`` 要求
+            ``paid_chapter`` 为非空整数。
+        chapter_range: ``(lo, hi)`` 对 ``laid_chapter`` 的闭区间。
+        keyword: 对 ``id`` / ``tags`` 任一元素 / ``notes`` 的子串
+            匹配。大小写敏感。
 
-    The function is pure: no filesystem IO, no logging, no mutation
-    of the input list.
+    本函数为纯函数：没有文件系统 IO，没有日志，不修改输入列表。
     """
 
     results = list(entries)

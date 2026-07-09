@@ -1,8 +1,7 @@
-"""Event data class hierarchy for the agent engine.
+"""Agent 引擎的事件数据类层次。
 
-Events are the public contract between ``writer.engine`` and its consumers
-(REPL, future EngineSession, tests). They are immutable so consumers can
-freely ``match`` on them without defensive copies.
+事件是 ``writer.engine`` 与其消费者（REPL、未来的 EngineSession、测试）之间的公共契约。
+事件均为不可变结构，消费者可以放心地用 ``match`` 匹配而无需做防御性拷贝。
 """
 
 from __future__ import annotations
@@ -28,26 +27,26 @@ DoneReason = Literal[
 
 @dataclass(frozen=True)
 class Event:
-    """Base class for all engine events."""
+    """所有引擎事件的基类。"""
 
 
 @dataclass(frozen=True)
 class TextChunk(Event):
-    """A chunk of human-readable text, optionally followed by more chunks."""
+    """一段人类可读文本，可能后跟更多文本块。"""
 
     text: str
 
 
 @dataclass(frozen=True)
 class ActionEvent(Event):
-    """The dispatcher produced an ``AgentAction`` for the current input."""
+    """派发器已为当前输入产出 ``AgentAction``。"""
 
     action: AgentAction
 
 
 @dataclass(frozen=True)
 class ToolCall(Event):
-    """A tool invocation request, ready for execution."""
+    """工具调用请求，准备执行。"""
 
     name: str
     arguments: dict[str, Any]
@@ -55,7 +54,7 @@ class ToolCall(Event):
 
 @dataclass(frozen=True)
 class ToolResult(Event):
-    """Result returned by a tool execution."""
+    """工具执行的返回结果。"""
 
     name: str
     output: str
@@ -63,7 +62,7 @@ class ToolResult(Event):
 
 @dataclass(frozen=True)
 class Interrupt(Event):
-    """The engine needs a user reply before it can continue."""
+    """引擎在继续之前需要用户回复。"""
 
     type: Literal["choice", "text", "confirm"]
     prompt: str
@@ -72,7 +71,7 @@ class Interrupt(Event):
 
 @dataclass(frozen=True)
 class Done(Event):
-    """The engine finished the current turn for the given reason."""
+    """引擎因指定原因结束当前轮次。"""
 
     reason: DoneReason
     payload: dict[str, Any] | None = None
@@ -80,13 +79,12 @@ class Done(Event):
 
 @dataclass(frozen=True)
 class ErrorEvent(Event):
-    """An unrecoverable error occurred inside the engine.
+    """引擎内部发生了不可恢复的错误。
 
-    ``message`` is the human-readable summary that ``cli/main.py`` shows
-    inline. ``traceback`` (added 2026-07-05 per arch-optimizer M4) carries
-    the formatted stack trace when available; ``None`` for programmatic
-    errors raised without going through the engine boundary (e.g. a
-    pre-existing TestError fixture).
+    ``message`` 是 ``cli/main.py`` 内联展示的人类可读摘要；``traceback``
+    （2026-07-05 按 arch-optimizer M4 增补）携带格式化的堆栈（若可用），
+    未经过引擎边界（例如预先存在的 TestError fixture）抛出的程序化错误
+    时为 ``None``。
     """
 
     message: str

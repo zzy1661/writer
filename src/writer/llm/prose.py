@@ -1,30 +1,28 @@
-"""Long-form prose LLM client.
+"""长篇散文 LLM 客户端。
 
-The existing ``writer.llm`` package covers two paths:
+现有 ``writer.llm`` 包覆盖两条路径：
 
-* :mod:`writer.llm.structured` — short structured-output calls (Pydantic
-  schema validated against a JSON response).
-* :mod:`writer.llm.agent` — :class:`LLMToolLoop` ReAct-style tool calls.
+* :mod:`writer.llm.structured` —— 短结构化输出调用（针对 JSON
+  响应校验 Pydantic schema）。
+* :mod:`writer.llm.agent` —— :class:`LLMToolLoop` ReAct 风格的工具调用。
 
-Neither is a good fit for **chapter-length prose generation**: a chapter
-draft is several thousand Chinese characters with no schema, and the
-``LLMToolLoop`` is optimised for short model responses interleaved with
-tool calls. This module adds the missing third path:
+两者都不适合**章节长度散文生成**：章节草稿是数千中文字符且无
+schema，而 ``LLMToolLoop`` 针对与工具调用交错的短模型响应进行了
+优化。本模块补齐缺失的第三条路径：
 
-* :class:`LLMProseClient` — Protocol with a single
-  ``generate_text(*, system, user) -> str`` method.
-* :class:`RealProseClient` — wraps a LangChain ``BaseChatModel`` and
-  invokes it with a system + human message pair.
-* :class:`DeterministicProseClient` — assembles structured prose from
-  the project context (no LLM call) so offline / no-API-key deployments
-  produce a usable draft.
+* :class:`LLMProseClient` —— 单方法
+  ``generate_text(*, system, user) -> str`` 的 Protocol。
+* :class:`RealProseClient` —— 包装 LangChain ``BaseChatModel``，
+  以 system + human 消息对调用。
+* :class:`DeterministicProseClient` —— 从项目上下文组装结构化散文
+  （无 LLM 调用），让离线 / 无 API key 部署产出可用草稿。
 
-The :func:`writer.engine.deps.production_deps` factory injects the
-Real variant when an API key is configured, otherwise the Deterministic
-variant. The field is **always** populated (never ``None``), unlike
-``tool_loop`` which can be ``None`` for rule-only deployments.
+:func:`writer.engine.deps.production_deps` 工厂在配置 API key 时
+注入 Real 变体，否则注入 Deterministic 变体。该字段**始终**填充
+（从不为 ``None``），与 ``tool_loop`` 不同 —— 后者在纯规则部署下
+可以为 ``None``。
 
-Added 2026-07-09 (real-writing-pipeline PR2).
+2026-07-09 增补（real-writing-pipeline PR2）。
 """
 
 from __future__ import annotations
@@ -38,23 +36,21 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
 class LLMProseError(ValueError):
-    """Raised by :class:`LLMProseClient` implementations on transport /
-    parse / protocol failures.
+    """:class:`LLMProseClient` 实现遇到传输 / 解析 / 协议失败时抛出。
 
-    Inherits from :class:`ValueError` (same as :class:`LLMConfigError` and
-    :class:`StructuredOutputError`) so the engine's existing
-    ``except Exception`` arm surfaces it as a normal aborted turn.
+    继承 :class:`ValueError`（与 :class:`LLMConfigError` 和
+    :class:`StructuredOutputError` 一致），让引擎现有的
+    ``except Exception`` 分支把它作为普通 aborted 轮次暴露。
     """
 
 
 @runtime_checkable
 class LLMProseClient(Protocol):
-    """Long-form prose generation contract.
+    """长篇散文生成契约。
 
-    Implementations MUST expose a ``name`` attribute (string) so the
-    engine and tests can branch on the implementation without importing
-    the concrete class. Implementations MUST also support a single
-    keyword-only ``generate_text`` method that returns a string.
+    实现必须暴露 ``name`` 属性（字符串），让引擎和测试能在不导入
+    具体类的情况下分支。实现还必须支持单个 keyword-only
+    ``generate_text`` 方法，返回字符串。
     """
 
     name: str
@@ -64,18 +60,17 @@ class LLMProseClient(Protocol):
 
 
 def _coerce_ai_message_to_text(message: AIMessage) -> str:
-    """Coerce a LangChain ``AIMessage`` content field to ``str``.
+    """把 LangChain ``AIMessage`` 的 content 字段强制为 ``str``。
 
-    Mirrors the rules in :func:`writer.llm.structured._message_content_to_text`
-    so the two paths share content-handling semantics:
+    与 :func:`writer.llm.structured._message_content_to_text` 规则一致，
+    让两条路径共享内容处理语义：
 
-    * ``str`` → returned as-is
-    * ``list`` of strings / dicts → joined with newlines; dict entries
-      with ``text`` / ``content`` keys are stringified
-    * other types → ``str(content)`` fallback
+    * ``str`` → 原样返回
+    * ``list`` 字符串 / dict → 用换行连接；带 ``text`` / ``content`` 键
+      的 dict 项被字符串化
+    * 其他类型 → ``str(content)`` 回退
 
-    Raises :class:`LLMProseError` when the content is ``None`` or an
-    unsupported type.
+    当内容为 ``None`` 或不支持的类型时抛 :class:`LLMProseError`。
     """
     content = message.content
     if content is None:
@@ -98,12 +93,11 @@ def _coerce_ai_message_to_text(message: AIMessage) -> str:
 
 
 class RealProseClient:
-    """LLM-backed prose client.
+    """LLM 支持的散文客户端。
 
-    ``generate_text`` calls ``self.llm.invoke([SystemMessage, HumanMessage])``
-    and coerces the response to ``str``. Designed for long-form chapter
-    drafts; the caller is responsible for token-budgeting (see
-    :func:`writer.context.prep_context` for the canonical context packer).
+    ``generate_text`` 调用 ``self.llm.invoke([SystemMessage, HumanMessage])``
+    并把响应强制为 ``str``。为长篇章节草稿设计；调用方负责 token 预算
+    （参见 :func:`writer.prompts.context.prep_context` 规范的上下文打包器）。
     """
 
     name: str = "real"
@@ -116,7 +110,7 @@ class RealProseClient:
             response = self._llm.invoke(
                 [SystemMessage(content=system), HumanMessage(content=user)]
             )
-        except Exception as exc:  # noqa: BLE001 — surface as domain exception
+        except Exception as exc:  # noqa: BLE001 — 暴露为领域异常
             raise LLMProseError(f"LLM 调用失败: {exc}") from exc
         if not isinstance(response, AIMessage):
             raise LLMProseError(
@@ -127,21 +121,21 @@ class RealProseClient:
 
 @dataclass
 class DeterministicProseClient:
-    """Offline prose client.
+    """离线散文客户端。
 
-    Produces structured prose (≥ 200 chars) from the prep_context canon
-    / history blocks plus the user message — no LLM call, no network.
-    Intended for tests, CI, and dev environments without an API key.
+    从 prep_context 的 canon / history 块以及用户消息组装结构化散文
+    （≥ 200 字符）—— 无 LLM 调用，无网络。针对测试、CI 和没有
+    API key 的开发环境。
 
-    The output follows a deterministic 3-beat template:
+    输出遵循确定性的 3-beat 模板：
 
-    * chapter heading line (``# 第 <id> 章 <task summary>``)
-    * opening paragraph (canon summary)
-    * conflict paragraph (history summary)
-    * closing hook paragraph
+    * 章节标题行（``# 第 <id> 章 <task summary>``）
+    * 开篇段（canon 摘要）
+    * 冲突段（history 摘要）
+    * 收尾钩子段
 
-    ``prep_context_fn`` defaults to :func:`writer.context.prep_context`
-    but can be overridden in tests for fake context packs.
+    ``prep_context_fn`` 默认 :func:`writer.prompts.context.prep_context`，
+    但可以在测试中用 fake context pack 覆写。
     """
 
     name: str = "deterministic"
@@ -149,26 +143,25 @@ class DeterministicProseClient:
 
     def __post_init__(self) -> None:
         if self.prep_context_fn is None:
-            # Lazy import: ``writer.context`` itself does no heavy I/O
-            # at import time, but the prose module is imported early in
-            # the engine stack — keep the import inside ``__post_init__``
-            # so test-only code paths that construct a
-            # ``DeterministicProseClient(prep_context_fn=fake)`` never
-            # touch ``writer.context`` at all.
-            from writer.context import prep_context
+            # 延迟 import：``writer.prompts.context`` 本身在 import 时不做重型
+            # I/O，但 prose 模块在引擎栈中导入较早 —— 把 import 放在
+            # ``__post_init__`` 内部，让用
+            # ``DeterministicProseClient(prep_context_fn=fake)`` 构造
+            # 的纯测试路径完全不触碰 ``writer.prompts.context``。
+            from writer.prompts.context import prep_context
 
             self.prep_context_fn = prep_context
 
     def generate_text(self, *, system: str, user: str) -> str:
-        # ``user`` is the per-call user message (carries ``task:`` from
-        # the workflow); ``system`` is the prep_context system_block.
-        # Extract the chapter_id + task from the user message using a
-        # small, stable parser so the template is deterministic.
+        # ``user`` 是每次调用的用户消息（携带工作流的 ``task:``）；
+        # ``system`` 是 prep_context 的 system_block。
+        # 用小而稳定的解析器从用户消息中抽取 chapter_id + task，
+        # 让模板保持确定性。
         chapter_id, task_summary = _parse_user_message(user)
 
-        # The prep_context is invoked with the same signature as
-        # ``write_chapter._prep_context_node`` so the output looks
-        # identical to a Real-mode draft (modulo LLM phrasing).
+        # 用与 ``write_chapter._prep_context_node`` 相同的签名调用
+        # prep_context，让输出看起来与 Real 模式草稿完全一致
+        #（LLM 措辞除外）。
         pack = self.prep_context_fn(
             chapter_id,
             task_summary or user,
@@ -180,12 +173,11 @@ class DeterministicProseClient:
         history = _excerpt(pack.history_block, limit=200)
         title = _chapter_title(chapter_id, task_summary)
 
-        # 5-paragraph template: heading + opening + conflict + body + hook.
-        # The template is intentionally padded with prose so the assembled
-        # text is reliably ≥ 200 chars even when the prep_context blocks
-        # are empty or the task is a single short word. Real-mode drafts
-        # (LLM output) easily clear that bar; the deterministic path is
-        # the worst case the tests assert.
+        # 5 段模板：标题 + 开篇 + 冲突 + 正文 + 钩子。
+        # 模板刻意用散文填充，让即使 prep_context 块为空或 task 是
+        # 短词时，拼装出的文本也能稳定 ≥ 200 字符。Real 模式草稿
+        # （LLM 输出）轻松越过这条线；确定性路径是测试断言的最坏
+        # 情况。
         return (
             f"# {title}\n\n"
             f"本章承接正典设定，延续既有因果。{canon}\n\n"
@@ -201,17 +193,17 @@ class DeterministicProseClient:
 
 
 def _parse_user_message(user: str) -> tuple[str, str]:
-    """Extract ``(chapter_id, task_summary)`` from a workflow user message.
+    """从工作流用户消息中提取 ``(chapter_id, task_summary)``。
 
-    The user message format produced by ``_plan_chapter_node`` is:
+    ``_plan_chapter_node`` 产出的用户消息格式是：
 
     .. code-block:: text
 
         chapter_id: <id>
         task: <task description>
 
-    For any other format, we fall back to ``("1.1", user)`` so the
-    Deterministic client never raises on unexpected input.
+    其他任何格式都回退到 ``("1.1", user)``，让 Deterministic
+    客户端不会因意外输入而抛异常。
     """
     chapter_id = "1.1"
     task_summary = ""
@@ -227,7 +219,7 @@ def _parse_user_message(user: str) -> tuple[str, str]:
 
 
 def _excerpt(text: str, *, limit: int = 120) -> str:
-    """Return the first ``limit`` characters of ``text`` collapsed to one line."""
+    """返回 ``text`` 前 ``limit`` 字符，折叠为单行。"""
     if not text:
         return "（暂无上下文）"
     compact = " ".join(text.split())
@@ -235,9 +227,9 @@ def _excerpt(text: str, *, limit: int = 120) -> str:
 
 
 def _chapter_title(chapter_id: str, task_summary: str) -> str:
-    """Build a deterministic chapter heading like ``第 1.1 章 <task>``."""
+    """构造形如 ``第 1.1 章 <task>`` 的确定性章节标题。"""
     task = task_summary.strip() or "本章"
-    # Cap task length to keep titles reasonable.
+    # 限制 task 长度让标题保持合理。
     if len(task) > 24:
         task = task[:24] + "..."
     return f"第 {chapter_id} 章 {task}"

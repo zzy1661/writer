@@ -1,26 +1,23 @@
-"""LLM-backed :class:`IntentRouter` implementation.
+"""LLM 支持的 :class:`IntentRouter` 实现。
 
-Wires LangChain's ``with_structured_output`` to a Pydantic
-:class:`AgentAction` schema. Per 备忘 15, this router must NOT do work
-itself — it only translates natural-language input into a structured
-action; the engine loop handles execution.
+把 LangChain 的 ``with_structured_output`` 接到 Pydantic
+:class:`AgentAction` schema 上。Per 备忘 15，本路由器不能自己干
+活 —— 它只把自然语言输入翻译成结构化 action；执行由引擎循环处理。
 
-The constructor takes :class:`writer.config.Settings` and builds its own
-LLM via :func:`writer.llm.get_llm`. Tests inject a fake ``llm`` via the
-secondary constructor argument ``llm=...``.
+构造函数接受 :class:`writer.config.Settings` 并通过
+:func:`writer.llm.get_llm` 构建自己的 LLM。测试通过次级构造函数
+参数 ``llm=...`` 注入 fake LLM。
 
-The prompt template lives in :mod:`writer.prompts.router`; the legacy
-``COMMAND_AGENT_PROMPT`` name is preserved as a re-export so existing
-callers and tests can keep using it.
+prompt 模板位于 :mod:`writer.prompts.router`；旧的 ``COMMAND_AGENT_PROMPT``
+名字保留为 re-export，让现有调用方和测试可以继续使用。
 
-Agent dispatch (per ``fea-agent-mirror``):
-When constructed with ``agent_registry=...`` the LLM system prompt
-includes a "可用 agent" section listing each agent's ``{name, description,
-genre}`` from :meth:`AgentRegistry.descriptions`. The LLM is then free
-to set ``target_agent`` on the returned :class:`AgentAction`, in which
-case the engine loop will dispatch to the chosen agent (see
-:mod:`writer.engine.loop` ``case "agent"``). The rule-based router
-ignores ``agent_registry`` — rules operate on slash commands only.
+Agent 派发（per ``fea-agent-mirror``）：
+用 ``agent_registry=...`` 构造时，LLM system prompt 会包含一段
+"可用 agent" 列表，来自 :meth:`AgentRegistry.descriptions` 的
+``{name, description, genre}``。LLM 可以在返回的 :class:`AgentAction`
+上设置 ``target_agent``，此时引擎循环会派发给所选 agent
+（参见 :mod:`writer.engine.loop` 的 ``case "agent"``）。基于规则的
+路由器忽略 ``agent_registry`` —— 规则只处理斜杠命令。
 """
 
 from __future__ import annotations
@@ -46,16 +43,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# Backward-compatible alias — earlier code imported COMMAND_AGENT_PROMPT
-# from this module. The template now lives in writer.prompts.router.
+# 向后兼容别名 —— 旧代码从本模块导入 COMMAND_AGENT_PROMPT。
+# 模板现在位于 writer.prompts.router。
 COMMAND_AGENT_PROMPT = COMMAND_AGENT_TEMPLATE
 
 
 def _render_agent_section(descriptions: list[dict[str, str]]) -> str:
-    """Render the ``可用 agent`` section for the router system prompt.
+    """渲染路由器 system prompt 中的 ``可用 agent`` 段落。
 
-    Returns an empty string when ``descriptions`` is empty so the
-    section can be unconditionally appended.
+    ``descriptions`` 为空时返回空字符串，便于无条件追加该段落。
     """
 
     if not descriptions:
@@ -85,17 +81,16 @@ def _render_agent_section(descriptions: list[dict[str, str]]) -> str:
 
 
 class LlmIntentRouter(IntentRouter):
-    """Translate natural-language input to :class:`AgentAction` via an LLM.
+    """通过 LLM 把自然语言输入翻译为 :class:`AgentAction`。
 
-    Construct via:
-    - ``LlmIntentRouter(settings)`` — production wiring; uses :func:`get_llm`.
-    - ``LlmIntentRouter(settings, llm=fake_chat_model)`` — test injection.
-    - ``LlmIntentRouter(settings, chain=fake_runnable)`` — test injection
-      bypassing LangChain's ``with_structured_output`` (which some fakes
-      do not implement).
-    - ``LlmIntentRouter(settings, agent_registry=registry)`` — enables
-      agent dispatch in the system prompt; the LLM may set
-      ``target_agent`` to delegate to a registered agent.
+    构造方式：
+    - ``LlmIntentRouter(settings)`` — 生产装配，使用 :func:`get_llm`。
+    - ``LlmIntentRouter(settings, llm=fake_chat_model)`` — 测试注入。
+    - ``LlmIntentRouter(settings, chain=fake_runnable)`` — 测试注入，
+      绕过 LangChain 的 ``with_structured_output``（某些 fake 不实现）。
+    - ``LlmIntentRouter(settings, agent_registry=registry)`` — 在 system
+      prompt 中启用 agent 派发；LLM 可设置 ``target_agent`` 委托给
+      已注册 agent。
     """
 
     def __init__(
@@ -109,9 +104,8 @@ class LlmIntentRouter(IntentRouter):
         self._chain: Runnable | None = None
         self._llm: BaseChatModel | None = None
         self._use_json_prompt = False
-        # ``_agent_descriptions`` is the frozen LLM-facing view of the
-        # registry; computed once at construction so each ``route()``
-        # call doesn't re-enumerate the registry.
+        # ``_agent_descriptions`` 是 registry 面向 LLM 的冻结视图；
+        # 在构造时计算一次，避免每次 ``route()`` 调用都重新枚举 registry。
         self._agent_descriptions: list[dict[str, str]] = []
         if agent_registry is not None:
             self._agent_descriptions = list(agent_registry.descriptions())
@@ -125,7 +119,7 @@ class LlmIntentRouter(IntentRouter):
             self._use_json_prompt = True
             return
         structured_llm = llm.with_structured_output(AgentAction)  # type: ignore[arg-type]
-        # RunnableSequence.__or__ is dynamically typed; cast keeps mypy happy.
+        # RunnableSequence.__or__ 是动态类型的；cast 让 mypy 满意。
         self._chain = COMMAND_AGENT_PROMPT | structured_llm  # type: ignore[assignment,operator]
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -147,13 +141,11 @@ class LlmIntentRouter(IntentRouter):
             msg = "LlmIntentRouter has neither chain nor LLM"
             raise ValueError(msg)
 
-        # The native ``with_structured_output`` path does not let us
-        # splice extra messages into a pre-built ``PromptTemplate |
-        # structured_llm`` chain. So we fall back to formatting the
-        # template manually + appending the agent section + invoking
-        # the structured LLM directly. This duplicates the chain's
-        # behaviour but is the only way to add the section without
-        # rebuilding the chain.
+        # 原生 ``with_structured_output`` 路径不允许我们往预先构造好的
+        # ``PromptTemplate | structured_llm`` 链中拼接额外消息。
+        # 因此改为手动格式化模板 + 追加 agent section + 直接调用
+        # 结构化 LLM。这与链的行为重复，但这是新增段落而不重建链的
+        # 唯一办法。
         structured_llm = (
             self._chain.last
             if hasattr(self._chain, "last")
@@ -164,22 +156,20 @@ class LlmIntentRouter(IntentRouter):
         ).to_messages()
         messages = _with_agent_section(base_messages, agent_section)
         result: Any = structured_llm.invoke(messages)
-        # with_structured_output against a Pydantic class returns the
-        # model itself.
+        # 针对 Pydantic 类的 with_structured_output 直接返回模型本身。
         if isinstance(result, AgentAction):
             return _normalize_action(result)
-        # Defensive: some LangChain versions return a dict; coerce.
+        # 防御性：某些 LangChain 版本返回 dict；强制转换。
         return _normalize_action(AgentAction.model_validate(result))
 
 
 def _with_agent_section(
     base_messages: list, agent_section: str
 ) -> list:
-    """Return ``base_messages`` with the agent section appended to the
-    first system message.
+    """返回 ``base_messages`` 并把 agent section 追加到第一条 system 消息。
 
-    If no system message is present, prepends one. The section is
-    empty → ``base_messages`` is returned unchanged.
+    若不存在 system 消息，则在开头插入一条。section 为空时
+    直接返回 ``base_messages``。
     """
 
     if not agent_section:
@@ -191,28 +181,27 @@ def _with_agent_section(
             new_content = (message.content or "") + agent_section
             messages[index] = SystemMessage(content=new_content)
             return messages
-    # No system message → prepend a new one.
+    # 没有 system 消息 → 在开头插入一条。
     return [SystemMessage(content=agent_section), *messages]
 
 
 def _normalize_action(action: AgentAction) -> AgentAction:
-    """Fill deterministic fields that LLMs often omit but the engine needs.
+    """补齐 LLM 经常遗漏但引擎需要的确定性字段。
 
-    Also normalizes the new ``kind`` / ``target_agent`` shape (per
-    ``fea-agent-mirror``): when the LLM fills in ``target_agent``, force
-    ``kind="agent"`` and clear ``command`` so the engine's
-    ``case "agent"`` branch is the only path.
+    同时规范化 ``fea-agent-mirror`` 引入的 ``kind`` / ``target_agent``
+    形态：当 LLM 填了 ``target_agent`` 时，强制 ``kind="agent"`` 并清空
+    ``command``，让引擎的 ``case "agent"`` 分支成为唯一通路。
     """
 
     updates: dict[str, Any] = {}
 
-    # Agent dispatch: if the LLM picked an agent, force kind="agent"
-    # and clear command (the agent branch ignores command).
+    # Agent 派发：若 LLM 选择了 agent，强制 kind="agent" 并清空
+    # command（agent 分支忽略 command）。
     if action.target_agent:
         updates["kind"] = "agent"
         updates["command"] = None
     elif action.kind is None:
-        # Defensive: schema default is "command"; only set when missing.
+        # 防御性：schema 默认是 "command"；只在缺失时设置。
         updates["kind"] = "command"
 
     if action.workflow == "write_chapter":

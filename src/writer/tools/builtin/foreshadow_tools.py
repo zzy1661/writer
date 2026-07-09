@@ -1,15 +1,14 @@
-"""Structured foreshadow lookup backed by ``<project_root>/伏笔.yaml``.
+"""由 ``<project_root>/伏笔.yaml`` 支持的结构化伏笔查询。
 
-Replaces the previous RAG-based :class:`ForeshadowQuery` (per
-``chg-remove-rag``): instead of fuzzy vector recall over the project
-tree, this tool reads a deterministic YAML ledger and runs an in-memory
-filter with structured criteria. All filters combine with AND.
+取代了之前的基于 RAG 的 :class:`ForeshadowQuery`（per ``chg-remove-rag``）：
+不再对项目树做模糊向量召回，而是读取一份确定性的 YAML ledger，
+在内存中用结构化条件过滤。所有过滤条件以 AND 组合。
 
-Layering:
-* This module wires the tool layer.
-* The actual ledger IO and filter logic live in
-  :mod:`writer.tools.builtin.foreshadow_ledger` so future tests / tools
-  can import them without pulling in the tool Protocol.
+分层：
+* 本模块负责工具层接线。
+* 实际的 ledger IO 与过滤逻辑位于
+  :mod:`writer.tools.builtin.foreshadow_ledger`，让未来的测试 / 工具
+  可以在不引入 tool Protocol 的情况下 import 它们。
 """
 
 from __future__ import annotations
@@ -26,20 +25,18 @@ from writer.tools.protocol import ToolResult
 if TYPE_CHECKING:
     from writer.tools.runtime import ToolRuntime
 
-#: Sentinel project_root used by :func:`writer.engine.deps.production_deps`
-#: when no project is bound (S0). Mirrored here to avoid leaking the engine
-#: constant into a path-free tool's import graph.
+#: :func:`writer.engine.deps.production_deps` 在未绑定项目（S0）时
+#: 使用的哨兵 project_root。在此处镜像一份，避免把 engine 常量泄漏
+#: 到无路径工具的 import 图中。
 _NO_PROJECT_ROOT = "/__no_project__"
 
 
 class ForeshadowSearch:
-    """Query the project ``伏笔.yaml`` ledger with structured filters.
+    """用结构化过滤条件查询项目 ``伏笔.yaml`` ledger。
 
-    The tool is **path-free**: it locates the ledger at
-    ``<runtime.project_root>/伏笔.yaml`` automatically. When
-    ``runtime.project_root`` is the S0 sentinel, the tool returns a
-    friendly result instead of attempting to read a non-existent
-    directory.
+    工具是**无路径**的：它自动在 ``<runtime.project_root>/伏笔.yaml``
+    定位 ledger。当 ``runtime.project_root`` 为 S0 哨兵时，工具返回
+    友好的结果而非尝试读取不存在的目录。
     """
 
     name = "foreshadow_search"
@@ -58,10 +55,9 @@ class ForeshadowSearch:
         chapter_range: tuple[int, int] | None = None,
         keyword: str | None = None,
     ) -> ToolResult:
-        # S0 path: the engine created a ToolRuntime with a sentinel
-        # project root, but the ledger obviously doesn't exist there.
-        # Return a friendly error result rather than letting the
-        # FileNotFoundError bubble out as an aborted turn.
+        # S0 路径：引擎用哨兵 project_root 创建了 ToolRuntime，
+        # 但 ledger 显然不在那里。返回友好的错误结果，而不是让
+        # FileNotFoundError 冒泡成 aborted 轮次。
         if str(runtime.project_root) == _NO_PROJECT_ROOT:
             return ToolResult(
                 output="未绑定项目，无法查询伏笔 ledger。",

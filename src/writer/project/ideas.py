@@ -1,15 +1,14 @@
-"""Load creative materials from a project's ``创意/`` directory."""
+"""从项目的 ``创意/`` 目录加载创作素材。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
 
-# Re-export the outline system prompt from the centralised prompts
-# module so callers that previously did
-# ``from writer.project.ideas import OUTLINE_SYSTEM_PROMPT`` keep
-# working without modification. The local file stays focused on
-# project-layer concerns (filesystem layout, IdeasContext assembly).
+# 从集中式 prompts 模块 re-export 大纲 system prompt，
+# 让之前用 ``from writer.project.ideas import OUTLINE_SYSTEM_PROMPT``
+# 的调用方可以保持工作而无需修改。本地文件专注于项目层关注点
+# （文件系统布局、IdeasContext 组装）。
 from writer.prompts.agents import OUTLINE_TEMPLATE_STORY
 
 CORE_IDEA_FILENAME = "核心创意.md"
@@ -19,7 +18,7 @@ _TEXT_SUFFIXES = frozenset({".md", ".txt"})
 
 @dataclass(frozen=True)
 class IdeasContext:
-    """Creative context assembled from ``创意/`` for outline generation."""
+    """从 ``创意/`` 为大纲生成组装的创作上下文。"""
 
     core_idea: str | None = None
     supplementary_docs: tuple[tuple[str, str], ...] = ()
@@ -30,7 +29,7 @@ class IdeasContext:
 
 
 def load_ideas_context(project_root: Path | None) -> IdeasContext:
-    """Read ``核心创意.md`` and other text docs under ``创意/``."""
+    """读取 ``创意/`` 下的 ``核心创意.md`` 与其他文本文件。"""
 
     if project_root is None:
         return IdeasContext()
@@ -62,7 +61,7 @@ def load_ideas_context(project_root: Path | None) -> IdeasContext:
 
 
 def build_outline_user_message(*, user_instruction: str, ideas: IdeasContext) -> str:
-    """Build the HumanMessage body for outline LLM calls."""
+    """为大纲 LLM 调用构造 HumanMessage body。"""
 
     sections: list[str] = []
 

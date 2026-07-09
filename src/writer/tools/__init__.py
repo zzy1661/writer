@@ -1,15 +1,14 @@
-"""Tool layer: registry, runtime, built-in tools, and LangChain bridge.
+"""Tool 层：registry、runtime、内置工具与 LangChain 桥接。
 
-Public entry points:
+公开入口：
 
-* ``ToolRuntime`` / ``ToolRegistry`` / ``Tool`` / ``ToolResult`` — core
-  data types consumed by the engine and (later) LangGraph.
-* Built-in tool classes (``SafeReadFile`` etc.) — exposed for direct
-  construction and testing.
-* ``built_tool_registry()`` — registers every built-in tool; this is the
-  default wiring used by tests and (eventually) the engine session.
-* ``to_langchain_tools`` — adapter that exposes the same tools to the
-  LangGraph ``ToolNode``.
+* ``ToolRuntime`` / ``ToolRegistry`` / ``Tool`` / ``ToolResult`` —
+  引擎和（未来）LangGraph 消费的核心数据类型。
+* 内置工具类（``SafeReadFile`` 等）—— 暴露给直接构造和测试。
+* ``built_tool_registry()`` —— 注册所有内置工具；这是测试和
+  （最终）engine session 使用的默认装配。
+* ``to_langchain_tools`` —— 把同一套工具暴露给 LangGraph ``ToolNode``
+  的适配器。
 """
 
 from writer.tools import builtin

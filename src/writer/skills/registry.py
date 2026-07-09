@@ -1,23 +1,21 @@
-"""Directive registry — lookup table for command-bound directives.
+"""Directive registry —— 命令绑定 directive 的查找表。
 
-Renamed from ``SkillRegistry`` per chg-markdown-skills Decision 3.
-The internal dict value type changed from ``Skill`` to ``SkillDirective``;
-the public surface (``get`` / ``commands`` / ``help_entries`` /
-``state_matrix``) is shape-compatible with the prior registry so
-downstream callers (REPL help / tab completion / state-machine gating)
-do not need to change their call sites — only the type names.
+按 chg-markdown-skills Decision 3 从 ``SkillRegistry`` 更名而来。
+内部 dict 的 value 类型从 ``Skill`` 改为 ``SkillDirective``；公开 API
+（``get`` / ``commands`` / ``help_entries`` / ``state_matrix``）
+形状与旧 registry 兼容，下游调用方（REPL 帮助 / Tab 补全 / 状态机门控）
+不需要改动调用点 —— 只是类型名变了。
 
-Discovery happens in three layers (Replace semantics — later wins on
-command collision):
+发现分三层（Replace 语义 —— 命令冲突时后者覆盖前者）：
 
 1. :func:`writer.skills.directive_discovery.discover_shipped_directives`
-   — the 4 built-in directives in ``writer/skills/_shipped/``.
-2. :func:`writer.skills.directive_discovery.discover_directives` — only
-   when ``project_root`` is provided.
-3. :func:`discover_entry_point_directives` — Python entry-point plugins
-   under ``[project.entry-points."writer.directives"]``.
+   —— ``writer/skills/_shipped/`` 下的 4 个内置 directives。
+2. :func:`writer.skills.directive_discovery.discover_directives` ——
+   仅在提供 ``project_root`` 时启用。
+3. :func:`discover_entry_point_directives` —— Python entry-point
+   插件，位于 ``[project.entry-points."writer.directives"]``。
 
-See :func:`built_directive_registry` for the composition.
+见 :func:`built_directive_registry` 的组装方式。
 """
 
 from __future__ import annotations
@@ -39,16 +37,15 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-#: Entry-point group name for third-party directive plugins.
+#: 第三方 directive 插件的 entry-point 组名。
 ENTRY_POINT_GROUP = "writer.directives"
 
 
 def _validate(directive: SkillDirective) -> None:
-    """Enforce the directive metadata contract at registration time.
+    """在注册时强制 directive 元数据契约。
 
-    Catching problems early keeps a typo (``description = 123``) from
-    surviving until the first ``/帮助`` call, where it would surface
-    as a confusing render glitch.
+    及早捕获问题，避免把笔误（``description = 123``）一路放到首次
+    ``/帮助`` 调用 —— 那里会以令人困惑的渲染异常暴露。
     """
 
     if not isinstance(directive.command, str) or not directive.command.startswith("/"):
@@ -72,17 +69,15 @@ def _validate(directive: SkillDirective) -> None:
 
 
 class DirectiveRegistry:
-    """Lookup table for command-bound directives.
+    """命令绑定 directive 的查找表。
 
-    Duplicate commands are resolved with **last-write-wins** semantics:
-    when the same ``command`` appears more than once across layers
-    (shipped / project / entry-point), the later layer replaces the
-    earlier one. This Replace semantics lets users override any shipped
-    directive by adding a same-named project directive.
+    重复命令按 **last-write-wins** 语义解决：当相同的 ``command`` 跨层
+    （shipped / project / entry-point）出现多次时，后者替换前者。
+    这种 Replace 语义让用户可以通过添加同名 project directive
+    来覆盖任何 shipped directive。
 
-    Per-directive validation still raises :class:`SkillError` (via
-    :func:`_validate`) — a malformed directive is always a hard error
-    and will abort registry construction.
+    逐 directive 校验仍会抛 :class:`SkillError`（通过 :func:`_validate`）——
+    格式错乱的 directive 始终是硬错误，会中止 registry 构造。
     """
 
     def __init__(
@@ -110,26 +105,25 @@ class DirectiveRegistry:
         return self._by_command.get(command)
 
     def commands(self) -> list[str]:
-        """Return sorted slash commands (stable across runs)."""
+        """返回排序后的斜杠命令（跨运行稳定）。"""
 
         return sorted(self._by_command)
 
     def help_entries(self) -> list[tuple[str, str]]:
-        """Return ``[(command, description), …]`` in registry order.
+        """按 registry 顺序返回 ``[(command, description), …]``。
 
-        Sorted by :meth:`commands` so ``/帮助`` rendering stays stable
-        regardless of insertion order.
+        按 :meth:`commands` 排序，让 ``/帮助`` 渲染不受插入顺序
+        影响。
         """
 
         return [(cmd, self._by_command[cmd].description) for cmd in self.commands()]
 
     def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
-        """Return ``{command: requires_states}`` for every registered directive.
+        """返回每个已注册 directive 的 ``{command: requires_states}``。
 
-        Powers :func:`writer.project.validate_command_available` so the
-        state matrix for directive-driven commands is fully derived from
-        directive metadata — adding a directive updates its availability
-        map automatically.
+        为 :func:`writer.project.validate_command_available` 提供数据，
+        让 directive 命令的状态矩阵完全由 directive 元数据派生 —— 新增
+        directive 时其可用性映射自动接入。
         """
 
         return {cmd: self._by_command[cmd].requires_states for cmd in self.commands()}
@@ -139,22 +133,21 @@ class DirectiveRegistry:
     def get_body_with_references(
         self, command: str
     ) -> tuple[str, list[tuple[str, str]]] | None:
-        """Return ``(body, resolved_references)`` for ``command``.
+        """返回 ``command`` 的 ``(body, resolved_references)``。
 
-        ``resolved_references`` is the list of ``(relpath, content)``
-        pairs matched by ``@reference path`` mentions in the body, in
-        the order they appear. Returns ``None`` if the command is not
-        registered.
+        ``resolved_references`` 是 body 中 ``@reference path`` 提及
+        所匹配的 ``(relpath, content)`` 对列表，按出现顺序。若命令
+        未注册则返回 ``None``。
 
-        Imported lazily to avoid a circular import between registry and
-        directive_discovery at module load time.
+        延迟 import 以避免模块加载时 registry 与 directive_discovery
+        之间的循环 import。
         """
 
         directive = self.get(command)
         if directive is None:
             return None
-        # Local import: directive_discovery imports from this module's
-        # level, so we resolve references at call time to avoid the cycle.
+        # 本地 import：directive_discovery 从本模块层 import，
+        # 所以我们在调用时再解析引用，避免循环。
         from writer.skills.directive_discovery import resolve_references  # noqa: PLC0415
 
         return directive.body, resolve_references(directive.body, directive.references)
@@ -170,24 +163,22 @@ __all__ = [
 def built_directive_registry(
     project_root: Path | None = None,
 ) -> DirectiveRegistry:
-    """Built-in directives + project-level directives + entry-point directives.
+    """内置 directives + 项目级 directives + entry-point directives。
 
-    Layers (Replace semantics — later wins on command collision):
+    分层（Replace 语义 —— 命令冲突时后者覆盖前者）：
 
-    1. :func:`discover_shipped_directives` — the 4 shipped directives.
-    2. :func:`discover_directives(project_root)` — only when
-       ``project_root`` is provided.
-    3. :func:`discover_entry_point_directives` — Python entry-point
-       plugins.
+    1. :func:`discover_shipped_directives` —— 4 个内置 directives。
+    2. :func:`discover_directives(project_root)` —— 仅当提供
+       ``project_root`` 时启用。
+    3. :func:`discover_entry_point_directives` —— Python entry-point
+       插件。
 
-    The ``project_root=None`` path preserves the legacy behavior (no
-    project layer; back-compat for tests and callers that do not have
-    a project bound).
+    ``project_root=None`` 路径保留既有行为（无项目层；为测试和未绑定
+    项目的调用方保留兼容性）。
 
-    The function never raises for missing project skills (the loader
-    swallows per-file errors as warnings) and never raises for missing
-    entry-point plugins. A truly empty registry (no built-ins, no
-    project, no plugins) is still valid.
+    本函数从不为缺失的项目 skills 抛异常（loader 把单文件错误吞为
+    warning），从不为缺失的 entry-point 插件抛异常。真正的空 registry
+    （无内置、无项目、无插件）依然合法。
     """
 
     items: list[SkillDirective] = list(discover_shipped_directives())
@@ -200,8 +191,7 @@ def built_directive_registry(
     items.extend(discover_entry_point_directives())
 
     if len(items) == 0:
-        # No built-ins AND no project AND no plugins. This should not
-        # happen in production (the shipped layer always provides 4),
-        # but we tolerate it for tests + bootstrap.
+        # 无内置 AND 无项目 AND 无插件。生产中不应发生（shipped 层
+        # 总会提供 4 个），但我们为测试 + bootstrap 容忍这种情况。
         return DirectiveRegistry()
     return DirectiveRegistry(directives=items)

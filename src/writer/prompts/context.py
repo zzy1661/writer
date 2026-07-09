@@ -1,9 +1,8 @@
-"""Context packing for long-form chapter workflows.
+"""长篇章节工作流的上下文拼装。
 
-The workflow layer asks this module for a ready-to-use ``ContextPack`` and
-does not perform retrieval itself. That keeps context assembly replaceable:
-the current MVP uses local files and project RAG, while future versions can
-swap in richer memory stores behind the same function.
+工作流层向本模块请求现成的 ``ContextPack``，自身不执行检索。
+这让上下文组装保持可替换：当前 MVP 使用本地文件拼装，
+未来版本可以在同一函数背后接入更丰富的记忆存储。
 """
 
 from __future__ import annotations
@@ -13,15 +12,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-try:  # pragma: no cover - exercised indirectly when tiktoken is installed
+try:  # pragma: no cover - 仅当安装了 tiktoken 时才会间接触发
     import tiktoken
-except ImportError:  # pragma: no cover - fallback for minimal environments
+except ImportError:  # pragma: no cover - 极简环境的回退
     tiktoken = None  # type: ignore[assignment]
 
 
 @dataclass(frozen=True)
 class ContextPack:
-    """Layered prompt material for a chapter-level task."""
+    """章节级任务的分层 prompt 素材。"""
 
     system_block: str
     canon_block: str
@@ -37,7 +36,7 @@ def prep_context(
     project_root: Path | None,
     max_tokens: int = 8_000,
 ) -> ContextPack:
-    """Build and trim a ``ContextPack`` for ``chapter_id`` and ``task``."""
+    """为 ``chapter_id`` 和 ``task`` 构建并裁剪 ``ContextPack``。"""
 
     system_block = (
         "你是长篇小说写作工作流中的章节写作节点。必须遵守正典资料、延续前文因果，"
@@ -58,10 +57,10 @@ def prep_context(
 
 
 def trim_to_budget(pack: ContextPack, *, max_tokens: int = 8_000) -> ContextPack:
-    """Trim context blocks deterministically and attach token audit data.
+    """按确定策略裁剪上下文块并附带 token 审计数据。
 
-    ``system_block`` and ``task_block`` are kept first. ``canon_block`` is
-    preferred over history because正典约束 beats recap detail when budget is tight.
+    ``system_block`` 与 ``task_block`` 优先保留。预算紧张时，
+    偏好保留 ``canon_block`` 而非 history_block —— 正典约束胜过复述细节。
     """
 
     remaining = max(max_tokens, 0)
@@ -86,7 +85,7 @@ def trim_to_budget(pack: ContextPack, *, max_tokens: int = 8_000) -> ContextPack
 
 
 def count_tokens(text: str, *, model: str = "gpt-4o-mini") -> int:
-    """Count tokens with ``tiktoken`` and fall back to a stable estimate."""
+    """使用 ``tiktoken`` 统计 token，缺失时回退到稳定的估算。"""
 
     if not text:
         return 0
@@ -121,15 +120,14 @@ def _build_canon_block(project_root: Path | None, *, query: str) -> str:
     if project_root is None:
         return "未绑定项目，暂无正典资料。"
 
-    # Per chg-remove-rag: pure file composition, no RAG. Layers are:
+    # Per chg-remove-rag：纯文件拼装，无 RAG。分层为：
     #   1. outline/* 全文（小文件，整篇读）
     #   2. characters/* 全文（小文件，整篇读）
     #   3. chapter_summaries.json 切片（按 chapter_id 前后 N=2 章）
     #   4. 最近一章 manuscript/chapter-XXX.md 全文（"上一章" 笔触锚点）
-    # The `query` parameter is kept in the signature for back-compat with
-    # `prep_context` callers but is no longer used: structured layers
-    # give us the relevant content without needing an embedder.
-    del query  # formerly fed into ProjectRagIndex(...).query(query, ...)
+    # ``query`` 参数仍保留在签名中以兼容 ``prep_context`` 调用方，
+    # 但已不再使用：结构化分层在不依赖 embedder 的情况下也能给出相关素材。
+    del query  # 之前会传入 ProjectRagIndex(...).query(query, ...)
 
     parts: list[str] = []
     for relative in ("outline", "characters"):
@@ -149,11 +147,11 @@ def _build_canon_block(project_root: Path | None, *, query: str) -> str:
 
 
 def _build_summary_block(project_root: Path) -> str:
-    """Return the chapter-summaries slice for the canon block.
+    """为 canon block 返回章节摘要切片。
 
-    Reads ``manuscript/chapter_summaries.json`` and emits a small
-    header + the last few entries (capped at 4 to keep the block small).
-    Falls back to "暂无章节摘要" on missing / unreadable file.
+    读取 ``manuscript/chapter_summaries.json`` 并产出小段头部 +
+    最近若干条目（最多 4 条以保持块体积）。文件缺失 / 不可读时
+    回退到「暂无章节摘要」。
     """
 
     summary_file = project_root / "manuscript" / "chapter_summaries.json"
@@ -167,11 +165,10 @@ def _build_summary_block(project_root: Path) -> str:
 
 
 def _read_last_chapter(project_root: Path) -> str:
-    """Return the most recent ``manuscript/chapter-*.md`` as a canon anchor.
+    """将最近的 ``manuscript/chapter-*.md`` 作为 canon anchor 返回。
 
-    Returns "" when no manuscript files exist. The file is prefixed with
-    ``[last_chapter]`` so downstream consumers can see at a glance where
-    the content came from.
+    无 manuscript 文件时返回 ""。文件以 ``[last_chapter]`` 前缀，
+    让下游消费者一眼能看出素材来源。
     """
 
     manuscript = project_root / "manuscript"

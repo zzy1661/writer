@@ -52,9 +52,8 @@ console = Console()
 EXIT_COMMANDS = {"/退出", "/quit", "/q", "exit", "quit"}
 HELP_COMMANDS = {"/帮助", "/help", "help"}
 
-# Static REPL commands that aren't owned by a Skill. /大纲, /目录 used
-# to live here too — they are now served by the DirectiveRegistry (see
-# ``build_repl_commands``).
+# 不属于任何 Skill 的静态 REPL 命令。``/大纲``、``/目录`` 之前也
+# 放在这里 —— 现在由 DirectiveRegistry 提供（见 ``build_repl_commands``）。
 STATIC_REPL_COMMANDS = [
     ("/init", "初始化小说项目"),
     ("/创作", "创作指定章节或下一章"),
@@ -65,20 +64,19 @@ STATIC_REPL_COMMANDS = [
     ("/退出", "退出 writer"),
 ]
 
-# ``REPL_COMMANDS`` is kept as a module-level constant for backwards
-# compatibility with existing tests / completion behaviour. Derived from
-# the default skill registry at import time so the list still includes
-# every currently-registered Skill command.
+# ``REPL_COMMANDS`` 作为模块级常量保留，以兼容现有测试 / 补全行为。
+# 在 import 时从默认 skill registry 派生，因此列表仍包含当前所有
+# 已注册的 Skill 命令。
 REPL_COMMANDS: list[tuple[str, str]] = list(STATIC_REPL_COMMANDS) + built_directive_registry().help_entries()
 
 
 def build_repl_commands(directive_registry: DirectiveRegistry) -> list[tuple[str, str]]:
-    """Return the full ``/帮助`` table: static commands + skills.
+    """返回 ``/帮助`` 完整表格：静态命令 + skills。
 
-    Static commands (init / 状态 / 帮助 / 退出, plus the not-yet-Skill
-    /创作 /审核 / 查看 / 搜索 / 字数统计) come first so the help table
-    stays stable across Skill additions. Skills follow in alphabetical
-    order (driven by :meth:`DirectiveRegistry.commands`).
+    静态命令（init / 状态 / 帮助 / 退出，以及尚未 Skill 化的
+    /创作 /审核 / 查看 / 搜索 / 字数统计）放在前面，让帮助表
+    在 Skill 增加时仍保持稳定。Skills 按字母顺序紧随其后
+    （由 :meth:`DirectiveRegistry.commands` 驱动）。
     """
 
     return list(STATIC_REPL_COMMANDS) + directive_registry.help_entries()
@@ -104,7 +102,7 @@ def version_callback(value: bool) -> None:
 
 
 def print_welcome() -> None:
-    """Render the minimal REPL landing page."""
+    """渲染极简的 REPL 落地页。"""
     console.print(
         Panel.fit(
             f"[bold cyan]Writer Agent[/bold cyan] [dim]v{__version__}[/dim]\n"
@@ -117,11 +115,10 @@ def print_welcome() -> None:
 
 
 def print_repl_help(directive_registry: DirectiveRegistry | None = None) -> None:
-    """Render the first-pass command list used inside the REPL.
+    """渲染 REPL 内首次使用的命令列表。
 
-    When ``directive_registry`` is provided, draws the help entries from it
-    so a plugin that registers a new skill is automatically reflected
-    in ``/帮助`` without restarting the process.
+    提供 ``directive_registry`` 时从它拉取帮助条目，以便注册了新 skill
+    的插件无需重启进程即可反映在 ``/帮助`` 中。
     """
 
     if directive_registry is None:
@@ -137,9 +134,9 @@ def print_repl_help(directive_registry: DirectiveRegistry | None = None) -> None
 
 
 def handle_repl_input(line: str, session: EngineSession) -> bool:
-    """Handle one REPL input line.
+    """处理一行 REPL 输入。
 
-    Returns False when the loop should stop.
+    循环应当停止时返回 False。
     """
     text = line.strip()
     if not text:
@@ -176,13 +173,13 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         return True
 
     if text.startswith("/init ") and ("--" in text or " -" in text):
-        # ``/init`` alone (no args) falls through to engine dispatch; only
-        # flag-form inputs (e.g. ``/init --name 双生 --genre 言情``) take
-        # this code path. Mirrors Typer subcommand behaviour.
-        # Parse argv-style flags after the command for the REPL form.
-        # Supported flags mirror the Typer subcommand: --name, --dir/-d,
-        # --genre/-g, --force. Missing --genre falls through to the same
-        # Typer-style prompt (4-option chooser → free-text follow-up).
+        # ``/init`` 单用（无参数）走 engine 派发；只有 flag 形式
+        # （例如 ``/init --name 双生 --genre 言情``）走本代码路径，
+        # 与 Typer 子命令行为一致。
+        # 按 REPL 形式解析命令后的 argv 风格 flag。
+        # 支持的 flag 与 Typer 子命令对齐：--name, --dir/-d,
+        # --genre/-g, --force。缺失 --genre 时走相同的 Typer 风格
+        # 提示（4 选 1 → 自由文本后续输入）。
         from writer.cli.main import _parse_repl_init_argv  # local import: forward-ref cycle
 
         try:
@@ -192,8 +189,8 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
             return True
 
         if genre is None:
-            # Interactive prompt — show the canonical labels as a hint;
-            # actual prompt is free-text per project decision.
+            # 交互式提示 —— 把规范标签作为提示展示；
+            # 实际提示按项目决定为自由文本。
             console.print(
                 f"可用题材（输入后回车；其它值视为 other）：{', '.join(_init_prompt_genre_labels())}"
             )
@@ -212,12 +209,12 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         except typer.Exit:
             return True
 
-        # Bind the freshly-created project to the live session so subsequent
-        # engine turns can find the right RAG files / Agent.
+        # 把刚创建的项目绑定到当前 session，让后续 engine 轮次能找到
+        # 正确的 RAG 文件 / Agent。
         try:
             session.set_project_root(directory / name)
             session.refresh_project_genre()
-        except Exception:  # noqa: BLE001 — set_project_root is path-tolerant
+        except Exception:  # noqa: BLE001 — set_project_root 对路径宽容
             pass
         console.print(f"[dim]session.project_genre={resolved_genre}[/dim]")
         return True
@@ -233,12 +230,11 @@ async def _run_engine(
     session: EngineSession,
     console: Console,
 ) -> None:
-    """Drive the agent engine for one natural-language turn.
+    """为单轮自然语言驱动 agent engine。
 
-    Uses ``session.deps`` (built once at REPL start) and
-    ``session.session_id`` (frozen across turns). If the previous turn
-    yielded an ``Interrupt`` event, the pending prompt is composed with
-    the user's input before being fed to the engine.
+    使用 ``session.deps``（REPL 启动时一次性构建）和
+    ``session.session_id``（跨轮次冻结）。若上一轮产出了 ``Interrupt``
+    事件，则把待回答的 prompt 与用户输入拼好后喂给引擎。
     """
     session.refresh_project_state()
     composed_input = compose_pending_input(user_input, session.pending_interrupt)
@@ -252,8 +248,8 @@ async def _run_engine(
     async for event in run_engine(ctx, session.deps):
         match event:
             case TextChunk(text=chunk):
-                # engine output is plain text — disable Rich markup so
-                # tokens like "[engine]" stay literal in the REPL
+                # engine 输出是纯文本 —— 关闭 Rich markup，让
+                # 类似 "[engine]" 这样的 token 在 REPL 中保持字面值。
                 console.print(chunk, end="", markup=False, highlight=False)
             case ActionEvent(action=a):
                 console.print(f"[dim]→ {a.action_type}[/dim]")
@@ -262,7 +258,7 @@ async def _run_engine(
             case ToolResult(name=name, output=output):
                 console.print(f"[green]✓ {name}: {output}[/green]")
             case Interrupt() as interrupt:
-                # Show prompt and stash for next turn
+                # 展示 prompt 并暂存到下一轮
                 console.print(f"[cyan]? {interrupt.prompt}[/cyan]")
                 session.set_pending_interrupt(interrupt)
             case Done(reason=r, payload=payload):
@@ -271,38 +267,33 @@ async def _run_engine(
                 else:
                     session.refresh_project_state()
                 console.print(f"[green]✓ {r}[/green]\n")
-                # Per arch-optimizer M5 (2026-07-07): surface the
-                # ``project_state`` from the aborted payload so the user
-                # knows *why* the engine rejected the command (e.g. "S1
-                # 状态不允许 /创作"). Without this, an aborted Done
-                # leaves the user guessing.
+                # Per arch-optimizer M5（2026-07-07）：从 aborted payload
+                # 中暴露 ``project_state``，让用户知道引擎*为何*拒绝了
+                # 命令（例如「S1 状态不允许 /创作」）。没有它时，
+                # 一次 aborted Done 只会让用户一头雾水。
                 if r == "aborted" and payload is not None and "project_state" in payload:
                     state_value = str(payload["project_state"])
-                    # STATE_DESCRIPTIONS is keyed on ProjectState enum;
-                    # payload carries the str form. Try the enum lookup
-                    # first, fall back to raw value if the string is
-                    # not a known ProjectState member.
+                    # STATE_DESCRIPTIONS 以 ProjectState enum 为键；
+                    # payload 携带字符串形式。先尝试 enum 查找，
+                    # 字符串不是已知 ProjectState 成员时回退到原值。
                     try:
                         description = STATE_DESCRIPTIONS[ProjectState(state_value)]
                     except (KeyError, ValueError):
                         description = ""
                     label = f"{state_value}（{description}）" if description else state_value
                     console.print(f"[yellow]当前状态: {label}[/yellow]")
-                # PR3: a workflow that returned status="pending" (e.g.
-                # review_chapter with decision=needs_rewrite) surfaces
-                # as aborted with a decision metric. Tell the user
-                # what the workflow decided so they know to re-run
-                # /创作 with a clearer task.
+                # PR3：当工作流返回 status="pending"（例如带
+                # decision=needs_rewrite 的 review_chapter）会以 aborted
+                # 形式呈现并附带 decision 指标。告诉用户工作流判定了
+                # 什么，以便他们知道要用更清晰的任务重新跑 /创作。
                 if r == "aborted" and payload is not None and "decision" in payload:
                     decision = str(payload["decision"])
                     console.print(f"[yellow]工作流判定: {decision}[/yellow]")
-                # Per LLM tool-loop addition (2026-07-08): when the LLM
-                # tool loop hits its ``MAX_LOOP_STEPS`` budget the engine
-                # yields ``Done(tool_loop_completed)`` with a payload
-                # carrying how many calls ran and the last tool output.
-                # Surface those so the user knows the loop exhausted its
-                # budget and has the data they need to ask a narrower
-                # follow-up.
+                # Per LLM 工具循环增补（2026-07-08）：当 LLM 工具循环
+                # 触及 ``MAX_LOOP_STEPS`` 预算时，引擎会产出
+                # ``Done(tool_loop_completed)``，payload 中包含调用次数
+                # 与最后一次工具输出。把它们暴露出来，让用户知道循环已
+                # 耗尽预算，并掌握后续提出更窄追问所需的数据。
                 if r == "tool_loop_completed" and payload is not None:
                     calls = payload.get("tool_calls_made", 0)
                     last = str(payload.get("last_output", ""))
@@ -310,12 +301,11 @@ async def _run_engine(
                     console.print(
                         f"[dim]LLM 工具循环已结束（{calls} 次调用）；最近结果: {tail}[/dim]"
                     )
-                # Per real-writing-pipeline PR1 (2026-07-09): when a
-                # workflow returns ``WorkflowResult(status="completed")``
-                # the engine emits ``Done(reason="workflow_completed")``
-                # with artifacts + metrics in the payload. Render them
-                # so the user sees what the workflow produced without
-                # re-running it.
+                # Per real-writing-pipeline PR1（2026-07-09）：当工作流
+                # 返回 ``WorkflowResult(status="completed")`` 时，引擎
+                # 产出 ``Done(reason="workflow_completed")``，payload
+                # 中带有 artifacts + metrics。把它们渲染出来，让用户
+                # 看到工作流产出了什么而无需重跑。
                 if r == "workflow_completed" and payload is not None:
                     artifacts = payload.get("artifacts") or {}
                     metrics = payload.get("metrics") or {}
@@ -341,15 +331,15 @@ NO_HISTORY: object = object()
 def _resolve_history_file(
     history_file: Path | None | object = None,
 ) -> Path | None:
-    """Return a writable REPL history path, or ``None`` to disable history.
+    """返回可写的 REPL history 路径，或 ``None`` 禁用 history。
 
-    Preference order:
+    优先级：
 
-    1. Explicit ``history_file`` argument (tests / callers)
+    1. 显式传入的 ``history_file`` 参数（测试 / 调用方）
     2. ``$XDG_CONFIG_HOME/writer/history``
     3. ``~/.config/writer/history``
-    4. ``$TMPDIR`` / system temp (PyInstaller / sandbox fallback)
-    5. ``./.writer/history`` in the current working directory
+    4. ``$TMPDIR`` / 系统临时目录（PyInstaller / 沙箱回退）
+    5. 当前工作目录下的 ``./.writer/history``
     """
 
     if history_file is NO_HISTORY:
@@ -381,17 +371,15 @@ def build_prompt_session(
     *,
     directive_registry: DirectiveRegistry | None = None,
 ) -> PromptSession[str]:
-    """Construct a prompt session with persistent history + tab completion.
+    """构造带持久化历史与 Tab 补全的 prompt session。
 
-    Pass ``history_file=NO_HISTORY`` to disable history entirely (useful in
-    tests). Passing ``None`` (the default) uses the user-level history file.
+    传入 ``history_file=NO_HISTORY`` 可完全禁用 history（测试中很有用）。
+    传入 ``None``（默认）使用用户级 history 文件。
 
-    ``directive_registry`` is consulted for the completion word list so a
-    plugin can register new slash commands and they'll show up in
-    tab-completion without rebuilding the session. When omitted, the
-    default :func:`writer.skills.built_directive_registry` is used — keeping
-    the original zero-arg call sites (``build_prompt_session()`` in
-    :func:`_build_repl_prompt_session` and tests) working unchanged.
+    ``directive_registry`` 用于补全词列表，插件注册新斜杠命令后
+    无需重建 session 即可在 Tab 补全中体现。省略时使用默认的
+    :func:`writer.skills.built_directive_registry` —— 保持零参调用
+    （``_build_repl_prompt_session`` 与测试中）的不变性。
     """
     history_path = _resolve_history_file(history_file)
     history: FileHistory | None = None
@@ -418,7 +406,7 @@ def build_prompt_session(
 
 
 def _build_repl_prompt_session() -> PromptSession[str] | None:
-    """Build a prompt session for interactive REPL, or fall back to plain input."""
+    """为交互式 REPL 构建 prompt session，否则回退到原生 input。"""
 
     if not sys.stdin.isatty():
         return None
@@ -429,11 +417,11 @@ def _build_repl_prompt_session() -> PromptSession[str] | None:
 
 
 def _read_line(session: PromptSession[str] | None, prompt: str) -> str:
-    """Read one line from stdin.
+    """从 stdin 读取一行。
 
-    Uses prompt-toolkit only when stdin is a TTY (interactive terminal);
-    falls back to plain ``input()`` for piped input, which keeps CliRunner
-    tests and ``writer < commands.txt`` usage stable.
+    仅当 stdin 是 TTY（交互终端）时使用 prompt-toolkit；
+    对管道输入回退到原生 ``input()``，让 CliRunner 测试与
+    ``writer < commands.txt`` 用法保持稳定。
     """
     if session is not None:
         return session.prompt(prompt)
@@ -441,7 +429,7 @@ def _read_line(session: PromptSession[str] | None, prompt: str) -> str:
 
 
 def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
-    """Start the interactive writer command loop."""
+    """启动交互式 writer 命令循环。"""
     print_welcome()
 
     load_env_file(safe_cwd())
@@ -450,8 +438,8 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
         load_project_settings(discovered)
     refresh_settings()
 
-    # One EngineSession for the lifetime of the REPL — owns session_id,
-    # deps, turn history, and pending Interrupt state.
+    # 一个 EngineSession 撑起 REPL 整个生命周期 —— 持有 session_id、
+    # deps、轮次历史与待处理 Interrupt 状态。
     engine_session = EngineSession()
     if discovered is not None:
         engine_session.set_project_root(discovered)
@@ -465,12 +453,10 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
             "请先 [bold]cd[/bold] 到一个有效目录，或使用 [bold]/init <项目名>[/bold] 重新初始化。[/yellow]"
         )
 
-    # ``directive_registry`` lives on ``engine_session.deps`` (see
-    # ``EngineDeps.directive_registry``); passing it through to the prompt
-    # session + ``/帮助`` renderer keeps the help table and tab
-    # completion in sync with whatever skills are registered for this
-    # REPL run — including entry-point plugins discovered at import
-    # time.
+    # ``directive_registry`` 位于 ``engine_session.deps``（见
+    # ``EngineDeps.directive_registry``）；把它透传给 prompt session
+    # 与 ``/帮助`` 渲染器，让帮助表和 Tab 补全与本次 REPL 运行所注册
+    # 的 skills（包括 import 时由 entry point 发现的插件）保持同步。
     directive_registry = engine_session.deps.directive_registry
 
     if prompt_session is None and sys.stdin.isatty():
@@ -523,7 +509,7 @@ def _init_prompt_genre_labels() -> list[str]:
 
 
 def _normalize_cli_genre(raw: str) -> str:
-    """Map a CLI-side genre string to a canonical key (legacy single-genre helper)."""
+    """把 CLI 侧的题材字符串映射为规范 key（遗留的单一题材辅助）。"""
 
     from writer.project.genre import normalize_genre_token
 
@@ -531,13 +517,13 @@ def _normalize_cli_genre(raw: str) -> str:
 
 
 def _parse_repl_init_argv(text: str) -> tuple[str, Path, bool, str | None]:
-    """Parse ``"/init --name 双生 --dir . --genre 言情"`` style input.
+    """解析 ``"/init --name 双生 --dir . --genre 言情"`` 风格的输入。
 
-    Returns ``(name, directory, force, genre)``. Raises ``ValueError`` on
-    missing/empty ``--name``. The REPL form does not support positional
-    ``name`` (it's a single-line shell-ish string, so the first token
-    after ``/init`` MUST be a flag) — explicit ``--name`` keeps parsing
-    deterministic and produces a clearer error when omitted.
+    返回 ``(name, directory, force, genre)``。``--name`` 缺失或
+    为空时抛 ``ValueError``。REPL 形式不支持位置参数 ``name``
+    （它是单行 shell-ish 字符串，``/init`` 后第一个 token 必须
+    是 flag）—— 显式 ``--name`` 让解析保持确定性，并在省略时
+    给出更清晰的报错。
     """
     from argparse import ArgumentParser
 
@@ -571,9 +557,9 @@ def init_project(
     brief: str | None = None,
     skip_brief: bool = False,
 ) -> str:
-    """Shared backend for the Typer ``init`` subcommand and the REPL ``/init``.
+    """Typer ``init`` 子命令与 REPL ``/init`` 共用的后端。
 
-    Returns the canonical genre label used (for session binding).
+    返回使用的规范题材标签（用于 session 绑定）。
     """
     genre_list = normalize_genres(genres if genres is not None else ([genre] if genre else ["other"]))
     from writer.project.genre import format_genre_line, primary_genre
@@ -629,10 +615,9 @@ def _maybe_apply_init_brief(
 
     load_project_settings(project_root)
     refresh_settings()
-    # ``process_init_brief`` (the only surviving Python-side capability
-    # after ``chg-remove-roles``) is invoked through
-    # :func:`writer.project.init_brief.apply_init_brief`; no
-    # ``deps.story_agent`` is needed.
+    # ``process_init_brief``（``chg-remove-roles`` 后唯一幸存的
+    # Python-side 能力）通过 :func:`writer.project.init_brief.apply_init_brief`
+    # 调用；不需要 ``deps.story_agent``。
     result = apply_init_brief(project_root, user_brief.strip(), settings=get_settings())
     console.print(f"[green]已写入 创意/核心创意.md[/green]（来源: {result.source}）")
     console.print("[green]已更新 AGENT.md 基本要求[/green]")

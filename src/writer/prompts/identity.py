@@ -1,26 +1,21 @@
-"""Genre / role identity fragments for LLM system prompts.
+"""LLM system prompt 的题材 / 角色身份片段。
 
-Each constant is a single sentence that establishes *who the LLM is*;
-the per-call system prompt in :mod:`writer.prompts.agents` then
-appends the *task* description on top of the identity. Splitting these
-two concerns means a future tweak to the agent identity (e.g. adding
-a model-handling hint, or localising the wording) does not require
-editing the task prompts.
+每个常量是一句建立「LLM 是谁」的话；:mod:`writer.prompts.agents` 中
+每次调用的 system prompt 在身份之上再追加「任务」描述。把这两件
+事分开，意味着未来调整 agent 身份（例如添加模型处理提示或本地化
+措辞）时无需编辑任务 prompt。
 
-The four constants mirror the four concrete agents in
-:mod:`writer.roles`:
+四个常量对应 :mod:`writer.roles` 中四个具体 agent：
 
-* :data:`AGENT_IDENTITY_STORY` — the default ``StoryAgent``
-  (genre ``"other"``); a neutral screenwriting voice used for any genre
-  the engine does not specialise on.
-* :data:`AGENT_IDENTITY_HISTORY` — :class:`HistoryAgent`.
-* :data:`AGENT_IDENTITY_ROMANCE` — :class:`RomanceAgent`.
-* :data:`AGENT_IDENTITY_XUANHUAN` — :class:`XuanhuanAgent`.
+* :data:`AGENT_IDENTITY_STORY` —— 默认 ``StoryAgent``（题材
+  ``"other"``）；中性的编剧口吻，用于引擎不专门化的任何题材。
+* :data:`AGENT_IDENTITY_HISTORY` —— :class:`HistoryAgent`。
+* :data:`AGENT_IDENTITY_ROMANCE` —— :class:`RomanceAgent`。
+* :data:`AGENT_IDENTITY_XUANHUAN` —— :class:`XuanhuanAgent`。
 
-Renamed from ``CONSULTANT_IDENTITY_*`` to ``AGENT_IDENTITY_*`` per
-``fea-agent-mirror`` (2026-07-09) — the wording is intentionally
-preserved so existing project state (e.g. cached LLM responses) is
-unaffected by the rename.
+按 ``fea-agent-mirror``（2026-07-09）从 ``CONSULTANT_IDENTITY_*``
+重命名为 ``AGENT_IDENTITY_*`` —— 措辞刻意保持不变，让现有项目状态
+（例如缓存的 LLM 响应）不受重命名影响。
 """
 
 from __future__ import annotations

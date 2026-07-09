@@ -1,8 +1,8 @@
-"""Agent engine runtime.
+"""Agent 引擎运行时。
 
-This package is the runtime facade for every writing capability. It is
-deliberately stateless (``AsyncGenerator`` per turn); per-session state
-is owned by the caller (REPL today, ``EngineSession`` tomorrow).
+本包是所有写作能力运行时的统一外观接口。它被刻意设计为无状态
+（每轮一个 ``AsyncGenerator``）；会话级状态由调用方持有
+（当前是 REPL，未来是 ``EngineSession``）。
 """
 
 from writer.engine.config import EngineConfig, build_engine_config

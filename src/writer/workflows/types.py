@@ -1,16 +1,14 @@
-"""Structured return contract + Pydantic review models.
+"""结构化返回契约 + Pydantic 审阅模型。
 
-A workflow (e.g. ``write_chapter``, ``review_chapter``) returns a
-:class:`WorkflowResult` instead of a bare ``Iterable[str]`` so the
-engine can route on ``status`` to pick the right ``Done`` reason,
-surface ``artifacts`` deterministically in the CLI, and ship
-``metrics`` to downstream consumers.
+工作流（例如 ``write_chapter``、``review_chapter``）返回
+:class:`WorkflowResult` 而非裸 ``Iterable[str]``，让引擎能基于
+``status`` 路由到正确的 ``Done`` reason，确定性地在 CLI 中暴露
+``artifacts``，并把 ``metrics`` 发送给下游消费者。
 
-The PR3 Pydantic models (``ReviewVerdict`` / ``MultiConcernReview`` /
-``ConcernVerdict``) live in this module so all workflow-side value
-objects live in one place.
+PR3 Pydantic 模型（``ReviewVerdict`` / ``MultiConcernReview` /
+``ConcernVerdict``）位于本模块，让所有工作流侧的值对象集中一处。
 
-Added 2026-07-09 (real-writing-pipeline).
+2026-07-09 增补（real-writing-pipeline）。
 """
 
 from __future__ import annotations
@@ -26,24 +24,23 @@ WorkflowStatus = Literal["completed", "pending", "failed"]
 
 @dataclass(frozen=True)
 class WorkflowResult:
-    """Structured return value of :meth:`EngineDeps.run_workflow`.
+    """:meth:`EngineDeps.run_workflow` 的结构化返回值。
 
-    Fields:
+    字段：
 
-    * ``status`` — one of ``"completed" | "pending" | "failed"``; the
-      engine maps this to a ``DoneReason`` (``workflow_completed`` /
-      ``aborted`` [for pending-rewrite] / ``aborted`` [for failure]
-      respectively). ``workflow_pending`` is no longer a valid
-      ``DoneReason`` (removed in PR3).
-    * ``chunks`` — UI-facing text stream (immutable tuple to play nice
-      with ``@dataclass(frozen=True)``).
-    * ``artifacts`` — paths the workflow produced (``draft_path``,
-      ``review_path``, ``summaries_path``). Values are ``Path`` so the
-      engine and CLI know these are filesystem references, not labels.
-    * ``metrics`` — numeric or string telemetry (``score``,
-      ``retry_count``, ``decision``, ``error``). No nested dicts /
-      objects; flat ``float | int | str`` only so the value is
-      JSON-friendly via :func:`dataclasses.asdict`.
+    * ``status`` —— ``"completed" | "pending" | "failed"`` 之一；引擎把
+      它映射到 ``DoneReason``（分别是 ``workflow_completed`` /
+      ``aborted`` [针对 pending-rewrite] / ``aborted`` [针对 failure]）。
+      ``workflow_pending`` 不再是合法的 ``DoneReason``（PR3 中删除）。
+    * ``chunks`` —— 面向 UI 的文本流（不可变 tuple，与
+      ``@dataclass(frozen=True)`` 配合良好）。
+    * ``artifacts`` —— 工作流产出的路径（``draft_path``、
+      ``review_path``、``summaries_path``）。值是 ``Path``，让引擎
+      和 CLI 知道这些是文件系统引用而非标签。
+    * ``metrics`` —— 数值或字符串遥测（``score``、``retry_count``、
+      ``decision``、``error``）。无嵌套 dict / 对象；只接受扁平
+      ``float | int | str``，让值能通过 :func:`dataclasses.asdict`
+      友好 JSON 序列化。
     """
 
     status: WorkflowStatus
@@ -52,13 +49,11 @@ class WorkflowResult:
     metrics: dict[str, float | int | str] = field(default_factory=dict)
 
     def to_payload(self) -> dict[str, Any]:
-        """Render a JSON-friendly ``Done.payload`` dict.
+        """渲染为 JSON 友好的 ``Done.payload`` dict。
 
-        The engine calls this when constructing the terminal
-        :class:`writer.engine.events.Done`. ``Path`` values in
-        ``artifacts`` are converted to ``str`` so the payload is
-        JSON-serializable without forcing callers to do the
-        conversion themselves.
+        引擎在构造终结 :class:`writer.engine.events.Done` 时调用。
+        ``artifacts`` 中的 ``Path`` 值被转换为 ``str``，让 payload
+        不需要调用方做转换即可 JSON 序列化。
         """
 
         return {
@@ -75,16 +70,16 @@ def workflow_result_from_iterable(
     artifacts: dict[str, Path] | None = None,
     metrics: dict[str, float | int | str] | None = None,
 ) -> WorkflowResult:
-    """Adapter for legacy ``Iterable[str]`` workflow callables.
+    """旧 ``Iterable[str]`` 工作流 callable 的适配器。
 
-    The :class:`EngineDeps` default impl maps registered
-    :data:`writer.workflows.WORKFLOWS` entries (which are still
-    ``Callable[[EngineContext], Iterable[str]]`` in PR1) into
-    :class:`WorkflowResult` so the engine can dispatch on
-    ``status``. The default status is ``"pending"`` because the
-    legacy callables had no concept of "completed / failed" — the
-    PR2 / PR3 rewrites of ``write_chapter`` and ``review_chapter``
-    replace the callables with explicit ``WorkflowResult`` returns.
+    :class:`EngineDeps` 默认实现把已注册的
+    :data:`writer.workflows.WORKFLOWS` 条目（PR1 中仍是
+    ``Callable[[EngineContext], Iterable[str]]``）映射到
+    :class:`WorkflowResult`，让引擎能基于 ``status`` 派发。默认
+    status 为 ``"pending"``，因为旧 callable 没有
+    "completed / failed" 概念 —— PR2 / PR3 重写的 ``write_chapter``
+    和 ``review_chapter`` 把 callable 替换为显式的 ``WorkflowResult``
+    返回。
     """
 
     chunks = tuple(chunks_iter or ())
@@ -97,19 +92,19 @@ def workflow_result_from_iterable(
 
 
 # ---------------------------------------------------------------------------
-# Pydantic review models (PR3)
+# Pydantic 审阅模型（PR3）
 # ---------------------------------------------------------------------------
 
 
 class ReviewVerdict(BaseModel):
-    """Structured verdict from the ``write_chapter`` review gate.
+    """``write_chapter`` review gate 的结构化判定。
 
-    Pydantic enforces ``score`` 0..10 and ``concerns`` as a list so
-    the JSON-prompt path (DeepSeek) and the native ``bind_tools`` path
-    (OpenAI) both produce a validated object. The ``pass_`` field uses
-    a trailing underscore because Pydantic v2 reserves ``pass`` for the
-    ``populate_by_name`` alias (and ``from_attributes`` re-export);
-    we accept the dict form ``{"pass": True}`` via ``model_validate``.
+    Pydantic 强制 ``score`` 0..10 且 ``concerns`` 为 list，让
+    JSON-prompt 路径（DeepSeek）与原生 ``bind_tools`` 路径（OpenAI）
+    都产出经过校验的对象。``pass_`` 字段使用下划线后缀是因为
+    Pydantic v2 把 ``pass`` 保留给 ``populate_by_name`` alias
+    （以及 ``from_attributes`` re-export）；我们通过 ``model_validate``
+    接受 dict 形态 ``{"pass": True}``。
     """
 
     model_config = {"populate_by_name": True}
@@ -120,12 +115,11 @@ class ReviewVerdict(BaseModel):
 
 
 class ConcernVerdict(BaseModel):
-    """Per-concern verdict inside a :class:`MultiConcernReview`.
+    """:class:`MultiConcernReview` 中的每个 concern 判定。
 
-    Used for the three review concerns in PR3 (``continuity``,
-    ``pacing``, ``prose``). Each concern has its own score (0..10),
-    pass flag, and a list of free-form findings the reviewer
-    produced.
+    PR3 中用于三个 review concern（``continuity``、``pacing``、
+    ``prose``）。每个 concern 有自己的 score（0..10）、pass 标志，
+    以及 reviewer 产出的自由形式发现列表。
     """
 
     model_config = {"populate_by_name": True}
@@ -136,17 +130,15 @@ class ConcernVerdict(BaseModel):
 
 
 class MultiConcernReview(BaseModel):
-    """Single structured LLM call returning 3 review concerns.
+    """单次结构化 LLM 调用返回的 3 个 review concern。
 
-    Per the PR3 design: a single ``invoke_structured_json`` call
-    produces all three concerns in one Pydantic schema, avoiding the
-    cost of 3 parallel LLM calls while still requiring the model to
-    address each concern (Pydantic schema validation enforces the
-    fields).
+    按 PR3 设计：单次 ``invoke_structured_json`` 调用产出全部三个
+    concern 在同一 Pydantic schema 中，避免 3 次并行 LLM 调用的成本，
+    同时仍要求模型覆盖每个 concern（Pydantic schema 校验强制字段）。
 
-    ``total_score`` is computed in :class:`review_chapter.aggregate_reviews`
-    from the three concern scores; the LLM is asked to provide it but
-    we recompute as a sanity check.
+    ``total_score`` 由 :class:`review_chapter.aggregate_reviews` 从
+    三个 concern score 计算；LLM 被要求提供它，但我们重算作为健全
+    性检查。
     """
 
     continuity: ConcernVerdict
@@ -156,10 +148,10 @@ class MultiConcernReview(BaseModel):
     summary: str = Field(default="")
 
 
-# Decision mapping (from the writing-pipeline spec):
-#   total_score >= 8 AND all concerns pass  -> "pass"
+# 决策映射（来自 writing-pipeline spec）：
+#   total_score >= 8 AND 所有 concern 通过  -> "pass"
 #   total_score >= 6                          -> "tweak"
-#   total_score < 6 OR any concern score < 4  -> "needs_rewrite"
+#   total_score < 6 OR 任意 concern score < 4  -> "needs_rewrite"
 DECISION_PASS_THRESHOLD = 8
 DECISION_TWEAK_THRESHOLD = 6
 DECISION_NEEDS_REWRITE_CONCERN = 4

@@ -1,26 +1,25 @@
-"""Novel project workspace scaffolding.
+"""小说项目 workspace 脚手架。
 
-``create_workspace`` materialises the on-disk layout for a novel project.
-The base layout (``manuscript / outline / characters / world / notes`` +
-``AGENT.md / README.md`` + one stub per subdirectory) is **genre-agnostic**;
-genre-specific extras (history ``史实/``, xuanhuan ``伏笔/``, romance
-``人设/``) are layered on top by :func:`_genre_scaffolding` and merged into
-the returned ``created_files`` list.
+``create_workspace`` 把小说项目的目录布局落到磁盘。基础布局
+（``manuscript / outline / characters / world / notes`` +
+``AGENT.md / README.md`` + 每个子目录一个 stub）是**与题材无关**的；
+题材特定的额外内容（历史 ``史实/``、玄幻 ``伏笔/``、言情 ``人设/``）
+由 :func:`_genre_scaffolding` 层叠上去，并合并到返回的
+``created_files`` 列表中。
 
-When ``with_writer_meta=True`` (the path used by
-:func:`create_new_workspace`, i.e. ``writer new``),
-:func:`_writer_meta_scaffolding` also creates ``<root>/.writer/`` with
-three sub-areas: a ``skills/`` directory mirroring the four built-in
-skills, an empty ``agents/`` directory, and a ``config`` env-style file.
+当 ``with_writer_meta=True``（即 :func:`create_new_workspace` 走的
+``writer new`` 路径）时，:func:`_writer_meta_scaffolding`` 还会创建
+``<root>/.writer/``，包含三个子区域：镜像 4 个内置 skills 的
+``skills/`` 目录、空的 ``agents/`` 目录、以及 ``config`` env 风格文件。
 
-Genre values are normalised by :func:`_normalize_genre` — Chinese labels
-(``历史 / 言情 / 玄幻``) and English short forms (``history / romance /
-xuanhuan``) map onto the same key. Anything else falls back to
-``"other"``, which produces the original default layout and no extras.
+题材值由 :func:`_normalize_genre` 规范化 —— 中文标签
+（``历史 / 言情 / 玄幻``）与英文短形式（``history / romance /
+xuanhuan``）映射到同一 key。其他所有值回退到 ``"other"``，产生
+默认布局且不附加额外内容。
 
-Backward compatibility is preserved: ``create_workspace(name, base_dir)``
-without an explicit ``genre`` keyword behaves exactly as before (other
-fallback). See ``tests/test_workspace.py`` for the contracts.
+向后兼容性保留：不带显式 ``genre`` keyword 的
+``create_workspace(name, base_dir)`` 行为与之前完全一致（其他回退）。
+见 ``tests/test_workspace.py`` 中的契约。
 """
 
 from __future__ import annotations
@@ -47,8 +46,8 @@ class NovelWorkspace:
     created_files: list[Path]
 
 
-# Genre whitelist — must stay in sync with the CLI prompt options.
-# English short forms accepted as aliases (lower-case, strip-tolerant).
+# 题材白名单 —— 必须与 CLI 提示选项保持同步。
+# 接受英文短形式作为别名（小写、容忍前后空格）。
 _GENRE_ALIASES: dict[str, str] = {
     "历史": "历史",
     "history": "历史",
@@ -65,11 +64,11 @@ _GENRE_ALIASES: dict[str, str] = {
 
 
 def _normalize_genre(genre: str) -> str:
-    """Return the canonical genre key for the input.
+    """返回输入的规范题材 key。
 
-    Any value not in the alias table — including custom user strings like
-    ``"都市悬疑"`` or ``"科幻"`` — is returned as ``"other"``. Empty /
-    whitespace input is also treated as ``"other"``.
+    任何不在别名表中的值 —— 包括用户自定义字符串，例如 ``"都市悬疑"``
+    或 ``"科幻"`` —— 都返回 ``"other"``。空 / 纯空白输入同样视为
+    ``"other"``。
     """
     key = (genre or "").strip().lower()
     return _GENRE_ALIASES.get(key, "other")
@@ -137,7 +136,7 @@ def create_workspace(
             ideas_stub.write_text("# 创意库\n\n存放故事创意、灵感与核心设定。\n", encoding="utf-8")
             created_files.append(ideas_stub)
 
-    # Genre-specific scaffolding layered on top of the base layout.
+    # 题材特定脚手架叠在基础布局之上。
     created_files.extend(_genre_scaffolding(root, canonical_genre))
 
     if with_writer_meta:
@@ -155,10 +154,10 @@ def create_new_workspace(
     force: bool = False,
     genres: list[str] | None = None,
 ) -> NovelWorkspace:
-    """Create a novel project with ``创意/`` and ``.writer/`` metadata.
+    """创建带 ``创意/`` 和 ``.writer/`` 元数据的小说项目。
 
-    The ``.writer/`` meta scaffolding mirrors both the 4 shipped
-    directives AND the 4 shipped agents (per ``fea-agent-mirror``).
+    ``.writer/`` 元数据脚手架同时镜像 4 个内置 directives 与
+    4 个内置 agents（per ``fea-agent-mirror``）。
     """
 
     return create_workspace(
@@ -176,10 +175,9 @@ def _writer_meta_scaffolding(
     root: Path, *, force: bool = False, seed_agents: bool = False
 ) -> list[Path]:
     writer_root = root / ".writer"
-    # NOTE: ``agents/`` is no longer a placeholder .gitkeep; the
-    # _seed_agents helper below creates real .md files. We still
-    # ensure the directory exists so projects that pre-date the
-    # agent mirror (and that already have a .gitkeep) don't break.
+    # 注：``agents/`` 不再是占位的 .gitkeep；下面的 _seed_agents 助手
+    # 创建真实的 .md 文件。我们仍确保目录存在，让早于 agent mirror
+    # 的项目（且已有 .gitkeep）不会被打断。
     targets = {
         writer_root / "skills" / ".gitkeep": "",
         writer_root / "config": _WRITER_CONFIG_TEMPLATE,
@@ -191,9 +189,8 @@ def _writer_meta_scaffolding(
             path.write_text(content, encoding="utf-8")
             created.append(path)
 
-    # Make sure the agents directory exists even if no shipped agent
-    # can be discovered (per the legacy / S0 path). The .gitkeep is
-    # removed by the seed step when real .md files land.
+    # 即使没有可发现的内置 agent（遗留 / S0 路径），也确保 agents
+    # 目录存在。真正的 .md 落地后，seed 步骤会移除 .gitkeep。
     (writer_root / "agents").mkdir(parents=True, exist_ok=True)
 
     created.extend(_seed_directives(writer_root, force=force))
@@ -205,37 +202,34 @@ def _writer_meta_scaffolding(
 def _seed_agents(
     writer_root: Path, *, force: bool = False
 ) -> list[Path]:
-    """Copy the 4 shipped agent ``.md`` files into the project.
+    """把 4 个内置 agent ``.md`` 文件复制到项目中。
 
-    Each shipped agent lives at
-    ``writer.agents._shipped/<name>.md`` (loaded via
-    :mod:`importlib.resources`). This helper copies every ``*.md``
-    to ``<writer_root>/agents/<filename>`` so the project starts with
-    a complete editable copy of the 4 default agents.
+    每个内置 agent 位于
+    ``writer.agents._shipped/<name>.md``（通过
+    :mod:`importlib.resources` 加载）。本助手把每个 ``*.md`` 复制到
+    ``<writer_root>/agents/``，让项目从一份完整的 4 个默认 agent
+    可编辑副本开始。
 
-    After copying, the project's directory contains the same files as
-    the shipped source. The discovery layer treats shipped and
-    user-added agents identically — the user is free to edit, delete,
-    or extend.
+    复制后，项目目录中包含与内置源相同的文件。发现层对内置与
+    用户添加 agent 一视同仁 —— 用户可以自由编辑、删除或扩展。
 
-    Per-file failures are logged at WARNING and skipped (so a
-    broken shipped copy does not block the rest). Files that already
-    exist on disk are left untouched unless ``force=True``.
+    单文件失败以 WARNING 记录并跳过（让一份损坏的内置副本不阻塞
+    其余）。磁盘上已存在的文件保持不变，除非 ``force=True``。
 
-    Called by :func:`_writer_meta_scaffolding` only when
-    ``with_writer_meta=True`` (the ``create_new_workspace`` path).
-    The low-level :func:`create_workspace` does NOT seed agents.
+    仅当 ``with_writer_meta=True``（``create_new_workspace`` 路径）
+    时由 :func:`_writer_meta_scaffolding` 调用。底层
+    :func:`create_workspace` *不* 播种 agent。
     """
 
     agents_dir = writer_root / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
 
-    # Local import: keeps the workspace module free of a top-level
-    # writer.agents dependency (avoids any future circular import
-    # risk; mirrors the _seed_directives pattern above).
+    # 本地 import：让 workspace 模块不含顶层 writer.agents 依赖
+    # （避免未来潜在的循环 import 风险；与上方的 _seed_directives
+    # 模式一致）。
     try:
         import importlib.resources as _resources
-    except ImportError:  # pragma: no cover — Python 3.12+ has it
+    except ImportError:  # pragma: no cover — Python 3.12+ 有
         return []
 
     created: list[Path] = []
@@ -270,14 +264,12 @@ def _seed_agents(
 
     for src_path in file_iter:
         target = agents_dir / src_path.name
-        # Per ``fea-agent-mirror`` spec: NEVER overwrite an existing
-        # agent file (even when ``force=True``). The user's edits are
-        # the source of truth once the mirror has landed; subsequent
-        # ``writer new --force`` runs are a no-op for existing
-        # agent files. This is stricter than the directives mirror
-        # because agents carry project-specific identity (the
-        # user's tweaked description / body) that is more likely
-        # to be customized than the generic skill bodies.
+        # Per ``fea-agent-mirror`` spec：永不覆盖已存在的 agent 文件
+        # （即使 ``force=True``）。一旦镜像落地，用户的编辑就是
+        # 真理之源；后续 ``writer new --force`` 对已有 agent 文件
+        # 是 no-op。这比 directives 镜像更严格，因为 agent 携带项目
+        # 特定身份（用户的定制 description / body），比通用 skill body
+        # 更容易被定制。
         if target.exists():
             continue
         try:
@@ -304,9 +296,8 @@ def _seed_agents(
             continue
         created.append(target)
 
-    # Tidy up: if real .md files were created and a stale .gitkeep
-    # placeholder is sitting in the agents directory, remove it so the
-    # project tree doesn't have a confusing empty file.
+    # 整理：如果创建了真实的 .md 文件，而 agents 目录里还有陈旧的
+    # .gitkeep 占位符，则移除它，让项目树不留令人困惑的空文件。
     if created:
         stale = agents_dir / ".gitkeep"
         if stale.is_file():
@@ -318,38 +309,33 @@ def _seed_agents(
 def _seed_directives(
     writer_root: Path, *, force: bool = False
 ) -> list[Path]:
-    """Copy the 4 shipped SKILL.md directive packages into the project.
+    """把 4 个内置 SKILL.md directive 包复制到项目中。
 
-    Each shipped directive lives under
-    ``writer.skills._shipped/<command>/`` (loaded via
-    :mod:`importlib.resources`). This helper copies the whole
-    directory tree — ``SKILL.md`` + ``references/*.md`` (and any
-    future ``scripts/*.py``) — into
-    ``<writer_root>/skills/<command>/``.
+    每个内置 directive 位于
+    ``writer.skills._shipped/<command>/``（通过
+    :mod:`importlib.resources` 加载）。本助手把整个目录树 ——
+    ``SKILL.md`` + ``references/*.md``（以及任何未来的
+    ``scripts/*.py``）—— 复制到 ``<writer_root>/skills/<command>/``。
 
-    After copying, the project's directory contains the same files as
-    the shipped source. The discovery layer treats shipped and
-    user-added directives identically — the user is free to edit,
-    delete, or extend.
+    复制后，项目目录中包含与内置源相同的文件。发现层对内置与
+    用户添加 directive 一视同仁 —— 用户可以自由编辑、删除或扩展。
 
-    Per-directive failures are logged at WARNING and skipped (so a
-    broken shipped copy does not block the rest). Files that already
-    exist on disk are left untouched unless ``force=True``.
+    单 directive 失败以 WARNING 记录并跳过（让一份损坏的内置副本
+    不阻塞其余）。磁盘上已存在的文件保持不变，除非 ``force=True``。
 
-    Called by :func:`_writer_meta_scaffolding` only when
-    ``with_writer_meta=True`` (the ``create_new_workspace`` path).
-    The low-level :func:`create_workspace` does NOT seed directives.
+    仅当 ``with_writer_meta=True``（``create_new_workspace`` 路径）
+    时由 :func:`_writer_meta_scaffolding` 调用。底层
+    :func:`create_workspace` *不* 播种 directive。
     """
 
     skills_dir = writer_root / "skills"
     skills_dir.mkdir(parents=True, exist_ok=True)
 
-    # Local import: keeps the workspace module free of a top-level
-    # writer.skills dependency (avoids any future circular import
-    # risk).
+    # 本地 import：让 workspace 模块不含顶层 writer.skills 依赖
+    # （避免未来潜在的循环 import 风险）。
     try:
         import importlib.resources as _resources
-    except ImportError:  # pragma: no cover — Python 3.12+ has it
+    except ImportError:  # pragma: no cover — Python 3.12+ 有
         return []
 
     created: list[Path] = []
@@ -417,11 +403,10 @@ def _seed_directives(
 
 
 def _walk_traversable(root) -> list:
-    """Walk a Traversable (``importlib.resources``) directory tree.
+    """遍历一个 Traversable（``importlib.resources``）目录树。
 
-    Returns every file (relative paths included as ``Traversable``
-    objects) under ``root``. Directories are yielded before their
-    files so callers can mkdir parent paths first.
+    返回 ``root`` 下每个文件（相对路径以 ``Traversable`` 形式）。
+    目录先于其下文件产出，让调用方可以先 mkdir 父路径。
     """
 
     out: list = []
@@ -430,7 +415,7 @@ def _walk_traversable(root) -> list:
     except (OSError, NotImplementedError):
         return out
 
-    # Sort for deterministic seeding order.
+    # 排序以保证确定性播种顺序。
     children.sort(key=lambda p: p.name)
     for child in children:
         try:
@@ -439,18 +424,17 @@ def _walk_traversable(root) -> list:
             else:
                 out.append(child)
         except (OSError, NotImplementedError):
-            # Some Traversables cannot answer ``is_dir()``; treat as file
+            # 部分 Traversables 无法回答 ``is_dir()``；按文件处理
             out.append(child)
     return out
 
 
 def _genre_scaffolding(root: Path, canonical_genre: str) -> list[Path]:
-    """Create genre-specific files and return the paths that were created.
+    """创建题材特定的文件并返回实际写入的路径列表。
 
-    The returned list only contains paths that were actually written;
-    pre-existing files are left untouched. ``canonical_genre`` MUST be one
-    of ``{历史, 言情, 玄幻, other}`` (the whitelist returned by
-    :func:`_normalize_genre`); ``other`` returns ``[]``.
+    返回列表只包含实际写入的路径；已存在的文件保持不变。
+    ``canonical_genre`` 必须是 ``{历史, 言情, 玄幻, other}`` 之一
+    （:func:`_normalize_genre` 返回的白名单）；``other`` 返回 ``[]``。
     """
     scaffolds: dict[str, dict[Path, str]] = {
         "历史": {

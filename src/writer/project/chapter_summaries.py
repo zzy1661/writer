@@ -1,24 +1,19 @@
-"""Atomic write helper for ``chapter_summaries.json``.
+"""``chapter_summaries.json`` 的原子写入辅助函数。
 
-The ``write_chapter`` workflow (real-writing-pipeline PR2) appends a
-per-chapter summary to the project's ``chapter_summaries.json`` after
-writing the chapter draft. This helper:
+``write_chapter`` 工作流（real-writing-pipeline PR2）在写完章节草稿
+后，向项目的 ``chapter_summaries.json`` 追加每章摘要。本辅助函数：
 
-* Loads the existing JSON (or initializes ``{"chapters": []}`` on a
-  fresh project).
-* Appends a new entry: ``{"chapter_id", "summary", "written_at"}``.
-* Writes the file **atomically** (tempfile + ``os.replace``) so
-  concurrent readers (e.g. the REPL's per-turn canon-block builder)
-  never observe a half-written file.
+* 加载既有 JSON（新项目初始化为 ``{"chapters": []}``）。
+* 追加新条目：``{"chapter_id", "summary", "written_at"}``。
+* **原子地**写入文件（tempfile + ``os.replace``），让并发读取者
+  （例如 REPL 每轮的 canon-block 构建器）永远不会观察到半写入文件。
 
-The function is intentionally narrow and project-scoped: it lives in
-``writer.project`` because ``chapter_summaries.json`` is a project
-artifact (read by the canon block, written by the workflow). It does
-NOT touch ``safe_write_file`` because the file is JSON and needs
-read-modify-write semantics; the Tool layer would have to add another
-mode for that one shape.
+本函数刻意收窄并限定项目范围：它位于 ``writer.project``，因为
+``chapter_summaries.json`` 是项目产物（被 canon block 读取，被工作流
+写入）。它*不*调用 ``safe_write_file``，因为该文件是 JSON 且需要
+read-modify-write 语义；Tool 层需要为这种形态添加另一种 mode。
 
-Added 2026-07-09 (real-writing-pipeline PR2).
+2026-07-09 增补（real-writing-pipeline PR2）。
 """
 
 from __future__ import annotations
@@ -35,34 +30,33 @@ SUMMARIES_FILE = "chapter_summaries.json"
 
 
 class ChapterSummariesError(ValueError):
-    """Raised when the chapter_summaries helper cannot operate.
+    """当 chapter_summaries 辅助函数无法操作时抛出。
 
-    Inherits from ``ValueError`` (same as other domain exceptions in
-    this package) so the engine's ``except Exception`` arm surfaces it
-    as a normal aborted turn.
+    继承自 ``ValueError``（与本包其他领域异常一致），让引擎的
+    ``except Exception`` 分支把它作为普通的 aborted 轮次暴露。
     """
 
 
 def _is_project_root(path: Path) -> bool:
-    """Return True when ``path`` looks like a writer project root.
+    """当 ``path`` 看起来像 writer 项目根时返回 True。
 
-    The check is intentionally cheap: the project marker is
-    ``AGENT.md`` (always written by :func:`writer.project.create_workspace`).
+    校验刻意保持廉价：项目标记是 ``AGENT.md``（始终由
+    :func:`writer.project.create_workspace` 写入）。
     """
     return (path / "AGENT.md").exists()
 
 
 def _now_iso() -> str:
-    """Return the current UTC time in ISO 8601 format with ``Z`` suffix."""
+    """以 ISO 8601 + ``Z`` 后缀格式返回当前 UTC 时间。"""
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _read_existing(path: Path) -> dict[str, Any]:
-    """Load the existing ``chapter_summaries.json`` if present.
+    """若存在则加载既有 ``chapter_summaries.json``。
 
-    Returns a normalised ``{"chapters": [...]}`` shape. If the existing
-    file uses a different shape (legacy migration case), the prior
-    payload is preserved under ``"_legacy"`` so no data is lost.
+    返回规范化后的 ``{"chapters": [...]}`` 形态。若既有文件使用不同
+    形态（遗留迁移情形），原 payload 会被保存在 ``"_legacy"`` 下，
+    不丢失任何数据。
     """
     if not path.exists():
         return {"chapters": []}
@@ -74,9 +68,9 @@ def _read_existing(path: Path) -> dict[str, Any]:
         return {"chapters": []}
     if "chapters" in raw and isinstance(raw["chapters"], list):
         return raw
-    # Legacy shape: store the original under ``_legacy`` and start a
-    # fresh ``chapters`` list. This way the helper never silently
-    # overwrites an existing file the user customised.
+    # 遗留形态：把原始内容存在 ``_legacy`` 下，并启用新的
+    # ``chapters`` 列表。这样本辅助函数绝不会静默覆盖用户定制
+    # 的现有文件。
     return {"_legacy": raw, "chapters": []}
 
 
@@ -87,25 +81,23 @@ def append_summary(
     *,
     atomic: bool = True,
 ) -> Path:
-    """Append a chapter summary to ``chapter_summaries.json``.
+    """向 ``chapter_summaries.json`` 追加一条章节摘要。
 
     Args:
-        project_root: Path to the writer project root (must contain
-            ``AGENT.md``).
-        chapter_id: Stable chapter identifier (e.g. ``"1.1"``).
-        summary: One-paragraph summary string. May contain newlines;
-            the JSON writer handles escaping.
-        atomic: When True (default), write via ``tempfile`` +
-            ``os.replace`` so concurrent readers never observe a
-            half-written file. Set to False only in tests that need
-            to inspect intermediate failure modes.
+        project_root: writer 项目根路径（必须含 ``AGENT.md``）。
+        chapter_id: 稳定的章节标识符（例如 ``"1.1"``）。
+        summary: 一段摘要字符串。可以包含换行；JSON writer
+            会处理转义。
+        atomic: 为 True（默认）时，通过 ``tempfile`` + ``os.replace``
+            写入，让并发读取者不会观察到半写入文件。仅在需要检查
+            中间失败模式的测试中设为 False。
 
     Returns:
-        The path to the updated ``chapter_summaries.json``.
+        更新后的 ``chapter_summaries.json`` 路径。
 
     Raises:
-        ChapterSummariesError: When ``project_root`` is not a valid
-            writer project, or when the atomic write fails.
+        ChapterSummariesError: 当 ``project_root`` 不是有效的
+            writer 项目，或原子写入失败时。
     """
     if not _is_project_root(project_root):
         msg = (
@@ -125,8 +117,8 @@ def append_summary(
         "summary": summary,
         "written_at": _now_iso(),
     }
-    # Replace any prior entry with the same chapter_id (idempotent on
-    # retry). Otherwise append.
+    # 替换任何相同 chapter_id 的旧条目（重试时幂等）。
+    # 否则追加。
     chapters: list[dict[str, Any]] = payload.setdefault("chapters", [])
     chapters = [c for c in chapters if c.get("chapter_id") != entry["chapter_id"]]
     chapters.append(entry)
@@ -137,8 +129,8 @@ def append_summary(
         target.write_text(serialised, encoding="utf-8")
         return target
 
-    # Atomic write: temp file in the same directory (so ``os.replace``
-    # is an atomic rename, not a cross-filesystem copy).
+    # 原子写入：临时文件位于同一目录（让 ``os.replace`` 是原子
+    # 重命名，而非跨文件系统拷贝）。
     fd, tmp_path_str = tempfile.mkstemp(
         prefix=".chapter_summaries.", suffix=".tmp", dir=str(project_root)
     )
@@ -149,7 +141,7 @@ def append_summary(
             os.fsync(tmp.fileno())
         os.replace(tmp_path_str, target)
     except Exception:
-        # Best-effort cleanup on failure; do not shadow the original error.
+        # 失败时尽力清理；不要遮蔽原始错误。
         with contextlib.suppress(OSError):
             os.unlink(tmp_path_str)
         raise

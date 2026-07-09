@@ -1,4 +1,4 @@
-"""Novel project workspace and state helpers."""
+"""小说项目 workspace 与 state 辅助函数。"""
 
 from writer.project.chapter_summaries import (
     SUMMARIES_FILE,

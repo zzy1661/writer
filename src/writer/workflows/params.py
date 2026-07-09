@@ -1,14 +1,12 @@
-"""Argument parsing for ``/创作`` and ``/审核`` commands.
+"""``/创作`` 和 ``/审核`` 命令的参数解析。
 
-These two commands dispatch to workflows (not SKILL.md directives), so
-the workflow layer is the natural owner of argument parsing. The
-functions in this module are pure — they take a user input string and
-return a frozen dataclass; they do NOT touch the engine, the session,
-or the filesystem.
+这两个命令派发到工作流（而非 SKILL.md directives），所以工作流层
+是参数解析的自然所有者。本模块的函数是纯函数 —— 接受用户输入
+字符串并返回冻结 dataclass；它们*不*触碰引擎、会话或文件系统。
 
-Added 2026-07-09 (real-writing-pipeline PR2).
+2026-07-09 增补（real-writing-pipeline PR2）。
 
-Format:
+格式：
 
 * ``/创作`` → ``WriteChapterArgs(chapter_id="1.1", requirements=(), rewrite=False)``
 * ``/创作 1.3`` → ``WriteChapterArgs(chapter_id="1.3", requirements=(), rewrite=False)``
@@ -27,19 +25,17 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class WriteChapterArgs:
-    """Parsed arguments for the ``/创作`` command.
+    """``/创作`` 命令解析后的参数。
 
     Attributes:
-        chapter_id: Chapter identifier (defaults to ``"1.1"`` if not
-            given). The workflow's ``draft_chapter`` node uses this
-            to scope the prep_context canon/history blocks.
-        requirements: Tuple of requirement strings ("突出冲突",
-            "结尾留钩", etc.). Treated as plain prose — the LLM
-            consumes them directly when constructing the prompt.
-        rewrite: True when the user input contains a "回流" or
-            "重写" trigger. The workflow's review_gate honors this
-            flag by routing through the rewrite branch even if the
-            LLM verdict would otherwise pass.
+        chapter_id: 章节标识符（未给出时默认为 ``"1.1"``）。
+            工作流的 ``draft_chapter`` 节点用它限定
+            prep_context canon/history 块。
+        requirements: 需求字符串的 tuple（"突出冲突"、"结尾留钩" 等）。
+            视为纯散文 —— LLM 在构造 prompt 时直接消费。
+        rewrite: 用户输入包含 "回流" 或 "重写" 触发词时为 True。
+            工作流的 review_gate 通过走 rewrite 分支来尊重该标志，
+            即使 LLM 判定本应通过。
     """
 
     chapter_id: str
@@ -49,15 +45,14 @@ class WriteChapterArgs:
 
 @dataclass(frozen=True)
 class ReviewChapterArgs:
-    """Parsed arguments for the ``/审核`` command.
+    """``/审核`` 命令解析后的参数。
 
     Attributes:
-        target: Chapter identifier, or the literal string
-            ``"current"`` (the default) meaning the latest chapter
-            the workflow can locate. The ``load_target_chapter`` node
-            in PR3 resolves this to a real path.
-        focus: Tuple of focus strings ("重点看伏笔", etc.) passed
-            verbatim into the review LLM prompt.
+        target: 章节标识符，或字面字符串 ``"current"``（默认），
+            含义是工作流能定位到的最新章节。PR3 的
+            ``load_target_chapter`` 节点把它解析为真实路径。
+        focus: 关注点字符串的 tuple（"重点看伏笔" 等），原样传入
+            review LLM prompt。
     """
 
     target: str
@@ -68,12 +63,11 @@ _REWRITE_TRIGGERS = ("回流", "重写")
 
 
 def extract_write_chapter_args(user_input: str) -> WriteChapterArgs:
-    """Parse a ``/创作`` user input into :class:`WriteChapterArgs`.
+    """把 ``/创作`` 用户输入解析为 :class:`WriteChapterArgs`。
 
-    The first token after ``/创作`` (if any) is the ``chapter_id``;
-    remaining tokens become ``requirements`` (in order). If the user
-    input contains ``"回流"`` or ``"重写"``, ``rewrite`` is set to
-    True regardless of where the trigger word appears.
+    ``/创作`` 后第一个 token（如果有）是 ``chapter_id``；剩余 token
+    成为 ``requirements``（按顺序）。如果用户输入包含 ``"回流"`` 或
+    ``"重写"``，``rewrite`` 被设为 True，无论触发词出现在哪里。
     """
     stripped = user_input.removeprefix("/创作").strip()
     if not stripped:
@@ -91,11 +85,10 @@ def extract_write_chapter_args(user_input: str) -> WriteChapterArgs:
 
 
 def extract_review_chapter_args(user_input: str) -> ReviewChapterArgs:
-    """Parse a ``/审核`` user input into :class:`ReviewChapterArgs`.
+    """把 ``/审核`` 用户输入解析为 :class:`ReviewChapterArgs`。
 
-    The first token after ``/审核`` (if any) is the ``target``;
-    remaining tokens become ``focus``. No triggers are recognised
-    (review is a read-only flow).
+    ``/审核`` 后第一个 token（如果有）是 ``target``；剩余 token 成为
+    ``focus``。不识别任何触发词（review 是只读流程）。
     """
     stripped = user_input.removeprefix("/审核").strip()
     if not stripped:

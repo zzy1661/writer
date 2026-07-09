@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from writer.context import prep_context, trim_to_budget
+from writer.prompts.context import prep_context, trim_to_budget
 
 
 def test_prep_context_builds_token_audit_and_trims(tmp_path: Path) -> None:

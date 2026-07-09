@@ -1,8 +1,8 @@
-"""Tool protocol and result type.
+"""Tool 协议与结果类型。
 
-A ``Tool`` is a stateless object: it can be registered once and invoked
-many times across sessions, each time receiving the appropriate runtime.
-That keeps ``ToolRegistry`` cheap to construct and trivially thread-safe.
+``Tool`` 是一种无状态对象：可以注册一次并在多个会话中调用，
+每次调用接收合适的 runtime。这让 ``ToolRegistry`` 构造廉价且
+线程安全。
 """
 
 from __future__ import annotations
@@ -17,12 +17,11 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class ToolResult:
-    """Structured output of a tool invocation.
+    """工具调用的结构化输出。
 
-    ``output`` is the human-readable payload (what we put in a ToolResult
-    Event today, what we'd feed to LangGraph state tomorrow). ``truncated``
-    records whether the runtime cut the output for safety. ``metadata``
-    carries structured side information (counts, file paths …).
+    ``output`` 是人类可读载荷（今天放进 ToolResult Event，将来喂给
+    LangGraph state）；``truncated`` 记录 runtime 是否出于安全原因
+    截断了输出；``metadata`` 携带结构化的辅助信息（计数、文件路径…）。
     """
 
     output: str
@@ -32,10 +31,10 @@ class ToolResult:
 
 @runtime_checkable
 class Tool(Protocol):
-    """Stateless, runtime-aware capability.
+    """无状态、感知 runtime 的能力。
 
-    Implementations override ``name``, ``description`` and ``run``.
-    Tools never hold per-call state — sessions rely on ``ToolRuntime``.
+    实现覆写 ``name``、``description`` 和 ``run``。Tool 绝不持有
+    per-call 状态 —— 会话依赖 ``ToolRuntime``。
     """
 
     name: str

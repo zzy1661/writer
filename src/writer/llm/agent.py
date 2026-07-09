@@ -1,37 +1,31 @@
-"""LLM-driven multi-step tool loop (ReAct-style).
+"""LLM 驱动的多步工具循环（ReAct 风格）。
 
-``LlmIntentRouter`` is a one-shot translator: the LLM sees the user input,
-emits a single ``AgentAction``, and exits. That is fine for routing, but
-it means the model never sees the result of the tool it just called, so a
-multi-hop query like *"搜一下玉佩，再告诉我它在第几章"* has to be split
-across two REPL turns.
+``LlmIntentRouter`` 是单次翻译器：LLM 看到用户输入，产出单个
+``AgentAction``，然后退出。这对路由而言没问题，但意味着模型永远
+看不到它刚调用的工具的结果，所以像「搜一下玉佩，再告诉我它在第几章」
+这样的多跳查询必须拆成两轮 REPL。
 
-:mod:`writer.llm.agent` lifts the engine's tool invocation out of the
-outer state machine and into a ReAct-style loop:
+:mod:`writer.llm.agent` 把引擎的工具调用从外层状态机提到一个
+ReAct 风格的循环里：
 
-* Each step the LLM is invoked with the full conversation (system
-  prompt + tool catalog + prior tool results).
-* The model either emits an ``AgentAction`` of type ``answer_directly``
-  (loop ends) or a ``call_tool`` (loop invokes the tool via the
-  :class:`writer.tools.ToolRegistry`, appends a ``ToolMessage`` to the
-  history, and re-asks the model).
-* A hard ``MAX_LOOP_STEPS`` budget caps the number of tool calls so a
-  pathological model cannot loop forever. When the budget is exhausted,
-  the loop yields a fallback ``TextChunk`` summarising the last tool
-  output and terminates with a ``Done(tool_loop_completed)``.
+* 每一步都带着完整对话（system prompt + 工具目录 + 历史工具结果）
+  调用 LLM。
+* 模型要么产出 ``answer_directly`` 类型的 ``AgentAction``（循环结束），
+  要么产出 ``call_tool``（循环通过 :class:`writer.tools.ToolRegistry`
+  调用工具，往历史里追加 ``ToolMessage``，再次询问模型）。
+* 硬性 ``MAX_LOOP_STEPS`` 预算限制工具调用次数，让病态模型无法
+  无限循环。当预算耗尽时，循环产出兜底 ``TextChunk`` 总结最后一次
+  工具输出，并以 ``Done(tool_loop_completed)`` 终止。
 
-The loop is a separate concern from the engine state machine — the
-engine still owns per-turn context, REPL routing, and the outer
-``Done`` event. The loop is **delegated to** from ``engine.loop`` only
-when the router's first action is ``call_tool`` and a ``tool_loop`` is
-configured on the engine deps; rule-first dispatch and the non-LLM
-``_run_tool`` path remain untouched.
+循环与引擎状态机是分离的关注 —— 引擎仍持有每轮上下文、REPL 路由
+和外层 ``Done`` 事件。循环仅在路由的首个 action 是 ``call_tool``
+且 engine deps 上配置了 ``tool_loop`` 时，由 ``engine.loop`` *委托*
+给 —— 规则优先派发和非 LLM 的 ``_run_tool`` 路径保持不变。
 
-Layering: this module lives under ``writer.llm`` (not ``writer.engine``)
-so the engine package never imports LLM types directly. ``EngineDeps``
-holds an ``Optional[LLMToolLoop]`` reference; when the engine wants the
-loop it ``await deps.tool_loop.run(...)`` and forwards the yielded
-events unchanged.
+分层：本模块位于 ``writer.llm``（而非 ``writer.engine``），让 engine
+包从不直接 import LLM 类型。``EngineDeps`` 持有一个
+``Optional[LLMToolLoop]`` 引用；当引擎想要循环时
+``await deps.tool_loop.run(...)`` 并原样转发产出事件。
 """
 
 from __future__ import annotations
@@ -74,32 +68,28 @@ if TYPE_CHECKING:
     from writer.engine.context import EngineContext
     from writer.engine.deps import EngineDeps
 
-# Hard upper bound on tool calls per turn. A real ReAct agent can
-# accumulate useful context quickly; a runaway model that keeps calling
-# the same tool is almost always broken or hallucinating. 5 is generous
-# enough for "search → locate" chains while keeping the worst-case token
-# spend predictable.
+# 每次轮次工具调用的硬上限。真正 ReAct agent 可以快速积累有用的
+# 上下文；但失控的模型一直调用同一工具几乎总是坏掉或幻觉。5 对
+# 「search → locate」链而言足够慷慨，同时保持最坏情况下的 token
+# 消耗可预测。
 MAX_LOOP_STEPS = 5
 
 
 @dataclass
 class ToolLoopState:
-    """Per-turn state for the LLM tool loop.
+    """LLM 工具循环的每轮状态。
 
-    Lifecycle is single-turn: the engine constructs a fresh state every
-    time it delegates to ``LLMToolLoop.run``. Cross-turn memory would
-    belong to ``EngineSession`` (intentionally out of scope per the plan).
+    生命周期为单轮：引擎每次委托给 ``LLMToolLoop.run`` 时构造一份
+    全新状态。跨轮记忆属于 ``EngineSession``（按计划刻意排除在外）。
 
     Attributes:
-        messages: LangChain message history. Starts with the loop's
-            system prompt + a human turn for the user's input, and
-            accumulates ``AIMessage`` / ``ToolMessage`` pairs as the loop
-            iterates.
-        tool_calls_made: Counter incremented after each successful tool
-            invocation. Drives the budget check.
-        last_tool_result: Most recent :class:`writer.tools.ToolResult`
-            produced by the loop. Used for the fallback ``TextChunk``
-            when the budget is exhausted and for the ``Done`` payload.
+        messages: LangChain 消息历史。起始是循环的 system prompt +
+            用户输入的人类轮次，循环中累积 ``AIMessage`` /
+            ``ToolMessage`` 对。
+        tool_calls_made: 每次成功工具调用后递增的计数器。驱动预算
+            校验。
+        last_tool_result: 循环产出的最近一个 :class:`writer.tools.ToolResult`。
+            预算耗尽时用于兜底 ``TextChunk`` 与 ``Done`` payload。
     """
 
     messages: list[BaseMessage] = field(default_factory=list)
@@ -108,31 +98,28 @@ class ToolLoopState:
 
 
 class LLMToolLoop:
-    """Drive an LLM through multiple tool calls until it answers.
+    """驱动 LLM 完成多步工具调用直至给出答案。
 
-    Two provider paths are supported, mirroring
-    :class:`writer.routing.LlmIntentRouter`:
+    支持两条 provider 路径，镜像 :class:`writer.routing.LlmIntentRouter`：
 
-    * **Native structured output** — ``llm.bind_tools(...)`` is used for
-      OpenAI-compatible providers that honor the ``tools`` field on the
-      request. The model emits ``AIMessage`` objects whose
-      ``tool_calls`` attribute carries the structured invocation.
-    * **JSON-prompt structured output** — providers like DeepSeek reject
-      the native tool-binding payload, so the tool catalog is serialised
-      into the system prompt and the model emits a JSON ``AgentAction``.
-      :func:`writer.llm.structured.invoke_structured_json` validates the
-      payload against the same Pydantic schema used by the router.
+    * **原生结构化输出** —— ``llm.bind_tools(...)`` 用于尊重请求中
+      ``tools`` 字段的 OpenAI 兼容 provider。模型产出 ``AIMessage`` 对象，
+      其 ``tool_calls`` 属性携带结构化调用。
+    * **JSON-prompt 结构化输出** —— 像 DeepSeek 这样的 provider 会拒绝
+      原生 tool-binding payload，于是工具目录被序列化进 system prompt，
+      模型产出 JSON 形式的 ``AgentAction``。
+      :func:`writer.llm.structured.invoke_structured_json` 用 router
+      用的同一 Pydantic schema 校验 payload。
 
-    Construction:
+    构造：
 
-    * ``LLMToolLoop(settings, registry, runtime)`` — production wiring
-      via :func:`writer.llm.provider.get_llm`.
-    * ``LLMToolLoop(..., llm=fake_chat_model)`` — test injection; bypasses
-      :func:`get_llm`.
-    * ``LLMToolLoop(..., langchain_tools=[...])`` — test injection;
-      bypasses ``to_langchain_tools`` (which builds the closure over
-      ``runtime``). Useful when the test wants to observe how the loop
-      handles tool messages without needing a real registry wiring.
+    * ``LLMToolLoop(settings, registry, runtime)`` —— 生产装配，通过
+      :func:`writer.llm.provider.get_llm`。
+    * ``LLMToolLoop(..., llm=fake_chat_model)`` —— 测试注入；绕过
+      :func:`get_llm`。
+    * ``LLMToolLoop(..., langchain_tools=[...])`` —— 测试注入；绕过
+      ``to_langchain_tools``（它会在 ``runtime`` 上构建闭包）。当测试
+      想观察循环如何处理 tool 消息而无需真实 registry 装配时很有用。
     """
 
     def __init__(
@@ -150,9 +137,9 @@ class LLMToolLoop:
         self._descriptors: list[ToolDescriptor] = list(registry.describe())
         self._use_json_prompt = needs_json_prompt_structured_output(settings)
         self._llm: BaseChatModel | None = llm or get_llm(settings)
-        # Native tool binding: build once so every step reuses the same
-        # tool list. JSON-prompt providers also get the list built (for
-        # future use) but the loop path uses the descriptors directly.
+        # 原生 tool binding：一次性构建，让每一步复用同一工具列表。
+        # JSON-prompt provider 也构建该列表（为未来使用），但循环路径
+        # 直接使用 descriptors。
         self._tools: list[BaseTool] = (
             langchain_tools
             if langchain_tools is not None
@@ -182,25 +169,23 @@ class LLMToolLoop:
         self,
         action: AgentAction,
         ctx: EngineContext,
-        deps: EngineDeps,  # noqa: ARG002 — kept for symmetry with engine helpers
+        deps: EngineDeps,  # noqa: ARG002 — 与 engine helpers 保持对称
         cfg: EngineConfig,
     ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
-        """Drive the ReAct loop until ``answer_directly`` or budget exhaustion.
+        """驱动 ReAct 循环直至 ``answer_directly`` 或预算耗尽。
 
-        ``action`` is the router's first ``call_tool`` decision for this
-        turn. We use it to seed the conversation history (so the model
-        knows what the user asked, even if its first action was a tool
-        call rather than a text answer). ``ctx`` carries the original
-        user input via ``EngineContext.user_input``.
+        ``action`` 是本轮路由的首个 ``call_tool`` 决策。我们用它为对话
+        历史播种（让模型知道用户问的是什么，即便它的首个 action 是
+        工具调用而非文本回答）。``ctx`` 通过 ``EngineContext.user_input``
+        携带原始用户输入。
 
-        Exceptions from tool invocations propagate upward — the engine's
-        outer ``except ToolError`` boundary is the single funnel for
-        surfacing tool failures; we do not swallow them here so the
-        same ``ErrorEvent + Done(aborted)`` UX applies.
+        工具调用抛出的异常向外传播 —— 引擎外层的 ``except ToolError``
+        边界是暴露工具失败的唯一漏斗；我们不在这里吞异常，让相同的
+        ``ErrorEvent + Done(aborted)`` UX 生效。
         """
 
-        del deps  # currently unused; kept in the signature for future hooks
-        del cfg  # currently unused; reserved for future per-loop config
+        del deps  # 当前未使用；保留在签名里为未来 hooks
+        del cfg  # 当前未使用；为未来 per-loop 配置保留
 
         state = ToolLoopState(
             messages=self._initial_messages(action, ctx.user_input),
@@ -212,9 +197,8 @@ class LLMToolLoop:
 
             parsed = self._parse_ai_message(ai_message)
             if parsed is None:
-                # The model emitted nothing actionable (no tool_calls,
-                # no parseable JSON). Treat as a soft failure: yield a
-                # fallback answer and stop the loop.
+                # 模型没产出可执行动作（无 tool_calls，也无法解析 JSON）。
+                # 视为软失败：产出兜底回答并停止循环。
                 yield TextChunk(
                     text="LLM 未产出可执行动作(无 tool_calls 且无法解析 JSON)。"
                 )
@@ -243,9 +227,8 @@ class LLMToolLoop:
             arguments = dict(parsed.arguments)
             yield ToolCall(name=tool_name, arguments=arguments)
 
-            # ToolError intentionally re-raised so the engine's outer
-            # ``except ToolError`` boundary produces ErrorEvent +
-            # Done(aborted) with the same UX as the rule-first path.
+            # 故意让 ToolError 向外传播，让引擎外层 ``except ToolError``
+            # 边界产出与规则优先路径一致的 ErrorEvent + Done(aborted)。
             result = self._registry.invoke(
                 tool_name, self._runtime, **arguments
             )
@@ -256,10 +239,9 @@ class LLMToolLoop:
             yield ToolResult(name=tool_name, output=result.output)
             state.tool_calls_made += 1
 
-        # Budget exhausted. Yield a fallback chunk that surfaces what
-        # the last tool returned so the user has something actionable,
-        # then terminate with a non-error Done reason — the budget
-        # being reached is a *graceful* state, not a failure.
+        # 预算耗尽。产出兜底块，把最后一次工具返回的内容展示出来，
+        # 让用户能基于它行动；然后以非错误 Done reason 终止 ——
+        # 达到预算是*优雅*状态，不是失败。
         fallback_text = self._budget_fallback(state)
         yield TextChunk(text=fallback_text)
         yield Done(
@@ -281,26 +263,25 @@ class LLMToolLoop:
     def _initial_messages(
         self, action: AgentAction, user_input: str
     ) -> list[BaseMessage]:
-        """Seed the conversation with system prompt + user turn.
+        """用 system prompt + 用户轮次为对话播种。
 
-        The system prompt embeds the tool catalog (name + description)
-        for JSON-prompt providers and the model name/version banner for
-        all providers so the log history is self-describing.
+        System prompt 内嵌工具目录（name + description）供 JSON-prompt
+        provider 使用，并为所有 provider 加上模型名 / 版本 banner
+        让日志历史自描述。
         """
 
         system = self._system_prompt()
         return [SystemMessage(content=system), HumanMessage(content=user_input)]
 
     def _system_prompt(self) -> str:
-        """Build the loop's system prompt.
+        """构建循环的 system prompt。
 
-        Tool catalog is rendered as a stable JSON block so the model
-        can be told "decide which tool to call by emitting
-        ``{"action_type":"call_tool", "tool_name": "<name>", ...}``"
-        without needing schema-aware reasoning. Native tool-binding
-        providers ignore the catalog (they read it from the bound tools)
-        but having it in the system prompt helps when the model is
-        asked to choose between tool_call and free-form JSON.
+        工具目录渲染为稳定的 JSON 块，让模型能被告知「通过产出
+        ``{"action_type":"call_tool", "tool_name": "<name>", ...}``
+        来决定调用哪个工具」而无需 schema 感知推理。原 tool-binding
+        provider 忽略该目录（它们从绑定的工具中读取），但把它放进
+        system prompt 在模型需要在 tool_call 与自由 JSON 之间二选一
+        时有帮助。
         """
 
         catalog = json.dumps(
@@ -323,47 +304,44 @@ class LLMToolLoop:
         )
 
     async def _invoke_model(self, messages: list[BaseMessage]) -> AIMessage:
-        """Call the model with the right provider path.
+        """用合适的 provider 路径调用模型。
 
-        Returns an :class:`AIMessage` even on the JSON-prompt path —
-        downstream parsing is uniform.
+        JSON-prompt 路径下也返回 :class:`AIMessage` —— 下游解析统一。
         """
 
         if self._use_json_prompt:
-            assert self._llm is not None  # narrowed by provider wiring
+            assert self._llm is not None  # 通过 provider 装配收窄
             parsed = invoke_structured_json(self._llm, messages, AgentAction)
             return AIMessage(
                 content=parsed.model_dump_json(),
-                # Carry the parsed action through ``additional_kwargs``
-                # so ``_parse_ai_message`` can detect the JSON-prompt
-                # path without re-running ``invoke_structured_json``.
+                # 通过 ``additional_kwargs`` 携带解析后的 action，
+                # 让 ``_parse_ai_message`` 能识别 JSON-prompt 路径
+                # 而无需重跑 ``invoke_structured_json``。
                 additional_kwargs={"_json_action": parsed},
             )
         assert self._bound_llm is not None
         ai_message = await self._bound_llm.ainvoke(messages)
         if not isinstance(ai_message, AIMessage):
-            # Defensive: some LangChain adapters return BaseMessage;
-            # coerce so downstream parsing is uniform.
+            # 防御性：某些 LangChain adapter 返回 BaseMessage；
+            # 强制转换让下游解析统一。
             ai_message = AIMessage(content=str(ai_message.content))
         return ai_message
 
     def _parse_ai_message(self, ai_message: AIMessage) -> AgentAction | None:
-        """Extract an :class:`AgentAction` from an ``AIMessage``.
+        """从 ``AIMessage`` 提取 :class:`AgentAction`。
 
-        Resolution order:
+        解析顺序：
 
-        1. ``AIMessage.tool_calls`` — native binding path.
-        2. ``AIMessage.additional_kwargs["_json_action"]`` — JSON-prompt
-           path; the pre-validated action is attached by ``_invoke_model``.
-        3. ``AIMessage.content`` parsed as JSON — JSON-prompt fallback when
-           the model emits the action in its free-form text rather than
-           via the structured contract.
-        4. Plain text content with no tool calls — model is answering in
-           prose; treat as ``answer_directly`` so the loop terminates.
+        1. ``AIMessage.tool_calls`` —— 原生 binding 路径。
+        2. ``AIMessage.additional_kwargs["_json_action"]`` —— JSON-prompt
+           路径；预先校验的 action 由 ``_invoke_model`` 附加。
+        3. ``AIMessage.content`` 解析为 JSON —— 当模型在自由文本中
+           而非结构化契约中产出 action 时的 JSON-prompt 回退。
+        4. 无 tool_calls 的纯文本内容 —— 模型用散文回答；视为
+           ``answer_directly``，让循环终止。
 
-        Returns ``None`` only when the model emits *nothing* actionable
-        (empty content + no tool_calls) — that case becomes a soft
-        failure at the call site.
+        仅当模型*毫无*可执行内容时（空 content + 无 tool_calls）才
+        返回 ``None`` —— 该情形在调用处变为软失败。
         """
 
         tool_calls = getattr(ai_message, "tool_calls", None) or []
@@ -388,9 +366,8 @@ class LLMToolLoop:
         if isinstance(content, str):
             text_content = content
         elif isinstance(content, list):
-            # Multi-part content (LC standard for newer providers): take
-            # only the text parts so ``json.loads`` doesn't choke on
-            # non-JSON dicts in the list.
+            # 多段内容（新版 provider 的 LC 标准）：只取文本段，让
+            # ``json.loads`` 不会在 list 中非 JSON dict 上崩溃。
             parts: list[str] = []
             for item in content:
                 if isinstance(item, str):
@@ -403,16 +380,15 @@ class LLMToolLoop:
 
         stripped = text_content.strip()
         if stripped:
-            # Try JSON parse first (structured response).
+            # 先尝试 JSON 解析（结构化响应）。
             try:
                 payload = json.loads(stripped)
                 if isinstance(payload, dict) and "action_type" in payload:
                     return AgentAction.model_validate(payload)
             except json.JSONDecodeError:
                 pass
-            # Not JSON: model emitted a plain-text answer. Treat as
-            # ``answer_directly`` so a ReAct loop that decides "no
-            # more tools needed, just answer" terminates cleanly.
+            # 不是 JSON：模型产出纯文本回答。视为 ``answer_directly``，
+            # 让「不再需要工具，直接回答」的 ReAct 循环干净终止。
             return AgentAction(
                 action_type="answer_directly",
                 answer=text_content,
@@ -425,13 +401,12 @@ class LLMToolLoop:
         tool_name: str,
         output: str,
     ) -> ToolMessage:
-        """Wrap a tool result as a :class:`ToolMessage` for the model.
+        """把工具结果包装为 :class:`ToolMessage` 给模型。
 
-        Native providers require ``tool_call_id``; JSON-prompt providers
-        ignore it but accept the field. We pull the id from the
-        corresponding ``AIMessage.tool_calls`` entry when available,
-        falling back to a synthetic id derived from the tool name so the
-        JSON-prompt path doesn't need extra bookkeeping.
+        原生 provider 要求 ``tool_call_id``；JSON-prompt provider 忽略
+        它但接受该字段。我们从对应的 ``AIMessage.tool_calls`` 条目
+        中抽取 id（可用时），否则用从工具名派生的合成 id，让
+        JSON-prompt 路径无需额外记账。
         """
 
         tool_call_id = ""
@@ -445,11 +420,10 @@ class LLMToolLoop:
         return ToolMessage(content=output, tool_call_id=tool_call_id)
 
     def _budget_fallback(self, state: ToolLoopState) -> str:
-        """Build the budget-exhausted fallback chunk.
+        """构建预算耗尽时的兜底块。
 
-        Keeps the user informed: prints how many steps ran and surfaces
-        the tail of the last tool output so they can pick up manually
-        without re-asking.
+        让用户知情：打印跑了几步并展示最后一次工具输出的尾部，让
+        他们无需再次提问就能手动接着往下走。
         """
 
         head = (
@@ -457,7 +431,7 @@ class LLMToolLoop:
             " 请基于以下最近结果继续追问或缩小范围："
         )
         last = state.last_tool_result.output if state.last_tool_result else "(无)"
-        # Cap the tail to avoid pushing a giant payload back to the user.
+        # 限制尾部大小，避免把巨型 payload 推回给用户。
         tail = last if len(last) <= 200 else last[:200] + "..."
         return f"{head}\n{tail}"
 

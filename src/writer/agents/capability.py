@@ -1,34 +1,30 @@
-"""Agent capabilities — Python-side helpers the LLM does not directly perform.
+"""Agent 能力 —— LLM 不直接执行的 Python-side 辅助函数。
 
-The Markdown-paradigm agent system (``writer.agents.AgentRegistry`` /
-``writer.agents.Agent``) ships *identity* (the agent's system prompt for
-LLM dispatch). It does **not** ship *capabilities* (the deterministic
-Python helpers that run before/after an LLM call, file writes,
-structured-output parsing, etc.). This module collects those Python-side
-helpers so the "Agent" concept has a single semantic home — both the
-Markdown identity layer and the deterministic Python capability layer
-live in :mod:`writer.agents`.
+Markdown 范式的 agent 系统（``writer.agents.AgentRegistry`` /
+``writer.agents.Agent``）承载 *身份*（agent 用于 LLM 派发的 system prompt）。
+它*不*承载 *能力*（在 LLM 调用前后运行的确定性 Python 辅助函数、文件
+写入、结构化输出解析等）。本模块把那些 Python-side 辅助函数集中起来，
+让 "Agent" 概念有单一的语义归属 —— Markdown 身份层和确定性 Python
+能力层都位于 :mod:`writer.agents`。
 
-The original capability surface (``StoryAgent`` / ``HistoryAgent` /
-``XuanhuanAgent` / ``RomanceAgent``) was deleted in the
-``chg-remove-roles`` cleanup because every method except
-:func:`process_init_brief` was dead code after ``fea-agent-mirror``
-moved the LLM-facing identity to Markdown. The remaining helper is
-exposed as a free function rather than a class because:
+原能力表面（``StoryAgent`` / ``HistoryAgent` / ``XuanhuanAgent` /
+``RomanceAgent``）在 ``chg-remove-roles`` 清理中删除，因为
+``fea-agent-mirror`` 把面向 LLM 的身份迁移到 Markdown 之后，除
+:func:`process_init_brief` 之外的所有方法都成了死代码。剩下的辅助
+函数被暴露为自由函数而非类，因为：
 
-* It has no stateful resources — ``Settings`` and ``BaseChatModel`` are
-  passed as call arguments.
-* It does not branch by ``genre`` (the prompt template and schema are
-  genre-agnostic; per-genre specialisation is handled by Markdown
-  agents).
-* The ``LLMToolLoop``-style class survives only because it loops and
-  owns state; this function does neither.
+* 它没有状态化资源 —— ``Settings`` 和 ``BaseChatModel`` 作为调用参数
+  传入。
+* 它不分 ``genre``（prompt 模板和 schema 与题材无关；每个题材的专门
+  化由 Markdown agent 处理）。
+* 类形态的 ``LLMToolLoop`` 仅因它循环并持有状态而存活；本函数两者
+  都不需要。
 
-Public surface (per ``chg-remove-roles``):
+公开 API（per ``chg-remove-roles``）：
 
-* :class:`InitBriefResult` — frozen dataclass for the post-init brief.
-* :func:`process_init_brief` — the only Python-side helper kept after
-  the ``roles`` package deletion.
+* :class:`InitBriefResult` —— post-init 梗概的冻结 dataclass。
+* :func:`process_init_brief` —— ``roles`` 包删除后唯一保留的 Python-side
+  辅助函数。
 """
 
 from __future__ import annotations
@@ -48,7 +44,7 @@ log = logging.getLogger(__name__)
 
 
 class _InitBriefPayload(BaseModel):
-    """Pydantic schema for ``process_init_brief`` LLM structured output."""
+    """``process_init_brief`` LLM 结构化输出的 Pydantic schema。"""
 
     core_idea: str = Field(min_length=1)
     requirements: str = Field(min_length=1)
@@ -56,14 +52,14 @@ class _InitBriefPayload(BaseModel):
 
 @dataclass(frozen=True)
 class InitBriefResult:
-    """Structured output for the post-init creative brief.
+    """post-init 创意梗概的结构化输出。
 
-    Fields:
-        core_idea: Markdown body for ``创意/核心创意.md`` (string).
-        requirements: Markdown list appended to ``AGENT.md``'s
-            ``## 基本要求`` section.
-        source: ``"llm"`` when the structured-output path succeeded,
-            ``"fallback"`` when the LLM is unavailable / fails.
+    字段：
+        core_idea: ``创意/核心创意.md`` 的 Markdown body（字符串）。
+        requirements: 追加到 ``AGENT.md`` 的 ``## 基本要求`` 段的
+            Markdown 列表。
+        source: 结构化输出路径成功时为 ``"llm"``；LLM 不可用 /
+            失败时为 ``"fallback"``。
     """
 
     core_idea: str
@@ -72,7 +68,7 @@ class InitBriefResult:
 
 
 def _process_init_brief_fallback(brief: str) -> InitBriefResult:
-    """Offline-mode init brief — used when no API key is configured."""
+    """离线模式 init 梗概 —— 未配置 API key 时使用。"""
 
     return InitBriefResult(
         core_idea=(
@@ -95,11 +91,10 @@ def _process_init_brief_with_llm(
     settings: Settings,
     llm: BaseChatModel,
 ) -> InitBriefResult:
-    """LLM-backed init brief — uses the centralised prompt registry.
+    """LLM 支持的 init 梗概 —— 使用集中式 prompt registry。
 
-    Lazy imports keep :mod:`writer.llm` and :mod:`writer.prompts` from
-    dragging in their full stack at engine import time (rule-only
-    deployments never need either).
+    延迟 import 让 :mod:`writer.llm` 和 :mod:`writer.prompts` 不在引擎
+    import 时拖入整个栈（纯规则部署永不需这两者）。
     """
 
     from writer.llm import get_llm, invoke_structured_json
@@ -124,21 +119,20 @@ def process_init_brief(
     settings: Settings,
     llm: BaseChatModel | None = None,
 ) -> InitBriefResult:
-    """Expand a natural-language brief into the project's ``InitBriefResult``.
+    """把自然语言梗概展开为项目的 ``InitBriefResult``。
 
-    Behaviour:
+    行为：
 
-    * Empty / whitespace-only ``brief`` → ``ValueError``.
-    * API key configured (or ``llm=`` injected) → invoke the LLM with the
-      ``init_brief`` prompt template; fall back to deterministic Markdown
-      on any LLM-side failure (logged at WARNING).
-    * No API key → deterministic Markdown.
+    * 空 / 纯空白 ``brief`` → ``ValueError``。
+    * 已配置 API key（或注入 ``llm=``）→ 用 ``init_brief`` prompt
+      模板调用 LLM；任何 LLM-side 失败回退到确定性 Markdown
+      （以 WARNING 记录）。
+    * 无 API key → 确定性 Markdown。
 
-    This helper is the **only** Python-side capability that survives the
-    ``chg-remove-roles`` cleanup. ``outline`` / ``toc`` drafting is no
-    longer a Python helper — it is executed by the LLM consuming
-    ``writer/agents/_shipped/*.md`` identity (see
-    ``writer/skills/_shipped/大纲/SKILL.md`` for instructions).
+    本辅助函数是 ``chg-remove-roles`` 清理后**唯一**幸存的 Python-side
+    能力。``outline`` / ``toc`` 起草不再是 Python 辅助函数 —— 由 LLM
+    消费 ``writer/agents/_shipped/*.md`` 身份来执行（指令见
+    ``writer/skills/_shipped/大纲/SKILL.md``）。
     """
 
     normalized = brief.strip()
@@ -149,7 +143,7 @@ def process_init_brief(
     if settings.has_api_key or llm is not None:
         try:
             return _process_init_brief_with_llm(normalized, settings, llm)  # type: ignore[arg-type]
-        except Exception as exc:  # noqa: BLE001 — role must degrade gracefully
+        except Exception as exc:  # noqa: BLE001 — role 必须优雅降级
             log.warning(
                 "LLM init brief 失败，回退到本地摘要: %r", exc, exc_info=True
             )

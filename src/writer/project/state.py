@@ -1,4 +1,4 @@
-"""Project state detection and command availability rules."""
+"""项目状态检测与命令可用性规则。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Protocol, runtime_checkable
 
 
 class ProjectState(StrEnum):
-    """Coarse-grained writing project lifecycle."""
+    """粗粒度的写作项目生命周期。"""
 
     UNINITIALIZED = "S0"
     INITIALIZED = "S1"
@@ -31,7 +31,7 @@ STATE_DESCRIPTIONS: dict[ProjectState, str] = {
 
 @dataclass(frozen=True)
 class ProjectSnapshot:
-    """Readable summary of the current project on disk."""
+    """磁盘上当前项目的可读摘要。"""
 
     root: Path | None
     state: ProjectState
@@ -41,7 +41,7 @@ class ProjectSnapshot:
 
 @dataclass(frozen=True)
 class CommandCheck:
-    """Result of checking whether a command can run in the current state."""
+    """检查某命令在当前状态下是否可运行的结果。"""
 
     command: str
     state: ProjectState
@@ -63,18 +63,16 @@ _MANUSCRIPT_DIRS = (
     Path("正文"),
 )
 
-#: Header for the state block inside ``AGENT.md``. Exposed so write tools
-#: (e.g. :class:`writer.tools.builtin.file_tools.SafeWriteFile`) can
-#: sanity-check that ``AGENT.md`` writes preserve the project's required
-#: structure without hard-coding the literal in two places
-#: (per ``chg-add-write-edit-glob`` D4).
+#: ``AGENT.md`` 内状态块的 header。导出供写入工具（例如
+#: :class:`writer.tools.builtin.file_tools.SafeWriteFile`）使用，让
+#: 它们能校验 ``AGENT.md`` 写入保留项目所需结构，而无需在两处硬编码
+#: 字面量（per ``chg-add-write-edit-glob`` D4）。
 CURRENT_STATE_SECTION_HEADER = "## 当前状态"
 
 COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
-    # NOTE: /大纲, /目录 are intentionally absent — they are Skill-backed
-    # commands whose availability is derived from the registered Skill's
-    # ``requires_states``. See ``validate_command_available`` +
-    # ``SkillRegistryView``.
+    # 注：/大纲, /目录 故意缺席 —— 它们是 Skill-backed 命令，
+    # 可用性从注册 Skill 的 ``requires_states`` 派生。
+    # 见 ``validate_command_available`` + ``SkillRegistryView``。
     "/init": {ProjectState.UNINITIALIZED},
     "/创作": {ProjectState.HAS_TOC, ProjectState.WRITING},
     "/审核": {ProjectState.WRITING, ProjectState.FINISHED},
@@ -99,7 +97,7 @@ COMMAND_HINTS: dict[str, str] = {
 
 
 def safe_cwd() -> Path | None:
-    """Return the current working directory, or ``None`` when it is unavailable."""
+    """返回当前工作目录；不可用时返回 ``None``。"""
 
     try:
         return Path.cwd()
@@ -108,17 +106,16 @@ def safe_cwd() -> Path | None:
 
 
 def find_outline_path(project_root: Path) -> Path | None:
-    """Return the first non-empty outline file under ``project_root``."""
+    """返回 ``project_root`` 下第一个非空大纲文件。"""
 
     return _first_existing_nonempty(project_root.resolve(), _OUTLINE_PATHS)
 
 
 def discover_project_root(start: Path | None = None) -> Path | None:
-    """Find a novel project root near ``start`` (default: cwd).
+    """在 ``start`` 附近寻找小说项目根目录（默认：cwd）。
 
-    Returns ``start`` when it contains ``AGENT.md``. Otherwise, when
-    exactly one immediate child directory contains ``AGENT.md``, returns
-    that child. Ambiguous or missing layouts return ``None``.
+    当包含 ``AGENT.md`` 时返回 ``start``。否则，当恰好一个直接子目录
+    包含 ``AGENT.md`` 时返回该子目录。布局歧义或缺失时返回 ``None``。
     """
 
     if start is None:
@@ -153,7 +150,7 @@ def discover_project_root(start: Path | None = None) -> Path | None:
 
 
 def detect_state(project_root: Path | None) -> ProjectState:
-    """Infer the project lifecycle state from files under ``project_root``."""
+    """从 ``project_root`` 下的文件推断项目生命周期状态。"""
 
     if project_root is None:
         return ProjectState.UNINITIALIZED
@@ -175,7 +172,7 @@ def detect_state(project_root: Path | None) -> ProjectState:
 
 
 def inspect_project(project_root: Path | None) -> ProjectSnapshot:
-    """Return a display-ready snapshot for ``/状态``."""
+    """为 ``/状态`` 返回一份展示用的快照。"""
 
     state = detect_state(project_root)
     if project_root is None:
@@ -202,20 +199,17 @@ def validate_command_available(
     *,
     skill_registry: SkillRegistryView | None = None,
 ) -> CommandCheck:
-    """Validate a slash command against the state matrix.
+    """根据状态矩阵校验斜杠命令。
 
-    Lookup order for the availability set:
+    可用性集合的查找顺序：
 
-    1. ``skill_registry.state_matrix()`` — drives the Skill-bound
-       commands (``/大纲`` / ``/目录``) so the state matrix is fully
-       derived from Skill metadata.
-    2. ``COMMAND_ALLOWED`` — the static fallback for commands that
-       aren't owned by any Skill (``/init`` itself plus the tool- and
-       workflow-backed commands still listed by hand).
+    1. ``skill_registry.state_matrix()`` —— 驱动 Skill 绑定命令
+       （``/大纲`` / ``/目录``），让状态矩阵完全从 Skill 元数据派生。
+    2. ``COMMAND_ALLOWED`` —— 不属于任何 Skill 的命令的静态回退
+       （``/init`` 本身以及仍手写的工具 / 工作流命令）。
 
-    Unknown commands stay pass-through for the existing
-    ``command_pending`` branch; only commands declared in either source
-    are blocked.
+    未知命令保持原样走向 ``command_pending`` 分支；只有在这两个
+    来源中声明过的命令会被拦截。
     """
 
     state = _coerce_state(project_state) if project_root is None else detect_state(project_root)
@@ -255,13 +249,12 @@ def validate_command_available(
 
 @runtime_checkable
 class SkillRegistryView(Protocol):
-    """Structural view of :class:`writer.skills.registry.SkillRegistry`.
+    """:class:`writer.skills.registry.SkillRegistry` 的结构视图。
 
-    Defined here (not imported from ``writer.skills``) to keep
-    :mod:`writer.project.state` free of the heavier skill dependencies.
-    The full :class:`writer.skills.registry.SkillRegistry` trivially
-    satisfies this Protocol because the two methods are part of its
-    public surface.
+    在此定义（而非从 ``writer.skills`` 引入）以让 :mod:`writer.project.state`
+    不依赖较重的 skill 依赖。完整的
+    :class:`writer.skills.registry.SkillRegistry` 平凡地满足该 Protocol，
+    因为这两个方法都是它的公开 API。
     """
 
     def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
@@ -269,12 +262,11 @@ class SkillRegistryView(Protocol):
 
 
 def _skill_hint(command: str) -> str:
-    """Map a Skill-driven command to a user-facing hint string.
+    """把 Skill 驱动的命令映射为面向用户的提示字符串。
 
-    Kept here (not in :mod:`writer.skills`) so the state matrix only
-    reports on a command when the same command can be looked up in the
-    registry — this avoids pulling skill-side translation tables into
-    the static :data:`COMMAND_HINTS` fallback.
+    在此保留（而非放在 :mod:`writer.skills`）让状态矩阵只在能查到
+    同一命令的注册表时才报告 —— 避免把 skill 端的翻译表拉进静态
+    :data:`COMMAND_HINTS` 回退。
     """
 
     return {
@@ -284,7 +276,7 @@ def _skill_hint(command: str) -> str:
 
 
 def count_chapters(project_root: Path) -> int:
-    """Count markdown drafts in known manuscript directories."""
+    """统计已知 manuscript 目录中的 markdown 草稿数。"""
 
     total = 0
     for directory in _MANUSCRIPT_DIRS:
@@ -300,13 +292,12 @@ def render_agent_file(
     *,
     genre: str = "other",
 ) -> str:
-    """Render the project control file used by state detection.
+    """渲染项目控制文件，供状态检测使用。
 
-    When ``genre`` is a known genre (not ``"other"``), a ``题材: <genre>``
-    line is included directly below the state line so downstream code
-    (``EngineSession.refresh_project_genre`` and CLI ``init_project``)
-    can pick it up via simple regex. The default ``"other"`` skips the
-    line to keep legacy ``AGENT.md`` content unchanged.
+    当 ``genre`` 是已知题材（不是 ``"other"``）时，在状态行正下方
+    包含一行 ``题材: <genre>``，让下游代码（``EngineSession.refresh_project_genre``
+    和 CLI ``init_project``）可以通过简单正则拿到。默认 ``"other"``
+    跳过这一行，保持遗留 ``AGENT.md`` 内容不变。
     """
 
     lines = [
@@ -338,7 +329,7 @@ def render_agent_file(
 
 
 def append_agent_requirements(agent_md: Path, requirements: str) -> None:
-    """Append or replace the ``## 基本要求`` section in ``AGENT.md``."""
+    """在 ``AGENT.md`` 中追加或替换 ``## 基本要求`` 段。"""
 
     section = "## 基本要求\n\n" + requirements.strip() + "\n"
     try:
@@ -356,11 +347,10 @@ def append_agent_requirements(agent_md: Path, requirements: str) -> None:
 
 
 def refresh_agent_file(project_root: Path) -> None:
-    """Update ``AGENT.md`` with the current detected state.
+    """用当前检测到的状态更新 ``AGENT.md``。
 
-    Preserves any ``题材:`` line already in the file so re-rendering after
-    a state transition (e.g. S1 → S2) doesn't clobber the genre set by
-    ``create_workspace(genre=...)``.
+    保留文件中已有的 ``题材:`` 行，让状态切换后（例如 S1 → S2）
+    重新渲染不会清掉 ``create_workspace(genre=...)`` 设置的题材。
     """
 
     root = project_root.resolve()
@@ -374,12 +364,11 @@ def refresh_agent_file(project_root: Path) -> None:
 
 
 def read_genre_from_agent(agent_md: Path) -> str:
-    """Parse the ``题材:`` line out of an ``AGENT.md`` file.
+    """从 ``AGENT.md`` 文件中解析 ``题材:`` 行。
 
-    Returns ``"other"`` if the file is missing, unreadable, or has no
-    ``题材:`` line — never raises. Whitespace is stripped on both sides;
-    optional Markdown bullet prefix (``- `` / ``* ``) is tolerated so the
-    parser is robust to ``render_agent_file`` formatting changes.
+    文件缺失、不可读或没有 ``题材:`` 行时返回 ``"other"`` —— 从不抛异常。
+    两端空白会被去掉；可选的 Markdown 列表前缀（``- `` / ``* ``）
+    也会被容忍，让解析对 ``render_agent_file`` 格式变化保持健壮。
     """
 
     try:
@@ -388,8 +377,8 @@ def read_genre_from_agent(agent_md: Path) -> str:
         return "other"
     for line in text.splitlines():
         stripped = line.strip()
-        # Tolerate a leading bullet character so the line can appear as
-        # either ``题材: 历史`` or ``- 题材: 历史`` without breaking the parser.
+        # 容忍前导列表字符，让该行可以以 ``题材: 历史`` 或
+        # ``- 题材: 历史`` 两种形式出现而不破坏解析。
         if stripped.startswith(("- ", "* ", "· ", "• ")):
             stripped = stripped[2:].lstrip()
         if stripped.startswith("题材:"):

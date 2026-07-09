@@ -1,31 +1,30 @@
-"""Directive Protocol — pure Markdown SKILL.md paradigm.
+"""Directive Protocol —— 纯 Markdown SKILL.md 范式。
 
-A directive is a self-contained instruction set stored under
-``<command>/SKILL.md`` (mirroring Claude Code's ``~/.claude/skills/``
-layout). The engine reads the directive's body and `@reference`'d
-content into the LLM context, and the LLM uses the existing tool
-registry to do the actual work — there is no Python ``run()`` method.
+directive 是一组自包含的指令集，存储于 ``<command>/SKILL.md``
+（镜像 Claude Code 的 ``~/.claude/skills/`` 布局）。引擎把 directive
+的 body 和 ``@reference`` 引用读入 LLM 上下文，LLM 通过既有 tool
+registry 完成实际工作 —— 没有 Python ``run()`` 方法。
 
-Discovery happens via :func:`writer.skills.directive_discovery.discover_directives`
-(project-level) and :func:`...discover_shipped_directives` (package
-internals under ``writer/skills/_shipped/``). Both feed into
-:class:`writer.skills.registry.DirectiveRegistry`.
+通过 :func:`writer.skills.directive_discovery.discover_directives`
+（项目级）和 :func:`...discover_shipped_directives`（包内置，
+位于 ``writer/skills/_shipped/``）发现。两者的产物都汇入
+:class:`writer.skills.registry.DirectiveRegistry`。
 
-Metadata contract (``command`` / ``description`` / ``requires_states`` /
-``body`` / ``references`` / ``scripts`` / ``root``) drives four downstream
-surfaces:
+元数据契约（``command`` / ``description`` / ``requires_states`` /
+``body`` / ``references`` / ``scripts`` / ``root``）驱动 4 个
+下游表面：
 
-* ``/帮助`` — :func:`writer.cli.main.print_repl_help` uses
-  :meth:`writer.skills.registry.DirectiveRegistry.help_entries` to render
-  the command table without touching SKILL.md parsing.
-* REPL 补全 — :func:`writer.cli.main.build_prompt_session` uses
-  :meth:`DirectiveRegistry.commands` for tab completion.
-* 状态机拦截 — :func:`writer.project.validate_command_available`
-  consults :meth:`DirectiveRegistry.state_matrix` so adding a new
-  directive automatically wires its availability map.
-* Engine dispatch — :func:`writer.engine.loop.run_engine` recognises
-  matched ``command`` and routes the directive's body + references into
-  the LLM via the existing tool loop.
+* ``/帮助`` —— :func:`writer.cli.main.print_repl_help` 使用
+  :meth:`writer.skills.registry.DirectiveRegistry.help_entries`
+  渲染命令表，无需触及 SKILL.md 解析。
+* REPL 补全 —— :func:`writer.cli.main.build_prompt_session` 使用
+  :meth:`DirectiveRegistry.commands` 做 Tab 补全。
+* 状态机拦截 —— :func:`writer.project.validate_command_available`
+  查询 :meth:`DirectiveRegistry.state_matrix`，新增 directive 时
+  自动接入其可用性映射。
+* Engine dispatch —— :func:`writer.engine.loop.run_engine` 识别
+  匹配的 ``command``，把 directive 的 body + references 通过既有
+  工具循环喂给 LLM。
 """
 
 from __future__ import annotations
@@ -40,22 +39,22 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class SkillDirective:
-    """A loaded ``<command>/SKILL.md`` directive.
+    """加载后的 ``<command>/SKILL.md`` directive。
 
-    Fields:
+    字段：
 
-    * ``command`` — slash command (from YAML frontmatter).
-    * ``description`` — human-readable one-liner (from YAML frontmatter).
-    * ``requires_states`` — lifecycle gate (from YAML frontmatter,
-      parsed as a list of valid ``ProjectState`` names).
-    * ``body`` — full Markdown body of ``SKILL.md`` (frontmatter stripped,
-      trailing whitespace normalized).
-    * ``references`` — ``{relpath: content}`` for every ``*.md`` under
-      ``<command>/references/``. Absent directory → ``{}``.
-    * ``scripts`` — relative paths of files under
-      ``<command>/scripts/``. Absent directory → ``[]``.
-    * ``root`` — absolute path of the directive's directory, so the
-      engine can resolve script execution paths through ``safe_path``.
+    * ``command`` —— 斜杠命令（来自 YAML frontmatter）。
+    * ``description`` —— 人类可读的一行说明（来自 YAML frontmatter）。
+    * ``requires_states`` —— 生命周期门控（来自 YAML frontmatter，
+      解析为合法的 ``ProjectState`` 名称列表）。
+    * ``body`` —— ``SKILL.md`` 的完整 Markdown body（去掉 frontmatter，
+      末尾空白被规范化）。
+    * ``references`` —— ``<command>/references/`` 下每个 ``*.md``
+      的 ``{relpath: content}``。目录不存在时为 ``{}``。
+    * ``scripts`` —— ``<command>/scripts/`` 下文件的相对路径列表。
+      目录不存在时为 ``[]``。
+    * ``root`` —— directive 所在目录的绝对路径，让引擎能通过
+      ``safe_path`` 解析脚本执行路径。
     """
 
     command: str

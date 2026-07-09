@@ -1,17 +1,16 @@
-"""Shipped agent sources — drift detection metadata.
+"""内置 agent 源 —— 漂移检测元数据。
 
-Each entry records the expected ``sha256`` of the shipped ``.md``
-file so :func:`writer.agents.registry._check_builtin_sources_drift`
-can warn at registry construction time if the file was modified
-after the recorded hash. This is a soft check (the registry still
-loads the file) but a useful maintenance signal.
+每条记录了内置 ``.md`` 文件的预期 ``sha256``，以便
+:func:`writer.agents.registry._check_builtin_sources_drift` 在
+registry 构造时若文件在记录哈希后被修改则发出警告。这是软检查
+（registry 仍会加载该文件），但作为维护信号很有用。
 
-To refresh the hash after editing a shipped file:
+编辑内置文件后刷新哈希：
 
-1. Compute ``sha256 src/writer/agents/_shipped/<name>.md``
-2. Update the matching entry's ``source_sha256`` field
-3. Run ``uv run pytest tests/test_agent_registry.py -k drift`` to
-   confirm the warning now disappears
+1. 计算 ``sha256 src/writer/agents/_shipped/<name>.md``
+2. 更新匹配条目的 ``source_sha256`` 字段
+3. 运行 ``uv run pytest tests/test_agent_registry.py -k drift``
+   确认警告消失
 """
 
 from __future__ import annotations
@@ -21,16 +20,16 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class BuiltinAgentSource:
-    """One shipped agent's identity + integrity metadata.
+    """一个内置 agent 的身份 + 完整性元数据。
 
-    Fields:
+    字段：
 
-    * ``mirror_filename`` — the file name under
-      ``src/writer/agents/_shipped/`` (e.g. ``历史.md``).
-    * ``source_module`` — the dotted module path used by
-      ``importlib.resources`` (``writer.agents._shipped``).
-    * ``source_sha256`` — expected sha256 of the file's UTF-8
-      content; the registry emits a WARNING on mismatch.
+    * ``mirror_filename`` —— 文件名，位于
+      ``src/writer/agents/_shipped/`` 下（例如 ``历史.md``）。
+    * ``source_module`` —— ``importlib.resources`` 使用的点分模块路径
+      （``writer.agents._shipped``）。
+    * ``source_sha256`` —— 文件 UTF-8 内容的预期 sha256；registry
+      在不匹配时记 WARNING。
     """
 
     mirror_filename: str
@@ -38,13 +37,11 @@ class BuiltinAgentSource:
     source_sha256: str
 
 
-#: Shipped agents shipped at ``writer.agents._shipped/``. The order
-#: is informational only; discovery sorts by filename. sha256 values
-#: are filled in by the apply-phase write of the actual .md files
-#: (see tasks 2.5 / 2.6 in ``fea-agent-mirror/tasks.md``). Until then
-#: each entry uses a placeholder; drift detection will fire loudly
-#: on the first registry construction, which is the apply-phase
-#: trigger to refresh them.
+#: 位于 ``writer.agents._shipped/`` 的内置 agent。顺序仅供展示；发现
+#: 按文件名排序。sha256 值由 .md 文件的 apply 阶段写入填充
+#: （见 ``fea-agent-mirror/tasks.md`` 的 tasks 2.5 / 2.6）。
+#: 在此之前每条都用占位符；漂移检测会在首次 registry 构造时响亮
+#: 触发，那就是 apply 阶段刷新它们的触发点。
 BUILTIN_AGENT_SOURCES: tuple[BuiltinAgentSource, ...] = (
     BuiltinAgentSource(
         mirror_filename="other.md",

@@ -1,22 +1,20 @@
-"""Routing layer: maps user input to a structured ``AgentAction``.
+"""路由层：把用户输入映射为结构化 ``AgentAction``。
 
-The previous name ``WriterCommandAgent`` (in ``agent/command_agent.py``) made the
-class sound like a full writing agent, but it actually only does one thing:
-translate a REPL line into an ``AgentAction``. This module makes that role
-explicit by introducing:
+原先的名字 ``WriterCommandAgent``（位于 ``agent/command_agent.py``）让这个类
+听起来像个完整的写作 agent，但实际上它只做一件事：把一行 REPL 输入
+翻译成 ``AgentAction``。本模块通过引入下面两个概念把这一角色说清楚：
 
-* :class:`IntentRouter` — the ``Protocol`` contract every implementation
-  satisfies. The engine depends on this Protocol only, not on any concrete
-  class, so future implementations (e.g. an LLM-backed
-  ``LlmIntentRouter``) plug in without touching ``engine/`` or ``cli/``.
-* :class:`RuleBasedIntentRouter` — the current MVP. Network-free, pure rule
-  dispatcher that preserves the behavior of the original
-  ``WriterCommandAgent.decide()`` 1:1.
+* :class:`IntentRouter` — 所有实现都满足的 ``Protocol`` 契约。
+  引擎只依赖该 Protocol，不依赖任何具体类；未来实现
+  （例如 LLM 支持的 ``LlmIntentRouter``）可以直接接入而无需改动
+  ``engine/`` 或 ``cli/``。
+* :class:`RuleBasedIntentRouter` — 当前 MVP。无网络的纯规则派发器，
+  1:1 保留原 ``WriterCommandAgent.decide()`` 行为。
 
-Keeping ``AgentAction`` here (instead of in ``agent/``) reflects the layering:
-``AgentAction`` is the **output of routing**, not a property of any business
-agent (``StoryAgent``/``HistoryAgent``/``XuanhuanAgent``/``RomanceAgent`` etc.). Engines and consumers import
-it from :mod:`writer.routing`.
+把 ``AgentAction`` 放在这里（而不是 ``agent/``）反映了分层：
+``AgentAction`` 是 *路由的输出*，而不是任何业务 agent
+（``StoryAgent``/``HistoryAgent``/``XuanhuanAgent``/``RomanceAgent`` 等）的属性。
+引擎与消费者从 :mod:`writer.routing` 导入它。
 """
 
 from __future__ import annotations
@@ -37,18 +35,16 @@ ActionType = Literal[
 
 
 class AgentAction(BaseModel):
-    """Decision returned by an :class:`IntentRouter` for a single user input.
+    """单个用户输入由 :class:`IntentRouter` 返回的决策。
 
-    Only the fields relevant to ``action_type`` are populated; the rest stay
-    at their defaults. Using ``BaseModel`` (not ``dataclass``) keeps JSON
-    serialization cheap when we later swap in an LLM structured-output
-    implementation behind the same router.
+    只有与 ``action_type`` 相关的字段会被填充，其余保持默认值。
+    使用 ``BaseModel``（而非 ``dataclass``）让我们在后续把同一路由器背后
+    换成 LLM 结构化输出实现时，JSON 序列化保持廉价。
 
-    ``kind`` (added per ``fea-agent-mirror``) discriminates between
-    command-shaped actions (``kind="command"``, the default — populated
-    ``command`` / ``workflow`` / ``tool_name`` etc.) and agent-shaped
-    actions (``kind="agent"``, ``target_agent`` populated). The default
-    keeps every existing call site zero-diff.
+    ``kind``（per ``fea-agent-mirror`` 增补）用于在 command 形态 action
+    （``kind="command"``，默认 —— 填充 ``command`` / ``workflow`` /
+    ``tool_name`` 等）和 agent 形态 action（``kind="agent"``，填充
+    ``target_agent``）之间做区分。默认值保证所有现有调用点零差异。
     """
 
     model_config = {"frozen": True}
@@ -67,13 +63,12 @@ class AgentAction(BaseModel):
 
 @runtime_checkable
 class IntentRouter(Protocol):
-    """Front-desk dispatcher: user input → structured ``AgentAction``.
+    """前台派发器：用户输入 → 结构化 ``AgentAction``。
 
-    Implementations must be deterministic w.r.t. their inputs (no implicit
-    side effects) so the engine can replay a turn deterministically when
-    needed. The ``project_state`` parameter is reserved for the upcoming
-    ``LlmIntentRouter`` (LangChain structured output, per 备忘 15) — the
-    rule-based MVP ignores it on purpose.
+    实现必须对输入保持确定性（无隐式副作用），让引擎在需要时可以确定性
+    回放一轮。``project_state`` 参数为即将到来的 ``LlmIntentRouter``
+    （LangChain 结构化输出，per 备忘 15）保留 —— 基于规则的 MVP
+    故意忽略它。
     """
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
@@ -81,19 +76,18 @@ class IntentRouter(Protocol):
 
 
 class RuleBasedIntentRouter:
-    """Network-free rule dispatcher (MVP fallback)."""
+    """无网络的规则派发器（MVP 回退）。"""
 
-    # Framework-level command keywords handled by REPL itself, not by the
-    # router. Listed here so :meth:`looks_like_command` can short-circuit
-    # them before any LLM call.
+    # REPL 自身处理的框架级命令关键字，而非由路由器处理。
+    # 列在此处以便 :meth:`looks_like_command` 在调用任何 LLM 之前
+    # 就能短路掉它们。
     _FRAMEWORK_KEYWORDS: frozenset[str] = frozenset({"init", "状态", "退出", "帮助"})
 
     def route(self, user_input: str, project_state: str) -> AgentAction:
-        # ``project_state`` is intentionally unused here; the parameter
-        # exists so the Protocol stays stable when we add
-        # :class:`LlmIntentRouter`. Deleting it (vs. renaming to
-        # ``_project_state``) keeps the public signature aligned with the
-        # docs without changing router-call sites.
+        # ``project_state`` 在此故意不使用；该参数的存在是为了当我们
+        # 引入 :class:`LlmIntentRouter` 时保持 Protocol 稳定。
+        # 不删除它（而不是改名为 ``_project_state``）可以让公开签名
+        # 与文档保持一致，无需修改路由器的调用点。
         del project_state
 
         text = user_input.strip()
@@ -146,12 +140,11 @@ class RuleBasedIntentRouter:
 
     @classmethod
     def looks_like_command(cls, text: str) -> bool:
-        """Return True iff ``text`` should be handled without consulting an LLM.
+        """当且仅当 ``text`` 应在不咨询 LLM 的情况下被处理时返回 True。
 
-        Used by :class:`writer.routing.CompositeRouter` to decide whether
-        the LLM fallback is necessary. Conservative on purpose: false
-        positives cost one LLM call, false negatives break the rule-first
-        contract.
+        由 :class:`writer.routing.CompositeRouter` 用来决定是否需要
+        LLM 回退。故意保守：误报只多花一次 LLM 调用，漏报会破坏
+        规则优先契约。
         """
 
         stripped = text.strip()
@@ -159,30 +152,28 @@ class RuleBasedIntentRouter:
             return False
         if stripped.startswith("/"):
             return True
-        # Bare framework keyword (e.g. "退出", "状态")
+        # 裸框架关键字（例如 "退出", "状态"）
         return stripped in cls._FRAMEWORK_KEYWORDS
 
 
 def _command_argument(text: str, command: str) -> str:
-    """Return the text after a slash command, stripped of surrounding space."""
+    """返回斜杠命令后的文本，去除首尾空白。"""
 
     return text.removeprefix(command).strip()
 
 
-# Pattern for ledger entry ids (matches the schema in
-# ``tools/builtin/foreshadow_ledger.py``). The rule extracts the first
-# id-looking token and routes the query with ``id=...``; the remainder
-# of the text becomes ``keyword=...`` so the substring filter still
-# catches descriptive text the user typed alongside the id.
+# ledger 条目 id 的模式（与 ``tools/builtin/foreshadow_ledger.py``
+# 中的 schema 匹配）。规则抽取第一个 id 形态的 token，并以 ``id=...``
+# 派发查询；剩余文本作为 ``keyword=...``，让子串过滤仍能捕获用户在
+# id 旁边输入的描述性文字。
 _FID_PATTERN = re.compile(r"\bF\d+\b")
 
 
 def _parse_foreshadow_args(text: str) -> dict[str, Any]:
-    """Best-effort split of a free-form foreshadow query into tool args.
+    """把自由形式的伏笔查询尽力拆分为工具参数。
 
-    Used by :class:`RuleBasedIntentRouter` so the router emits
-    structured args (``id`` / ``keyword``) instead of the legacy
-    free-form ``query`` string the old RAG-based tool consumed.
+    被 :class:`RuleBasedIntentRouter` 使用，让路由器产出结构化参数
+    （``id`` / ``keyword``），而不是旧 RAG 工具消费的自由 ``query`` 字符串。
     """
 
     stripped = text.strip()

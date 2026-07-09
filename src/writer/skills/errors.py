@@ -1,30 +1,27 @@
-"""Domain exceptions raised by Skills.
+"""Skill 抛出的领域异常。
 
-Kept separate from the protocol so skill implementations, the engine
-boundary, and consumers can import them without dragging in the heavier
-engine event types. Symmetric with :mod:`writer.tools.errors` (the
-boundary that the engine loop also catches — see ``_engine_loop`` in
-:mod:`writer.engine.loop`).
+与 protocol 分开，让 skill 实现、引擎边界与消费者可以在不引入
+较重的引擎事件类型的前提下 import 它们。与 :mod:`writer.tools.errors`
+对称（引擎循环也会捕获 —— 见 :mod:`writer.engine.loop` 中的
+``_engine_loop``）。
 """
 
 from __future__ import annotations
 
 
 class SkillError(Exception):
-    """Base class for recoverable failures inside a ``Skill.run()`` body.
+    """``Skill.run()`` 内部可恢复失败的基类。
 
-    The engine boundary in :func:`writer.engine.loop._engine_loop`
-    catches this specifically (after ``ToolError``) and surfaces the
-    failure as an ``ErrorEvent`` followed by ``Done(reason='aborted')``
-    with ``payload={'error': str(exc), 'command': <slash>}`` so the
-    REPL can render a clean red ✗ marker plus the rejected command.
+    :func:`writer.engine.loop._engine_loop` 中的引擎边界会专门捕获
+    本异常（在 ``ToolError`` 之后），把失败暴露为 ``ErrorEvent`` 后
+    接 ``Done(reason='aborted')``，payload 为
+    ``{'error': str(exc), 'command': <slash>}``，让 REPL 能渲染清爽
+    的红色 ✗ 标记以及被拒绝的命令。
 
-    Skills should raise :class:`SkillError` (or a subclass) for any
-    condition that the user can recover from — missing project root,
-    unsatisfied preconditions, malformed arguments. Truly unexpected
-    bugs (ValueError / KeyError from inside the implementation) bubble
-    up unchanged so the engine's catch-all ``except Exception`` arm
-    still produces an ErrorEvent.
+    Skill 应为任何用户可恢复的条件（缺失 project root、前置条件
+    未满足、参数格式错误）抛 :class:`SkillError`（或其子类）。
+    真正意外的 bug（实现内部的 ValueError / KeyError）原样冒泡，
+    让引擎的 catch-all ``except Exception`` 分支仍然产出 ErrorEvent。
     """
 
 

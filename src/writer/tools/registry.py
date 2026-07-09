@@ -1,8 +1,7 @@
-"""In-process tool registry.
+"""进程内 tool registry。
 
-The registry is the single source of truth for which tools the engine /
-LangGraph can dispatch to. It enforces name uniqueness on register and
-raises ``ToolNotFoundError`` on lookup miss.
+registry 是引擎 / LangGraph 能派发哪些工具的唯一真理来源。它在注册
+时强制名称唯一，查找未命中时抛出 ``ToolNotFoundError``。
 """
 
 from __future__ import annotations
@@ -21,11 +20,11 @@ if TYPE_CHECKING:
 
 
 class ToolRegistry:
-    """A name-indexed collection of tools.
+    """按名称索引的工具集合。
 
-    Construct empty, then ``.register()`` one tool at a time, or pass the
-    full set via the constructor. Duplicate names raise ``ValueError``
-    so misconfiguration surfaces at startup, not on the first call.
+    构造为空，然后逐个 ``.register()``，或通过构造函数一次性传入
+    全部集合。重复名称抛 ``ValueError``，让配置错误在启动时就暴露，
+    而不是在首次调用时。
     """
 
     def __init__(self, *, tools: Iterable[Tool] = ()) -> None:
@@ -34,7 +33,7 @@ class ToolRegistry:
             self.register(tool)
 
     def register(self, tool: Tool) -> ToolRegistry:
-        """Add ``tool`` under its declared name. Chainable."""
+        """按声明名称添加 ``tool``。可链式调用。"""
         if tool.name in self._tools:
             msg = f"工具重复注册: {tool.name!r}"
             raise ValueError(msg)
@@ -42,8 +41,8 @@ class ToolRegistry:
         return self
 
     def unregister(self, name: str) -> None:
-        """Drop a tool by name. Missing names are silently ignored
-        (the absence is already evidence the registry has been mutated)."""
+        """按名称移除一个工具。缺失名称静默忽略
+        （缺失本身已是 registry 已被修改的证据）。"""
 
         self._tools.pop(name, None)
 
@@ -65,15 +64,13 @@ class ToolRegistry:
         return isinstance(name, str) and name in self._tools
 
     def describe(self) -> list[ToolDescriptor]:
-        """Return a snapshot of every registered tool's metadata.
+        """返回每个已注册工具元数据的快照。
 
-        Added 2026-07-08 for the LLM-driven tool loop: ``LLMToolLoop``
-        needs a deterministic, registry-side view of which tools exist
-        and what arguments they accept, without re-running the bridge
-        (which captures ``runtime`` in a closure). The args schema is
-        derived through the same ``_build_args_schema`` helper used by
-        :func:`writer.tools.langchain_bridge.to_langchain_tools` so the
-        two stay in sync.
+        2026-07-08 为 LLM 驱动的工具循环增补：``LLMToolLoop`` 需要一个
+        确定的、registry 视角的工具清单（包含哪些工具、各接受什么参数），
+        而不必重新跑桥接（桥接会把 ``runtime`` 捕获进闭包）。args schema
+        通过 :func:`writer.tools.langchain_bridge.to_langchain_tools` 使用的
+        同一 ``_build_args_schema`` helper 派生，让两者保持同步。
         """
 
         return [
@@ -88,10 +85,10 @@ class ToolRegistry:
     def invoke(
         self, name: str, runtime: ToolRuntime, /, **kwargs: object
     ) -> ToolResult:
-        """Resolve and run ``name`` against ``runtime``.
+        """解析并对 ``runtime`` 运行 ``name``。
 
-        Positional-only ``runtime`` keeps call sites unambiguous
-        (``registry.invoke(\"x\", runtime, path=\"…\")``).
+        仅位置参数 ``runtime`` 让调用点保持明确
+        （``registry.invoke("x", runtime, path="…")``）。
         """
 
         return self.get(name).run(runtime, **kwargs)
@@ -99,13 +96,12 @@ class ToolRegistry:
 
 @dataclass(frozen=True)
 class ToolDescriptor:
-    """Public-facing snapshot of a tool's metadata.
+    """工具元数据的对外快照。
 
-    Used by :meth:`ToolRegistry.describe` to feed the LLM-driven tool
-    loop. ``args_schema`` is the same Pydantic model that
-    :func:`writer.tools.langchain_bridge.to_langchain_tools` would
-    attach to the LangChain wrapper, so the schema's field names,
-    defaults, and types match what the loop eventually invokes.
+        由 :meth:`ToolRegistry.describe` 用于喂给 LLM 驱动的工具循环。
+        ``args_schema`` 是 :func:`writer.tools.langchain_bridge.to_langchain_tools`
+        会附加到 LangChain wrapper 的同一 Pydantic 模型，因此 schema 的
+        字段名、默认值和类型与循环最终调用的版本一致。
     """
 
     name: str

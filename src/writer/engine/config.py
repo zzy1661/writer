@@ -1,4 +1,4 @@
-"""Frozen environment snapshot for a single engine turn."""
+"""单次引擎轮次的冻结环境快照。"""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from writer.engine.context import EngineContext
 
 @dataclass(frozen=True)
 class EngineConfig:
-    """Immutable runtime knobs captured once per turn.
+    """单轮内一次性捕获的不可变运行时配置。
 
-    Mirrors Claude Code §八 "环境冰封": config does not change mid-turn,
-    so consumers can rely on its values when interpreting the event stream.
+    与 Claude Code §八「环境冰封」一致：配置在轮次内不会变动，
+    消费者在解释事件流时可以放心依赖其中的值。
     """
 
     session_id: str
@@ -22,7 +22,7 @@ class EngineConfig:
 def build_engine_config(
     ctx: EngineContext, *, fast_mode: bool = False
 ) -> EngineConfig:
-    """Snapshot the engine config from the context + runtime overrides."""
+    """从上下文与运行时覆盖项快照出引擎配置。"""
 
     return EngineConfig(session_id=ctx.session_id, fast_mode=fast_mode)
 

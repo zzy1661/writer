@@ -1,16 +1,14 @@
-"""Cheap text-analysis tools.
+"""轻量级文本分析工具。
 
-Wordcount uses the same heuristic as 备忘 13's reference code: count
-non-whitespace code points. That's roughly the right figure for Chinese
-prose, where each character ≈ 1 字; for mixed Chinese+English we still
-get a serviceable estimate.
+Wordcount 使用与备忘 13 参考代码相同的启发式：统计非空白码点。
+这对于中文散文大致合理（每个字符约 1 字）；中英混合时也能得到
+可用的估算。
 
-``ProjectSearch`` is a Claude Code-style Grep analog: line-level
-substring match across the project tree, no embeddings, no RAG
-fallback. The RAG fallback was removed in ``chg-remove-rag`` because
-the placeholder ``HashEmbeddings`` had near-zero recall on real
-queries; structured ledgers + chapter summaries now cover the gaps
-that RAG was meant to fill.
+``ProjectSearch`` 是 Claude Code 风格 Grep 的对等物：在项目树上
+做行级子串匹配，没有 embedding、没有 RAG 兜底。RAG 兜底在
+``chg-remove-rag`` 中被移除，因为占位的 ``HashEmbeddings`` 在真实
+查询上的召回率几乎为零；结构化 ledger + 章节摘要现在覆盖了原本
+由 RAG 填补的空缺。
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ if TYPE_CHECKING:
 
 
 class Wordcount:
-    """Estimate 字数 for a chunk of text or project file tree."""
+    """估算一段文本或项目文件树的字数。"""
 
     name = "wordcount"
     description = "统计文本或项目路径的粗略字数(剔除空白);适合中文小说草稿。"
@@ -49,10 +47,10 @@ class Wordcount:
                 else:
                     text = target.read_text(encoding="utf-8")
             except (PermissionError, OSError) as exc:
-                # Per arch-optimizer M6 (2026-07-07): surface I/O errors
-                # as a ToolResult instead of letting them bubble to the
-                # engine's ``except Exception`` branch. Mirrors
-                # ``ProjectSearch``'s handling of ``UnicodeDecodeError``.
+                # Per arch-optimizer M6（2026-07-07）：把 I/O 错误暴露为
+                # ToolResult，而不是让它们冒泡到引擎的 ``except Exception``
+                # 分支。与 ``ProjectSearch`` 处理 ``UnicodeDecodeError``
+                # 的方式对称。
                 return ToolResult(
                     output=f"读取失败: {exc}",
                     metadata={"path": path, "error": "io"},
@@ -70,7 +68,7 @@ class Wordcount:
 
 
 class ProjectSearch:
-    """Search project text via line-level substring match (Grep analog)."""
+    """通过行级子串匹配搜索项目文本（Grep 对等物）。"""
 
     name = "project_search"
     description = "在项目目录内搜索关键词;返回匹配文件、行号和片段。"
@@ -97,10 +95,9 @@ class ProjectSearch:
             except UnicodeDecodeError:
                 continue
             except (PermissionError, OSError) as exc:
-                # Mirror arch-optimizer M6 (2026-07-07) decision: surface
-                # I/O errors as a ToolResult rather than aborting the
-                # turn. The previous code bubbled these to the engine's
-                # outer ``except Exception`` branch.
+                # Mirror arch-optimizer M6（2026-07-07）决策：把 I/O 错误
+                # 暴露为 ToolResult，而不是中断本轮。原代码会让这些
+                # 异常冒泡到引擎的外层 ``except Exception`` 分支。
                 exact_lines.append(
                     f"<io error: {file.relative_to(runtime.project_root).as_posix()}: {exc}>"
                 )

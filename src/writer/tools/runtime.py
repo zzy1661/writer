@@ -1,8 +1,8 @@
-"""Per-session runtime knobs handed to every tool invocation.
+"""每次工具调用都会收到的会话级 runtime 配置。
 
-Each tool call receives a ``ToolRuntime`` so it can resolve paths safely,
-check capability flags (``shell_enabled``), and respect content-size
-limits. The runtime is *not* a global — each session mints its own.
+每次工具调用都会收到一个 ``ToolRuntime``，让它能安全地解析路径、
+检查能力标志（``shell_enabled``），并尊重内容大小限制。runtime
+*不是*全局的 —— 每个会话各自 mint 自己的。
 """
 
 from __future__ import annotations
@@ -11,10 +11,10 @@ from pathlib import Path
 
 from writer.tools.errors import ToolDeniedError
 
-# Default path whitelist for write/edit tools (per chg-add-write-edit-glob D2).
-# A path passes when its first segment (relative to project_root) is in this
-# set. ``AGENT.md`` is NOT in the whitelist — it goes through the dedicated
-# 3-stage guard in :func:`writer.tools.builtin.file_tools._guard_agent_md`.
+# 写入 / 编辑工具的默认路径白名单（per chg-add-write-edit-glob D2）。
+# 当路径的第一段（相对于 project_root）属于该集合时即通过。
+# ``AGENT.md`` *不在*白名单中 —— 它走 :func:`writer.tools.builtin.file_tools._guard_agent_md`
+# 中的专用 3-stage guard。
 DEFAULT_WRITE_WHITELIST: frozenset[str] = frozenset(
     {
         "manuscript",
@@ -30,18 +30,16 @@ DEFAULT_WRITE_WHITELIST: frozenset[str] = frozenset(
 
 
 class ToolRuntime:
-    """Project-scoped guards for tool invocations.
+    """工具调用的项目级守卫。
 
-    ``project_root`` is resolved once at construction; subsequent
-    ``safe_path`` calls compare against the canonical form, which blocks
-    symlink-based escapes (per 备忘 07 §最小代码).
+    ``project_root`` 在构造时一次性解析；后续 ``safe_path`` 调用与
+    规范化形式对比，阻断基于 symlink 的越界（per 备忘 07 §最小代码）。
 
-    ``allowed_write_paths`` is consulted by write/edit tools (per
-    ``chg-add-write-edit-glob`` D2 / D7). When ``None`` the runtime falls
-    back to :data:`DEFAULT_WRITE_WHITELIST`; callers can override it to
-    grant additional write roots (e.g. ``"creative_exports"``) or restrict
-    the agent further. An empty frozenset disables all writes
-    (fail-closed).
+    ``allowed_write_paths`` 被 write / edit 工具查阅（per
+    ``chg-add-write-edit-glob`` D2 / D7）。为 ``None`` 时 runtime 回退到
+    :data:`DEFAULT_WRITE_WHITELIST`；调用方可以覆写以授予额外写根
+    （例如 ``"creative_exports"``）或进一步收紧 agent。空 frozenset
+    禁用全部写入（fail-closed）。
     """
 
     def __init__(
@@ -62,11 +60,11 @@ class ToolRuntime:
         )
 
     def safe_path(self, raw: str | Path) -> Path:
-        """Resolve ``raw`` against ``project_root`` and reject escapes.
+        """把 ``raw`` 解析到 ``project_root`` 下并拒绝越界。
 
-        ``raw`` may be relative (joined to project root) or absolute; in
-        both cases the resulting path must live inside ``project_root``.
-        Symlinks are followed via ``Path.resolve()`` before the check.
+        ``raw`` 可以是相对路径（拼到项目根）或绝对路径；两种情况下，
+        解析后的路径都必须位于 ``project_root`` 之内。在检查前通过
+        ``Path.resolve()`` 跟随 symlink。
         """
 
         candidate = (self.project_root / raw).resolve()
@@ -75,7 +73,7 @@ class ToolRuntime:
         return candidate
 
     def require_shell(self) -> None:
-        """Guard call sites that would execute shell commands."""
+        """为会执行 shell 命令的调用点把关。"""
         if not self.shell_enabled:
             raise ToolDeniedError("shell_exec 默认关闭")
 

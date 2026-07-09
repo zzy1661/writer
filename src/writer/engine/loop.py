@@ -1,43 +1,38 @@
-"""Engine main loop.
+"""引擎主循环。
 
-The engine is a *stateless* ``AsyncGenerator``: callers (REPL, future
-``EngineSession``) own the per-session state and re-invoke ``run_engine``
-each turn. The benefits over a single ``run() -> Result`` mirror Claude
-Code §一·1.2: streaming output, late-binding decisions, and clean
-cancellation.
+引擎是 *无状态* 的 ``AsyncGenerator``：调用方（REPL、未来的
+``EngineSession``）持有会话级状态，并在每一轮重新调用 ``run_engine``。
+相对于单个 ``run() -> Result`` 的好处，与 Claude Code §一·1.2 一致：
+流式输出、晚绑定决策、干净的取消。
 
-Phase 2 wiring (per 本次重构 Phase 2):
+Phase 2 接线（per 本次重构 Phase 2）：
 
-* ``run_command`` for ``/大纲`` dispatches to the Markdown-paradigm
-  agent directive (``writer/skills/_shipped/大纲/SKILL.md``) via
-  ``_run_directive``; the LLM consumes the directive body and uses
-  the tool registry to write the outline. There is no Python-side
-  ``draft_outline`` anymore — the helper was deleted in
-  ``chg-remove-roles`` after ``fea-agent-mirror`` made it dead code.
-* ``start_workflow`` for ``write_chapter`` / ``review_chapter`` (and any
-  future registered workflow) dispatches to
-  :meth:`writer.engine.deps.EngineDeps.run_workflow` and streams the
-  workflow's chunks before ``Done('workflow_completed')`` (or
-  ``Done('aborted')`` on failure / pending-rewrite signal).
-* All other action types short-circuit to a terminal ``Done`` (MVP).
+* ``/大纲`` 的 ``run_command`` 通过 ``_run_directive`` 派发到 Markdown 范式
+  的 agent 指令（``writer/skills/_shipped/大纲/SKILL.md``）；LLM 消费
+  指令 body 并使用 tool registry 写出大纲。Python 侧的 ``draft_outline``
+  已不存在 —— 该 helper 在 ``fea-agent-mirror`` 让其变成死代码后，
+  于 ``chg-remove-roles`` 中被删除。
+* ``write_chapter`` / ``review_chapter``（以及任何未来注册的工作流）
+  的 ``start_workflow`` 派发到
+  :meth:`writer.engine.deps.EngineDeps.run_workflow`，并在 ``Done
+  ('workflow_completed')``（失败 / 待重写信号则为 ``Done('aborted')``）
+  之前流式输出工作流的文本块。
+* 其余所有 action 类型短路到终结 ``Done``（MVP）。
 
-Phase 3 wiring (this module, per change
-``add-llm-and-complete-engine-loop``):
+Phase 3 接线（本模块，per change ``add-llm-and-complete-engine-loop``）：
 
-* ``call_tool`` resolves the tool via ``deps.tool_registry``, invokes it
-  through ``deps.tool_runtime``, and emits ``ToolCall`` / ``ToolResult``
-  events around a terminal ``Done('tool_completed')``.
-* ``ask_user`` emits ``Interrupt`` so the REPL can prompt the user, then
-  ``Done('ask_user')`` to mark the turn complete.
-* All exceptions (router, tool, workflow) are caught and surfaced as
-  ``ErrorEvent`` followed by ``Done('aborted')``. ``ErrorEvent.traceback``
-  carries the formatted stack trace so post-mortem debugging doesn't
-  require attaching a debugger.
-* ``EngineConfig.fast_mode`` suppresses diagnostic ``[engine]`` log chunks.
-* 2026-07-05 (arch-optimizer M4 / Q7): engine boundary logs via stdlib
-  ``logging`` and the ``/大纲`` argument extraction uses
-  :meth:`str.removeprefix` (defensive against multi-space / repeated
-  prefix edge cases).
+* ``call_tool`` 通过 ``deps.tool_registry`` 解析工具，由 ``deps.tool_runtime``
+  调用，并在终结 ``Done('tool_completed')`` 前后产出 ``ToolCall`` /
+  ``ToolResult`` 事件。
+* ``ask_user`` 产出 ``Interrupt`` 让 REPL 可以提示用户，然后产出
+  ``Done('ask_user')`` 标记本轮完成。
+* 所有异常（路由器、工具、工作流）都会被捕获，并以 ``ErrorEvent``
+  后接 ``Done('aborted')`` 的形式暴露。``ErrorEvent.traceback``
+  携带格式化堆栈，方便事后调试时不需要挂调试器。
+* ``EngineConfig.fast_mode`` 抑制诊断用的 ``[engine]`` 日志块。
+* 2026-07-05（arch-optimizer M4 / Q7）：引擎边界通过 stdlib
+  ``logging`` 记日志，``/大纲`` 参数提取使用
+  :meth:`str.removeprefix`（对多空格 / 重复前缀边界情况保持防御性）。
 """
 
 from __future__ import annotations
@@ -80,9 +75,9 @@ log = logging.getLogger(__name__)
 
 
 def _log(text: str, cfg: EngineConfig) -> TextChunk:
-    """Diagnostic log chunk; emitted only when ``cfg.fast_mode`` is False."""
+    """诊断日志块；仅在 ``cfg.fast_mode`` 为 False 时产出。"""
 
-    del cfg  # currently no per-chunk logic; reserved for future log levels
+    del cfg  # 当前没有 per-chunk 逻辑；为未来日志级别预留
     return TextChunk(text=text)
 
 
@@ -92,7 +87,7 @@ async def run_engine(
     *,
     config: EngineConfig | None = None,
 ) -> AsyncIterator[TextChunk | ActionEvent | Interrupt | ToolCall | ToolResult | Done | ErrorEvent]:
-    """Public entry point. Wraps ``_engine_loop`` for future hooks."""
+    """公开入口。包装 ``_engine_loop`` 以便将来挂接 hooks。"""
 
     cfg = config or build_engine_config(ctx)
     async for event in _engine_loop(ctx, deps, cfg):
@@ -104,14 +99,13 @@ async def _engine_loop(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | ActionEvent | Interrupt | ToolCall | ToolResult | Done | ErrorEvent]:
-    """Per-turn inner loop: dispatch once, then yield ``Done``.
+    """每轮内部循环：派发一次，然后产出 ``Done``。
 
-    The whole body is wrapped in ``try/except`` so an unexpected failure
-    in the router, tool, or workflow produces an ``ErrorEvent`` followed
-    by ``Done(aborted)`` instead of bubbling out of the async generator.
-    Both catch arms capture the traceback into ``ErrorEvent.traceback``
-    (per arch-optimizer M4) so REPL output can be pasted into bug
-    reports without rerunning the engine.
+    整体 body 被 ``try/except`` 包裹，让路由器、工具或工作流中
+    出现意外失败时产出 ``ErrorEvent`` 后接 ``Done(aborted)``，而不是
+    从 async generator 中冒泡出去。两个 except 分支都会把堆栈
+    捕获进 ``ErrorEvent.traceback``（per arch-optimizer M4），
+    让 REPL 输出可以直接贴进 bug report 而无需重跑引擎。
     """
 
     try:
@@ -145,10 +139,10 @@ async def _engine_loop(
             )
             return
 
-        # Dispatch is on ``action.kind`` first (per ``fea-agent-mirror``)
-        # — a ``kind="agent"`` action takes the agent path regardless of
-        # the underlying ``action_type`` (which the LLM might emit as
-        # ``answer_directly`` since agents usually answer in prose).
+        # 先按 ``action.kind`` 派发（per ``fea-agent-mirror``）——
+        # ``kind="agent"`` 的 action 走 agent 路径，无论底层
+        # ``action_type`` 是什么（LLM 可能发出 ``answer_directly``，
+        # 因为 agent 通常以散文回答）。
         if action.kind == "agent":
             async for event in _run_agent(action, ctx, deps, cfg):  # type: ignore[assignment]
                 yield event
@@ -166,11 +160,9 @@ async def _engine_loop(
                 elif action.command and (
                     directive := deps.directive_registry.get(action.command)
                 ) is not None:
-                    # Dynamic dispatch: any slash command that maps to a
-                    # registered Directive gets routed through the LLM
-                    # directive execution path. Adding a new directive
-                    # does NOT touch this branch; the DirectiveRegistry
-                    # is the single source of truth.
+                    # 动态派发：任何映射到已注册 Directive 的斜杠命令
+                    # 都走 LLM 指令执行路径。新增 directive 无需触碰本分支；
+                    # DirectiveRegistry 是唯一的真理来源。
                     if not cfg.fast_mode:
                         yield _log(
                             f"[engine] {action.command} → directive "
@@ -189,13 +181,11 @@ async def _engine_loop(
 
             case "call_tool":
                 if deps.tool_loop is not None:
-                    # LLM-driven multi-step tool loop (ReAct-style).
-                    # The loop observes ``ToolResult`` events and may
-                    # continue calling tools until the model emits
-                    # ``answer_directly`` or the budget runs out. Rule-only
-                    # deployments (no API key) keep ``tool_loop = None``
-                    # and fall through to the synchronous ``_run_tool``
-                    # path — zero LLM cost for the common case.
+                    # LLM 驱动的多步工具循环（ReAct 风格）。
+                    # 循环观察 ``ToolResult`` 事件并可能继续调用工具，
+                    # 直到模型发出 ``answer_directly`` 或预算耗尽。
+                    # 纯规则部署（无 API key）保持 ``tool_loop = None``，
+                    # 走同步 ``_run_tool`` 路径 —— 通用情况零 LLM 成本。
                     async for event in _run_tool_loop(  # type: ignore[assignment]
                         action, ctx, deps, cfg
                     ):
@@ -218,32 +208,29 @@ async def _engine_loop(
                 yield Done(reason="ask_user", payload={"prompt": prompt})
 
     except ToolError as exc:
-        # ``ToolError`` is a domain exception (path / permission / tool not
-        # found / workflow not found); capture the traceback so the user
-        # can see *where* in the tool / workflow the failure originated
-        # without needing to attach a debugger.
+        # ``ToolError`` 是领域异常（路径 / 权限 / 未找到工具 /
+        # 未找到工作流）；捕获堆栈让用户能看到失败源自工具 / 工作流的
+        # 哪个位置，而无需挂调试器。
         tb = traceback.format_exc()
         log.warning("工具错误: %s", exc, exc_info=True)
         yield ErrorEvent(message=f"工具错误: {exc}", traceback=tb)
         yield Done(reason="aborted", payload={"error": str(exc)})
     except SkillError as exc:
-        # ``SkillError`` is the Skill-side equivalent of ``ToolError``:
-        # raised by ``Skill.run`` for recoverable failures (missing
-        # project root, unsatisfied preconditions, malformed arguments).
-        # Tagged with the rejected command so the REPL can render a
-        # useful red ✗ message that tells the user *which* skill
-        # failed.
+        # ``SkillError`` 是 Skill 侧的 ``ToolError`` 对等物：由 ``Skill.run``
+        # 抛出，代表可恢复的失败（缺失 project root、前置条件未满足、
+        # 参数格式错误）。附带被拒绝的命令，让 REPL 能渲染出有用的红色 ✗
+        # 提示，告诉用户 *哪个* skill 失败。
         tb = traceback.format_exc()
         log.warning("技能错误: %s", exc, exc_info=True)
-        # The skill command isn't on the SkillError itself — recover it
-        # from the last routed action to keep the payload stable.
+        # SkillError 本身不携带 skill command —— 从最近派发的 action 恢复，
+        # 保持 payload 稳定。
         command = getattr(exc, "command", getattr(action, "command", None))
         yield ErrorEvent(message=f"技能错误: {exc}", traceback=tb)
         yield Done(
             reason="aborted",
             payload={"error": str(exc), "command": command},
         )
-    except Exception as exc:  # noqa: BLE001 — engine boundary must never raise
+    except Exception as exc:  # noqa: BLE001 — 引擎边界绝不能抛
         tb = traceback.format_exc()
         log.exception("引擎边界异常: %s", exc)
         yield ErrorEvent(message=f"引擎异常: {exc}", traceback=tb)
@@ -255,7 +242,7 @@ def _init_turn_handled(
     project_root: Path | None,
     project_state: str,
 ) -> bool:
-    """Return True when ``/init`` was fully handled before state-matrix checks."""
+    """当 ``/init`` 在状态矩阵校验之前已完整处理时返回 True。"""
 
     if should_run_init_brief(
         user_input,
@@ -273,7 +260,7 @@ async def _maybe_run_init_brief_or_block(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done]:
-    """Handle REPL ``/init <brief>`` on a bound S1 project, or steer S0 users."""
+    """在已绑定 S1 项目上处理 REPL ``/init <brief>``，或引导 S0 用户。"""
 
     if not should_run_init_brief(
         ctx.user_input,
@@ -334,7 +321,7 @@ async def _run_init_brief_command(
     cfg: EngineConfig,
     brief: str,
 ) -> AsyncIterator[TextChunk | Done]:
-    """Expand a creative brief into ``创意/核心创意.md`` and ``AGENT.md``."""
+    """将创意梗概展开写入 ``创意/核心创意.md`` 和 ``AGENT.md``。"""
 
     if ctx.project_root is None:
         msg = "未绑定项目，无法写入创意。"
@@ -345,10 +332,10 @@ async def _run_init_brief_command(
     if not cfg.fast_mode:
         yield TextChunk(text="[engine] /init → apply_init_brief\n")
 
-    # ``writer.agents.process_init_brief`` is the only Python-side
-    # capability that survives the ``chg-remove-roles`` cleanup; we
-    # call it via :func:`writer.project.init_brief.apply_init_brief` so
-    # the engine boundary does not need to know about Settings.
+    # ``writer.agents.process_init_brief`` 是 ``chg-remove-roles``
+    # 清理后唯一幸存的 Python-side 能力；我们通过
+    # :func:`writer.project.init_brief.apply_init_brief` 调用它，
+    # 让引擎边界无需了解 Settings。
     from writer.config import get_settings
 
     result = apply_init_brief(
@@ -373,7 +360,7 @@ async def _run_init_command(
     ctx: EngineContext,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done]:
-    """Create a project workspace from ``/init <name>`` and return its root."""
+    """从 ``/init <name>`` 创建项目 workspace 并返回其根目录。"""
 
     if not cfg.fast_mode:
         yield TextChunk(text="[engine] /init → create_workspace\n")
@@ -402,7 +389,7 @@ async def _run_tool(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done | ErrorEvent]:
-    """Resolve, invoke, and yield events for a ``call_tool`` action."""
+    """为 ``call_tool`` action 解析、调用并产出事件。"""
 
     name = action.tool_name or ""
     arguments = dict(action.arguments)
@@ -411,9 +398,9 @@ async def _run_tool(
         yield TextChunk(text=f"[engine] 工具 {name} 调用中…\n")
     yield ToolCall(name=name, arguments=arguments)
 
-    # The tool layer's own try/except inside _engine_loop will catch
-    # ToolError; here we just call and let exceptions propagate up so the
-    # outer boundary produces ErrorEvent + Done(aborted).
+    # 工具层自身的 try/except 位于 _engine_loop 之内，会捕获
+    # ToolError；这里只是调用并让异常向外传播，由外层边界产生
+    # ErrorEvent + Done(aborted)。
     result = deps.tool_registry.invoke(name, deps.tool_runtime, **arguments)
     yield ToolResult(name=name, output=result.output)
 
@@ -431,21 +418,19 @@ async def _run_tool_loop(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
-    """Delegate to :class:`writer.llm.agent.LLMToolLoop` for multi-step calls.
+    """多步调用委托给 :class:`writer.llm.agent.LLMToolLoop`。
 
-    Pre-condition: ``deps.tool_loop is not None`` (the engine's
-    ``case "call_tool"`` branch only routes here when that's true).
+    前置条件：``deps.tool_loop is not None``（引擎的 ``case "call_tool"``
+    分支只在这种情况下路由到这里）。
 
-    ``ToolError`` raised by the loop propagates upward so the outer
-    ``_engine_loop`` ``except ToolError`` arm produces the same
-    ``ErrorEvent + Done(aborted)`` UX as the synchronous ``_run_tool``
-    path — no exception-swallowing at this seam.
+    循环内抛出的 ``ToolError`` 向外传播，让外层 ``_engine_loop`` 的
+    ``except ToolError`` 分支产出与同步 ``_run_tool`` 一致的
+    ``ErrorEvent + Done(aborted)`` UX —— 此接缝不做吞异常。
     """
 
     if deps.tool_loop is None:
-        # Defensive: should never reach here given the engine's
-        # ``case "call_tool"`` guard, but a clearly-worded error keeps
-        # the contract obvious to anyone touching this later.
+        # 防御性：考虑到引擎 ``case "call_tool"`` 守卫，理论上走不到这里，
+        # 但清晰的报错能让任何后续维护者一眼看清契约。
         msg = "_run_tool_loop called without deps.tool_loop"
         raise RuntimeError(msg)
     if not cfg.fast_mode:
@@ -462,25 +447,23 @@ async def _run_workflow(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done]:
-    """Run a registered workflow and dispatch on its :class:`WorkflowResult`.
+    """运行已注册的工作流并按其 :class:`WorkflowResult` 派发。
 
-    Maps ``result.status`` to a ``DoneReason``:
+    将 ``result.status`` 映射为 ``DoneReason``：
 
-    * ``"completed"`` → ``Done(reason="workflow_completed", payload=...)``
-      with the workflow's ``artifacts`` (paths stringified) and
-      ``metrics`` in the payload so the CLI can render them.
-    * ``"failed"`` → ``Done(reason="aborted", payload={"workflow": name, "error": ...})``
-      so the existing engine boundary's aborted branch handles the
-      error UX consistently.
+    * ``"completed"`` → ``Done(reason="workflow_completed", payload=...)``，
+      payload 中携带工作流的 ``artifacts``（路径转字符串）和
+      ``metrics``，便于 CLI 渲染。
+    * ``"failed"`` → ``Done(reason="aborted", payload={"workflow": name, "error": ...})``，
+      让现有引擎边界的 aborted 分支以一致的方式处理错误 UX。
     * ``"pending"`` → ``Done(reason="aborted", payload={"workflow": name, "decision": "needs_rewrite"})``
-      (PR3+). The previous PR1 deprecation branch for ``workflow_pending``
-      is removed; workflows that need a rewrite signal it via
-      ``status="pending"`` but the engine surfaces it through the
-      ``aborted`` reason (with a ``decision`` metric so consumers
-      can distinguish rewrite-needed from genuine failures).
+      （PR3+）。PR1 中用于 ``workflow_pending`` 的弃用分支已移除；
+      需要重写信号的工作流通过 ``status="pending"`` 表达，
+      但引擎通过 ``aborted`` reason 暴露（附带 ``decision`` metric
+      以便消费者区分"需要重写"和真实失败）。
 
-    The legacy ``[engine] 工作流 X 启动`` log chunk is kept in non-fast
-    mode for diagnostic parity with the previous stub path.
+    旧的 ``[engine] 工作流 X 启动`` 日志块在非 fast 模式下保留，
+    以保持与原 stub 路径的诊断一致性。
     """
     if not cfg.fast_mode:
         yield TextChunk(text=f"[engine] 工作流 {name} 启动\n")
@@ -498,12 +481,10 @@ async def _run_workflow(
         )
         return
     if result.status == "pending":
-        # PR3+: pending = the workflow delivered a result that
-        # signals "this needs upstream action" (e.g. needs_rewrite
-        # from review_chapter). The engine surfaces it as ``aborted``
-        # with a ``decision`` metric so the REPL can show a useful
-        # message. ``workflow_pending`` is no longer a valid
-        # ``DoneReason``.
+        # PR3+：pending = 工作流产出了一个「需要上游动作」的信号
+        # （例如 review_chapter 的 needs_rewrite）。引擎以 ``aborted``
+        # 暴露，附带 ``decision`` metric 让 REPL 能展示有用的提示。
+        # ``workflow_pending`` 不再是合法的 ``DoneReason``。
         decision = str(result.metrics.get("decision", "needs_rewrite"))
         yield Done(
             reason="aborted",
@@ -529,31 +510,29 @@ async def _run_agent(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | ActionEvent | Interrupt | ToolCall | ToolResult | Done | ErrorEvent]:
-    """Dispatch a ``kind="agent"`` action to the LLM with the agent's body.
+    """将 ``kind="agent"`` action 派发给 LLM，注入 agent body。
 
-    Per ``fea-agent-mirror`` Decision 7: the engine composes an LLM
-    call whose system prompt is the chosen agent's ``body`` (the
-    agent's identity / role description) plus the genre-specific
-    outline template. The LLM is invoked through the existing
-    :class:`writer.llm.agent.LLMToolLoop` path (when an API key is
-    configured) so the model can use the tool registry to read
-    project state before producing a structured outline.
+    Per ``fea-agent-mirror`` Decision 7：引擎组装一次 LLM 调用，
+    其 system prompt 由所选 agent 的 ``body``（agent 的身份 / 角色描述）
+    与题材特定的大纲模板拼接。LLM 通过现有的
+    :class:`writer.llm.agent.LLMToolLoop` 路径调用（配置了 API key 时），
+    让模型在产出结构化大纲前可用 tool registry 读取项目状态。
 
-    Without an LLM (``deps.tool_loop is None``) the helper emits a
-    preview TextChunk describing the picked agent (no real outline is
-    produced — the previous ``writer.roles.StoryAgent._draft_outline_fallback``
-    was deleted in ``chg-remove-roles``). The CLI renders the agent
-    name in the terminal ``Done`` payload so the user sees which agent
-    produced the response.
+    没有 LLM 时（``deps.tool_loop is None``）helper 产出一段预览
+    TextChunk 描述被选中的 agent（不生成真实大纲 —— 之前的
+    ``writer.roles.StoryAgent._draft_outline_fallback`` 已在
+    ``chg-remove-roles`` 中删除）。CLI 在终结 ``Done`` payload 中
+    渲染 agent 名称，让用户看到是哪个 agent 产出了回答。
 
-    Errors:
+    错误：
 
-    * :class:`writer.agents.AgentRegistryError` raised by
-      ``agent_registry.require`` when ``action.target_agent`` is not
-      a known agent → caught by the engine boundary, surfaced as
-      ``ErrorEvent + Done(aborted, payload={"error": ..., "command": name})``.
-    * Other LLM / tool failures are caught by the outer ``_engine_loop``
-      boundary (``except Exception`` arm).
+    * :class:`writer.agents.AgentRegistryError` 由
+      ``agent_registry.require`` 在 ``action.target_agent`` 不是已知
+      agent 时抛出 → 由引擎边界捕获，以
+      ``ErrorEvent + Done(aborted, payload={"error": ..., "command": name})``
+      暴露。
+    * 其他 LLM / 工具失败由外层 ``_engine_loop`` 边界
+      （``except Exception`` 分支）捕获。
     """
 
     from writer.agents import AgentRegistryError  # noqa: PLC0415
@@ -562,11 +541,10 @@ async def _run_agent(
     try:
         agent = deps.agent_registry.require(agent_name)
     except AgentRegistryError as exc:
-        # Defer to the engine boundary's existing ``except`` arms by
-        # re-raising as a ``ToolError``-shaped ``AgentRegistryError``;
-        # but since ``AgentRegistryError`` is a ``ValueError`` (not
-        # ``ToolError``), we instead emit the events directly so the
-        # boundary's catch-all arm doesn't double-wrap the message.
+        # 把决策让给引擎边界的现有 ``except`` 分支：原计划是重抛为
+        # ``ToolError`` 形态的 ``AgentRegistryError``；但由于
+        # ``AgentRegistryError`` 是 ``ValueError``（不是 ``ToolError``），
+        # 我们改为直接产出事件，避免边界的 catch-all 分支重复包装消息。
         from writer.engine.events import ErrorEvent
 
         tb_msg = str(exc)
@@ -582,12 +560,10 @@ async def _run_agent(
         yield _log(f"[engine] agent dispatch → {agent_name}\n", cfg)
 
     if deps.tool_loop is not None:
-        # LLM-driven path: feed the agent's body to the existing tool
-        # loop, which already knows how to invoke the LLM with a
-        # structured-output schema and the tool registry. We piggy-
-        # back on ``answer_directly`` so the loop just produces prose;
-        # the agent body is the system identity, the user input is
-        # the human message.
+        # LLM 驱动路径：把 agent body 喂给现有工具循环，
+        # 它已经知道如何用结构化输出 schema 和 tool registry 调用 LLM。
+        # 借力 ``answer_directly`` 让循环只产出散文；
+        # agent body 是 system identity，用户输入是 human message。
         agent_action = AgentAction(
             action_type="answer_directly",
             command=None,
@@ -602,10 +578,9 @@ async def _run_agent(
         async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
             yield event
     else:
-        # No LLM available — emit the agent's body as a preview so the
-        # user can see what agent got picked and what its identity is.
-        # This mirrors the rule-only fallback used elsewhere in the
-        # engine (``_run_directive``).
+        # 没有可用 LLM —— 产出 agent body 作为预览，让用户看到选中
+        # 的 agent 以及它的身份。这与引擎其他地方使用的纯规则
+        # 回退路径一致（``_run_directive``）。
         yield TextChunk(
             text=(
                 f"[agent {agent_name!r} preview, no LLM configured]\n"
@@ -632,26 +607,21 @@ async def _run_directive(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done | ToolCall | ToolResult]:
-    """Execute a Markdown SKILL.md directive via LLM tool loop.
+    """通过 LLM 工具循环执行 Markdown SKILL.md directive。
 
-    The directive's body is intended as instruction text for the LLM.
-    This helper resolves ``@reference path/to/file.md`` mentions in
-    the body and exposes them so the LLM can read the relevant
-    references. Once the LLM has consumed the instructions, it drives
-    the existing tool registry (``safe_read_file``,
-    ``safe_write_file``, etc.) to do the actual work.
+    directive 的 body 是给 LLM 的指令文本。本 helper 解析 body 中的
+    ``@reference path/to/file.md`` 引用并暴露给 LLM，让它能读取相关
+    引用资料。LLM 消化指令后，驱动现有 tool registry
+    （``safe_read_file``、``safe_write_file`` 等）完成实际工作。
 
-    Implementation status (per chg-markdown-skills spec):
-    * Body + resolved references are injected into the LLM context
-      via the existing ``deps.tool_loop.run`` path, which already
-      handles the JSON-action protocol and tool dispatch.
-    * The directive's metadata (``command`` / ``description`` /
-      ``requires_states``) is logged to the user via ``TextChunk``
-      for transparency.
-    * If ``deps.tool_loop`` is ``None`` (rule-only deployment), the
-      helper degrades to a TextChunk-only stub that prints the
-      directive body summary — the actual LLM execution is not
-      possible without an API key.
+    实现状态（per chg-markdown-skills spec）：
+    * Body + 解析后的引用通过现有 ``deps.tool_loop.run`` 路径注入
+      LLM 上下文，该路径已处理 JSON 动作协议与工具派发。
+    * Directive 的元数据（``command`` / ``description`` /
+      ``requires_states``）通过 ``TextChunk`` 输出给用户，便于透明。
+    * 若 ``deps.tool_loop`` 为 ``None``（纯规则部署），
+      helper 降级为只输出 TextChunk 的 stub，打印 directive body
+      摘要 —— 没有 API key 时无法真正执行 LLM。
     """
 
     if not cfg.fast_mode:
@@ -659,17 +629,16 @@ async def _run_directive(
             text=f"[engine] {directive.command} → directive ({directive.command})\n"
         )
 
-    # Resolve ``@reference path`` mentions to (relpath, content) pairs.
-    # Local import to avoid a circular import at module load time
-    # (directive_discovery already imports from skills.registry).
+    # 把 ``@reference path`` 提及解析为 (相对路径, 内容) 对。
+    # 本地 import 以避免模块加载时的循环 import
+    # （directive_discovery 已经从 skills.registry import）。
     from writer.skills.directive_discovery import resolve_references  # noqa: PLC0415
 
     resolved = resolve_references(directive.body, directive.references)
 
     if deps.tool_loop is not None:
-        # Hand the directive + resolved references to the existing
-        # LLM tool loop. The loop reads the action's body and
-        # references, then drives the tool registry.
+        # 把 directive + 解析后的引用交给现有 LLM 工具循环。
+        # 循环读取 action 的 body 和 references，然后驱动 tool registry。
         from writer.routing import AgentAction  # noqa: PLC0415
 
         action = AgentAction(
@@ -677,16 +646,14 @@ async def _run_directive(
             command=directive.command,
             answer=directive.body,
         )
-        # Stash resolved references on a transient attribute so the
-        # loop can read them; the loop's contract is satisfied by
-        # the answer field carrying the directive body.
-        # NOTE: a future task may wire ``resolved`` through a
-        # dedicated directive-aware loop subclass.
+        # 把解析后的引用暂存到临时属性，便于循环读取；
+        # 循环的契约由 answer 字段携带的 directive body 满足。
+        # NOTE: 未来任务可能通过专用的 directive-aware 循环子类
+        # 接入 ``resolved``。
         async for event in deps.tool_loop.run(action, ctx, deps, cfg):
             yield event
     else:
-        # No LLM available — emit a helpful preview so the user can
-        # see what the directive would have done.
+        # 没有可用 LLM —— 产出有用的预览，让用户看到 directive 本应做什么。
         yield TextChunk(
             text=(
                 f"[engine] directive body (preview, no LLM configured):\n"

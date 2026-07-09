@@ -1,16 +1,14 @@
-"""Shared prompt utilities — the JSON-contract fallback for non-``response_format`` providers.
+"""共享 prompt 工具 —— 不支持 ``response_format`` 的 provider 的 JSON 契约回退。
 
-Originally implemented as a private helper ``_json_contract_message``
-inside :mod:`writer.llm.structured`. Some OpenAI-compatible providers
-(notably DeepSeek at the time this was added) reject the
-``response_format`` payload emitted by LangChain's native structured
-output path. The fallback asks the model for plain JSON and validates
-the response locally against a Pydantic schema.
+最初作为私有 helper ``_json_contract_message`` 实现在
+:mod:`writer.llm.structured` 中。一些 OpenAI 兼容 provider（尤其是
+添加本模块时的 DeepSeek）会拒绝 LangChain 原生结构化输出路径产出的
+``response_format`` payload。回退路径向模型请求纯 JSON 并在本地
+针对 Pydantic schema 校验响应。
 
-The contract is template-shaped so it can live in the registry like any
-other prompt. The JSON schema is rendered at call time rather than at
-template construction time, because the schema itself is supplied by
-the caller (different call sites use different Pydantic models).
+契约是模板形态的，因此可以像其他 prompt 一样在 registry 中存在。
+JSON schema 在调用时而非模板构造时渲染，因为 schema 本身由调用方
+提供（不同调用点使用不同 Pydantic 模型）。
 """
 
 from __future__ import annotations
@@ -22,12 +20,11 @@ from pydantic import BaseModel
 
 
 def json_contract_message(schema: type[BaseModel]) -> SystemMessage:
-    """Return the system message that asks an LLM to emit a JSON object
-    matching ``schema``.
+    """返回要求 LLM 输出匹配 ``schema`` 的 JSON 对象的 system message。
 
-    The message is produced on demand (not at module import time) because
-    the schema is supplied per call. Callers feed the result to the LLM
-    via :func:`writer.llm.structured.invoke_structured_json`.
+    该消息按需产生（而非在模块 import 时），因为 schema 由每次调用
+    提供。调用方通过 :func:`writer.llm.structured.invoke_structured_json`
+    把结果喂给 LLM。
     """
 
     schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
