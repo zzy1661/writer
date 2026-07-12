@@ -2,8 +2,8 @@
 
 按 chg-markdown-skills Decision 3 从 ``SkillRegistry`` 更名而来。
 内部 dict 的 value 类型从 ``Skill`` 改为 ``SkillDirective``；公开 API
-（``get`` / ``commands`` / ``help_entries`` / ``state_matrix``）
-形状与旧 registry 兼容，下游调用方（REPL 帮助 / Tab 补全 / 状态机门控）
+（``get`` / ``commands`` / ``help_entries``）
+形状与旧 registry 兼容，下游调用方（REPL 帮助 / Tab 补全）
 不需要改动调用点 —— 只是类型名变了。
 
 发现分三层（Replace 语义 —— 命令冲突时后者覆盖前者）：
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from writer.skills.directive_discovery import (
     discover_entry_point_directives,
@@ -30,9 +29,6 @@ from writer.skills.directive_discovery import (
 )
 from writer.skills.errors import SkillError
 from writer.skills.protocol import SkillDirective
-
-if TYPE_CHECKING:
-    from writer.project.state import ProjectState
 
 log = logging.getLogger(__name__)
 
@@ -56,15 +52,6 @@ def _validate(directive: SkillDirective) -> None:
         raise SkillError(msg)
     if not isinstance(directive.description, str) or not directive.description.strip():
         msg = f"Directive {directive.command!r} missing non-empty `description`"
-        raise SkillError(msg)
-    if (
-        not isinstance(directive.requires_states, frozenset)
-        or not directive.requires_states
-    ):
-        msg = (
-            f"Directive {directive.command!r} has invalid `requires_states` "
-            "(must be a non-empty frozenset[ProjectState])"
-        )
         raise SkillError(msg)
 
 
@@ -117,16 +104,6 @@ class DirectiveRegistry:
         """
 
         return [(cmd, self._by_command[cmd].description) for cmd in self.commands()]
-
-    def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
-        """返回每个已注册 directive 的 ``{command: requires_states}``。
-
-        为 :func:`writer.project.validate_command_available` 提供数据，
-        让 directive 命令的状态矩阵完全由 directive 元数据派生 —— 新增
-        directive 时其可用性映射自动接入。
-        """
-
-        return {cmd: self._by_command[cmd].requires_states for cmd in self.commands()}
 
     # ----- execution --------------------------------------------------------
 

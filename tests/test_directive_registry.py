@@ -2,9 +2,9 @@
 
 Replaces the prior ``test_skill_registry.py`` for the new
 :class:`writer.skills.DirectiveRegistry` type. The public surface
-(``get`` / ``commands`` / ``help_entries`` / ``state_matrix``) is
-shape-compatible with the prior ``SkillRegistry`` so the broader CLI
-REPL integration is unaffected.
+(``get`` / ``commands`` / ``help_entries``) is shape-compatible with
+the prior ``SkillRegistry`` so the broader CLI REPL integration is
+unaffected.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from writer.project import ProjectState
 from writer.skills import (
     DirectiveRegistry,
     SkillDirective,
@@ -24,17 +23,10 @@ from writer.skills import (
 def _directive(
     command: str = "/test",
     description: str = "test",
-    requires=None,
 ) -> SkillDirective:
-    # Bypass the default — ``requires or default`` would mask an
-    # explicitly empty frozenset because empty frozenset is falsy.
-    requires_states = (
-        frozenset({ProjectState.INITIALIZED}) if requires is None else requires
-    )
     return SkillDirective(
         command=command,
         description=description,
-        requires_states=requires_states,
         body="body",
         references={},
         scripts=[],
@@ -67,7 +59,7 @@ def test_built_directive_registry_project_shadows_shipped(tmp_path: Path) -> Non
     project_skill = skills_dir / "大纲"
     project_skill.mkdir()
     (project_skill / "SKILL.md").write_text(
-        "---\ncommand: /大纲\ndescription: project-level override\nrequires_states: [S1]\n---\nbody\n",
+        "---\ncommand: /大纲\ndescription: project-level override\n---\nbody\n",
         encoding="utf-8",
     )
 
@@ -114,25 +106,12 @@ def test_registry_help_entries_pairs_command_with_description() -> None:
     assert dict(pairs) == {"/x": "x-desc", "/y": "y-desc"}
 
 
-def test_registry_state_matrix_derives_from_metadata() -> None:
-    registry = DirectiveRegistry(
-        directives=[
-            _directive(
-                command="/x", requires=frozenset({ProjectState.INITIALIZED})
-            ),
-            _directive(
-                command="/y",
-                requires=frozenset(
-                    {ProjectState.WRITING, ProjectState.HAS_TOC}
-                ),
-            ),
-        ]
-    )
-    matrix = registry.state_matrix()
-    assert matrix["/x"] == frozenset({ProjectState.INITIALIZED})
-    assert matrix["/y"] == frozenset(
-        {ProjectState.WRITING, ProjectState.HAS_TOC}
-    )
+def test_registry_has_no_state_matrix_method() -> None:
+    # Command availability is no longer a registry concern
+    # (per chg-remove-state-machine-enforcement); the introspection
+    # surface is commands() + help_entries() only.
+    registry = DirectiveRegistry(directives=[_directive(command="/x")])
+    assert not hasattr(registry, "state_matrix")
 
 
 # ---------------------------------------------------------------------------
@@ -152,15 +131,6 @@ def test_registry_rejects_directive_with_empty_description() -> None:
 
     with pytest.raises(SkillError):
         DirectiveRegistry(directives=[_directive(description="")])
-
-
-def test_registry_rejects_directive_with_empty_requires_states() -> None:
-    from writer.skills.errors import SkillError
-
-    with pytest.raises(SkillError):
-        DirectiveRegistry(
-            directives=[_directive(requires=frozenset())]
-        )
 
 
 # ---------------------------------------------------------------------------

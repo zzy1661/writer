@@ -26,7 +26,7 @@ from writer.engine.config import build_engine_config
 from writer.engine.deps import EngineDeps
 from writer.engine.loop import _run_directive
 from writer.llm.prose import DeterministicProseClient
-from writer.project import ProjectState, create_workspace
+from writer.project import create_workspace, detect_state
 from writer.routing import AgentAction
 from writer.skills import (
     SkillDirective,
@@ -52,7 +52,6 @@ def _directive(
     return SkillDirective(
         command=command,
         description=description,
-        requires_states=frozenset({ProjectState.INITIALIZED}),
         body=body,
         references=references or {},
         scripts=[],
@@ -167,6 +166,82 @@ def test_engine_dispatches_via_directive_registry(tmp_path: Path) -> None:
     answered = [e for e in done_events if e.reason == "answered"]
     assert answered, "expected Done(reason='answered')"
     assert answered[0].payload.get("directive") == "/大纲"
+
+
+def _run_engine_sync(ctx: EngineContext, deps: EngineDeps) -> list:
+    import asyncio
+
+    async def _consume(aiter: AsyncIterator) -> list:
+        out = []
+        async for ev in aiter:
+            out.append(ev)
+        return out
+
+    return asyncio.run(_consume(run_engine(ctx, deps)))
+
+
+def test_dispatch_directive_in_s4_does_not_block(tmp_path: Path) -> None:
+    """`/大纲` reaches the directive body in a mid-book S4 project.
+
+    Per chg-remove-state-machine-enforcement: the engine no longer
+    gates directives by lifecycle state. In S4 (manuscript has
+    chapters) the writer must be able to revise the outline, so
+    ``/大纲`` must NOT abort — it enters the directive body and the LLM
+    decides append vs overwrite from the actual file state.
+    """
+    from writer.project.state import ProjectState
+
+    workspace = create_workspace("s4-outline", tmp_path)
+    (workspace.root / "outline" / "大纲.md").write_text("旧大纲", encoding="utf-8")
+    (workspace.root / "manuscript" / "chapter-01.md").write_text(
+        "正文", encoding="utf-8"
+    )
+    assert detect_state(workspace.root) == ProjectState.WRITING
+
+    deps = _stub_deps(workspace.root)
+    events = _run_engine_sync(
+        EngineContext(
+            user_input="/大纲 扩写反派动机线",
+            project_root=workspace.root,
+            project_state="S4",
+        ),
+        deps,
+    )
+
+    done_events = [e for e in events if isinstance(e, Done)]
+    assert done_events, "expected a terminal Done event"
+    assert done_events[0].reason == "answered"
+    assert done_events[0].payload.get("directive") == "/大纲"
+    assert not any(e.reason == "aborted" for e in done_events)
+
+
+def test_dispatch_directive_in_s4_does_not_block_toc(tmp_path: Path) -> None:
+    """`/目录` reaches the directive body in a mid-book S4 project."""
+    from writer.project.state import ProjectState
+
+    workspace = create_workspace("s4-toc", tmp_path)
+    (workspace.root / "outline" / "大纲.md").write_text("旧大纲", encoding="utf-8")
+    (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
+    (workspace.root / "manuscript" / "chapter-01.md").write_text(
+        "正文", encoding="utf-8"
+    )
+    assert detect_state(workspace.root) == ProjectState.WRITING
+
+    deps = _stub_deps(workspace.root)
+    events = _run_engine_sync(
+        EngineContext(
+            user_input="/目录 把反派觉醒卷加入",
+            project_root=workspace.root,
+            project_state="S4",
+        ),
+        deps,
+    )
+
+    done_events = [e for e in events if isinstance(e, Done)]
+    assert done_events, "expected a terminal Done event"
+    assert done_events[0].reason == "answered"
+    assert done_events[0].payload.get("directive") == "/目录"
+    assert not any(e.reason == "aborted" for e in done_events)
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
 ---
 command: /目录
 description: 生成或查看章节目录
-requires_states: [HAS_OUTLINE, HAS_TOC]
 ---
 
 # 目录 (Table of Contents)

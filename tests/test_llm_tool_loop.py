@@ -412,7 +412,6 @@ def _stub_directive_registry() -> Any:
     fake_directive = SkillDirective(
         command="/大纲",
         description="测试 directive",
-        requires_states=frozenset(),
         body="四幕模板 body 内容",
         references={},
     )
@@ -504,7 +503,6 @@ def test_initial_messages_includes_references() -> None:
     fake_directive = SkillDirective(
         command="/大纲",
         description="测试 directive",
-        requires_states=frozenset(),
         body="body",
         references={"template.md": "模板内容", "examples.md": "示例内容"},
     )

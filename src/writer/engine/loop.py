@@ -58,7 +58,6 @@ from writer.project import (
     ProjectState,
     create_workspace,
     detect_state,
-    validate_command_available,
 )
 from writer.project.init_brief import (
     apply_init_brief,
@@ -120,24 +119,6 @@ async def _engine_loop(
                 yield event
             if _init_turn_handled(ctx.user_input, ctx.project_root, ctx.project_state):
                 return
-
-        check = validate_command_available(
-            action.command,
-            ctx.project_root,
-            ctx.project_state,
-            skill_registry=deps.directive_registry,
-        )
-        if not check.ok:
-            yield TextChunk(text=f"{check.reason}\n")
-            yield Done(
-                reason="aborted",
-                payload={
-                    "command": action.command,
-                    "project_state": check.state.value,
-                    "error": check.reason,
-                },
-            )
-            return
 
         # 先按 ``action.kind`` 派发（per ``fea-agent-mirror``）——
         # ``kind="agent"`` 的 action 走 agent 路径，无论底层
@@ -617,8 +598,8 @@ async def _run_directive(
     实现状态（per chg-markdown-skills spec）：
     * Body + 解析后的引用通过现有 ``deps.tool_loop.run`` 路径注入
       LLM 上下文，该路径已处理 JSON 动作协议与工具派发。
-    * Directive 的元数据（``command`` / ``description`` /
-      ``requires_states``）通过 ``TextChunk`` 输出给用户，便于透明。
+    * Directive 的元数据（``command`` / ``description``）
+      通过 ``TextChunk`` 输出给用户，便于透明。
     * 若 ``deps.tool_loop`` 为 ``None``（纯规则部署），
       helper 降级为只输出 TextChunk 的 stub，打印 directive body
       摘要 —— 没有 API key 时无法真正执行 LLM。

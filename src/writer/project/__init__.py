@@ -14,9 +14,7 @@ from writer.project.genre import (
     prompt_genres,
 )
 from writer.project.state import (
-    COMMAND_ALLOWED,
     STATE_DESCRIPTIONS,
-    CommandCheck,
     ProjectSnapshot,
     ProjectState,
     append_agent_requirements,
@@ -29,14 +27,11 @@ from writer.project.state import (
     refresh_agent_file,
     render_agent_file,
     safe_cwd,
-    validate_command_available,
 )
 from writer.project.workspace import NovelWorkspace, create_new_workspace, create_workspace
 
 __all__ = [
-    "COMMAND_ALLOWED",
     "ChapterSummariesError",
-    "CommandCheck",
     "GENRE_OPTIONS",
     "NovelWorkspace",
     "ProjectSnapshot",
@@ -61,5 +56,4 @@ __all__ = [
     "refresh_agent_file",
     "render_agent_file",
     "safe_cwd",
-    "validate_command_available",
 ]

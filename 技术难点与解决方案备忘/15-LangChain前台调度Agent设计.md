@@ -22,7 +22,7 @@ REPL 用户输入混合三类:
 
 - 长任务应该交给 LangGraph(占位 workflow 现在是 `_DefaultEngineDeps.run_workflow`,真实图待 `EngineDeps` 注入 `WorkflowStarter`)
 - 文件写入应该交给 Tool(`safe_read_file` / `safe_write_file`)
-- 命令可用性应该由状态机判断(`writer.project.validate_command_available`)
+- 命令可用性:**不再由状态机拦截**(per `chg-remove-state-machine-enforcement`,`validate_command_available` 已删除);命令在任意状态可调用,"已存在 vs 新建"判断下沉到 SKILL.md body
 
 前台调度的边界:**只产出 `AgentAction`,不直接动手**。
 

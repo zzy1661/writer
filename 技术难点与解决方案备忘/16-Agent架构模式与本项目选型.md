@@ -167,7 +167,7 @@ Tool-Use 本身不是 Agent 范式,但是大多数 Agent 都依赖它。RAG Agen
 
 1. **不把长任务交给前台路由器。** `start_workflow` 一旦返回,前台就不再干涉,由 LangGraph 接管。
 2. **不引入独立的多 Agent 实例通信。** 多个角色通过 LangGraph 节点的 prompt 模板切换,而不是各自拥有独立进程;它们看到的上下文由 `_build_canon_block` 裁剪。
-3. **状态机先于路由器。** `ProjectState` 是 S0-S5 大状态机,路由器在其下工作;`validate_command_available` 拦截所有不符合状态的指令。
+3. **状态机只作展示。** `ProjectState` 是 S0-S5 大状态标签,服务 `/状态` 显示;命令拦截机制(`validate_command_available`)已随 `chg-remove-state-machine-enforcement` 删除,不再拦截任何指令。
 4. **Tool 是 Agent 的边界。** 任何文件副作用必须经过注册过的 Tool,避免 LLM 直接编辑 Markdown。
 5. **业务规则是 directive。** "写大纲怎么做"、"续写章节怎么做"等业务规则通过 SKILL.md markdown 文件描述,LLM 在工具循环里直接消费这些指令。
 
@@ -240,8 +240,8 @@ tool_node = ToolNode([safe_read_file])
 # ---------- 4. Markdown directive ----------
 # `<project_root>/.writer/skills/大纲/SKILL.md`:
 # ---
+# command: /大纲
 # description: 生成大纲并写入 outline/大纲.md
-# requires_states: [S1]
 # ---
 # 你是一位编剧顾问。读取 `创意/核心创意.md` 与 `大纲/` 目录,
 # 然后调用 safe_write_file 写 outline/大纲.md ...

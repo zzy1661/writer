@@ -1,11 +1,10 @@
-"""项目状态检测与命令可用性规则。"""
+"""项目状态检测。"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
 
 
 class ProjectState(StrEnum):
@@ -39,16 +38,6 @@ class ProjectSnapshot:
     outline_path: Path | None = None
 
 
-@dataclass(frozen=True)
-class CommandCheck:
-    """检查某命令在当前状态下是否可运行的结果。"""
-
-    command: str
-    state: ProjectState
-    ok: bool
-    reason: str = ""
-
-
 _OUTLINE_PATHS = (
     Path("outline") / "大纲.md",
     Path("大纲") / "大纲.md",
@@ -68,32 +57,6 @@ _MANUSCRIPT_DIRS = (
 #: 它们能校验 ``AGENT.md`` 写入保留项目所需结构，而无需在两处硬编码
 #: 字面量（per ``chg-add-write-edit-glob`` D4）。
 CURRENT_STATE_SECTION_HEADER = "## 当前状态"
-
-COMMAND_ALLOWED: dict[str, set[ProjectState]] = {
-    # 注：/大纲, /目录 故意缺席 —— 它们是 Skill-backed 命令，
-    # 可用性从注册 Skill 的 ``requires_states`` 派生。
-    # 见 ``validate_command_available`` + ``SkillRegistryView``。
-    "/init": {ProjectState.UNINITIALIZED},
-    "/创作": {ProjectState.HAS_TOC, ProjectState.WRITING},
-    "/审核": {ProjectState.WRITING, ProjectState.FINISHED},
-    "/字数统计": {
-        ProjectState.INITIALIZED,
-        ProjectState.HAS_OUTLINE,
-        ProjectState.HAS_TOC,
-        ProjectState.WRITING,
-        ProjectState.FINISHED,
-    },
-}
-
-COMMAND_HINTS: dict[str, str] = {
-    "/init": (
-        "当前已经绑定项目。填写故事创意请直接输入 /init <故事梗概>；"
-        "如需新建项目，请先退出当前 REPL 或另开目录。"
-    ),
-    "/创作": "请先生成章节目录；当前 MVP 还不会从大纲自动生成目录。",
-    "/审核": "请先写出至少一章正文。",
-    "/字数统计": "请先执行 /init <项目名> 创建项目。",
-}
 
 
 def safe_cwd() -> Path | None:
@@ -190,89 +153,6 @@ def inspect_project(project_root: Path | None) -> ProjectSnapshot:
         chapter_count=count_chapters(root),
         outline_path=_first_existing_nonempty(root, _OUTLINE_PATHS),
     )
-
-
-def validate_command_available(
-    command: str | None,
-    project_root: Path | None,
-    project_state: str | ProjectState | None = None,
-    *,
-    skill_registry: SkillRegistryView | None = None,
-) -> CommandCheck:
-    """根据状态矩阵校验斜杠命令。
-
-    可用性集合的查找顺序：
-
-    1. ``skill_registry.state_matrix()`` —— 驱动 Skill 绑定命令
-       （``/大纲`` / ``/目录``），让状态矩阵完全从 Skill 元数据派生。
-    2. ``COMMAND_ALLOWED`` —— 不属于任何 Skill 的命令的静态回退
-       （``/init`` 本身以及仍手写的工具 / 工作流命令）。
-
-    未知命令保持原样走向 ``command_pending`` 分支；只有在这两个
-    来源中声明过的命令会被拦截。
-    """
-
-    state = _coerce_state(project_state) if project_root is None else detect_state(project_root)
-    if not command:
-        return CommandCheck(command="", state=state, ok=True)
-
-    skill_matrix = skill_registry.state_matrix() if skill_registry is not None else {}
-    if command in skill_matrix:
-        skill_allowed = skill_matrix[command]
-        if state in skill_allowed:
-            return CommandCheck(command=command, state=state, ok=True)
-        description = STATE_DESCRIPTIONS[state]
-        hint = _skill_hint(command)
-        return CommandCheck(
-            command=command,
-            state=state,
-            ok=False,
-            reason=f"{command} 当前不可用：项目状态为 {state.value}（{description}）。{hint}",
-        )
-
-    if command not in COMMAND_ALLOWED:
-        return CommandCheck(command=command, state=state, ok=True)
-
-    static_allowed = COMMAND_ALLOWED[command]
-    if state in static_allowed:
-        return CommandCheck(command=command, state=state, ok=True)
-
-    description = STATE_DESCRIPTIONS[state]
-    hint = COMMAND_HINTS.get(command, "请先推进项目到可用状态。")
-    return CommandCheck(
-        command=command,
-        state=state,
-        ok=False,
-        reason=f"{command} 当前不可用：项目状态为 {state.value}（{description}）。{hint}",
-    )
-
-
-@runtime_checkable
-class SkillRegistryView(Protocol):
-    """:class:`writer.skills.registry.SkillRegistry` 的结构视图。
-
-    在此定义（而非从 ``writer.skills`` 引入）以让 :mod:`writer.project.state`
-    不依赖较重的 skill 依赖。完整的
-    :class:`writer.skills.registry.SkillRegistry` 平凡地满足该 Protocol，
-    因为这两个方法都是它的公开 API。
-    """
-
-    def state_matrix(self) -> dict[str, frozenset[ProjectState]]:
-        ...
-
-
-def _skill_hint(command: str) -> str:
-    """把 Skill 驱动的命令映射为面向用户的提示字符串。
-
-    在此保留（而非放在 :mod:`writer.skills`）让状态矩阵只在能查到
-    同一命令的注册表时才报告 —— 避免把 skill 端的翻译表拉进静态
-    :data:`COMMAND_HINTS` 回退。
-    """
-
-    return {
-        "/大纲": "请先执行 /init <项目名> 创建项目。",
-        "/目录": "请先用 /大纲 生成并落盘大纲。",
-    }.get(command, "请先推进项目到可用状态。")
 
 
 def count_chapters(project_root: Path) -> int:
@@ -387,17 +267,6 @@ def read_genre_from_agent(agent_md: Path) -> str:
     return "other"
 
 
-def _coerce_state(value: str | ProjectState | None) -> ProjectState:
-    if isinstance(value, ProjectState):
-        return value
-    if value is None:
-        return ProjectState.UNINITIALIZED
-    try:
-        return ProjectState(value)
-    except ValueError:
-        return ProjectState.UNINITIALIZED
-
-
 def _first_existing_nonempty(root: Path, relatives: tuple[Path, ...]) -> Path | None:
     for relative in relatives:
         candidate = root / relative
@@ -421,12 +290,10 @@ def _is_nonempty_file(path: Path) -> bool:
 
 
 __all__ = [
-    "COMMAND_ALLOWED",
-    "CommandCheck",
+    "CURRENT_STATE_SECTION_HEADER",
     "ProjectSnapshot",
     "ProjectState",
     "STATE_DESCRIPTIONS",
-    "SkillRegistryView",
     "append_agent_requirements",
     "count_chapters",
     "detect_state",
@@ -437,5 +304,4 @@ __all__ = [
     "refresh_agent_file",
     "render_agent_file",
     "safe_cwd",
-    "validate_command_available",
 ]

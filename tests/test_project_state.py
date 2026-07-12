@@ -11,7 +11,6 @@ from writer.project import (
     discover_project_root,
     inspect_project,
     refresh_agent_file,
-    validate_command_available,
 )
 
 
@@ -74,14 +73,6 @@ def test_refresh_agent_file_writes_detected_state(tmp_path: Path) -> None:
 
     agent = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
     assert "state: S2" in agent
-
-
-def test_validate_command_blocks_write_in_s0() -> None:
-    check = validate_command_available("/创作", None, "S0")
-
-    assert check.ok is False
-    assert check.state == ProjectState.UNINITIALIZED
-    assert "请先生成章节目录" in check.reason
 
 
 def test_discover_project_root_returns_cwd_when_agent_exists(tmp_path: Path) -> None:

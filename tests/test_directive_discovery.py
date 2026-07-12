@@ -7,24 +7,18 @@ Covers:
 
 Discovery now uses YAML frontmatter parsing (replacing the prior
 Python importlib loader). Each SKILL.md is a self-contained
-directive: command + description + requires_states in frontmatter,
-Markdown body below.
+directive: command + description in frontmatter, Markdown body below.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from writer.skills import (
     discover_directives,
     discover_shipped_directives,
     resolve_references,
 )
-
-if TYPE_CHECKING:
-    pass
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -35,18 +29,15 @@ def _write_skill_md(
     skill_dir: Path,
     command: str,
     description: str = "测试 directive",
-    requires_states: list[str] | None = None,
     body: str = "## 步骤\n\n1. 读文件\n2. 写文件\n",
 ) -> Path:
     """Write a minimal valid SKILL.md into ``<skill_dir>/SKILL.md``."""
 
     skill_dir.mkdir(parents=True, exist_ok=True)
-    states = requires_states or ["S1"]
     front = (
         f"---\n"
         f"command: {command}\n"
         f"description: {description}\n"
-        f"requires_states: {states}\n"
         f"---\n"
     )
     path = skill_dir / "SKILL.md"
@@ -127,22 +118,21 @@ def test_discover_directives_parses_frontmatter_and_body(tmp_path: Path) -> None
     assert directives[0].command == "/大纲"
     assert directives[0].description == "生成或查看大纲"
     assert directives[0].body.startswith("## 步骤")
-    # requires_states: ["S1"] parses to INITIALIZED
-    from writer.project import ProjectState
-
-    assert ProjectState.INITIALIZED in directives[0].requires_states
 
 
-def test_discover_directives_accepts_state_names(tmp_path: Path) -> None:
-    """ProjectState NAMES (e.g. ``INITIALIZED``) are accepted, not just values."""
-    _write_skill_md(
-        tmp_path / ".writer" / "skills" / "test",
-        command="/test",
-        requires_states=["INITIALIZED", "HAS_OUTLINE"],
+def test_discover_directives_ignores_legacy_requires_states(tmp_path: Path) -> None:
+    """A legacy ``requires_states`` line is silently ignored, not rejected."""
+    skill_dir = tmp_path / ".writer" / "skills" / "test"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\ncommand: /test\ndescription: legacy\n"
+        "requires_states: [INITIALIZED, HAS_OUTLINE]\n---\nbody\n",
+        encoding="utf-8",
     )
     directives = discover_directives(tmp_path)
     assert len(directives) == 1
-    assert "INITIALIZED" in [s.name for s in directives[0].requires_states]
+    assert directives[0].command == "/test"
+    assert not hasattr(directives[0], "requires_states")
 
 
 def test_discover_directives_loads_references(tmp_path: Path) -> None:
@@ -221,24 +211,7 @@ def test_discover_directives_skips_missing_command(tmp_path: Path, caplog) -> No
     bad = skills_dir / "no_command"
     bad.mkdir()
     (bad / "SKILL.md").write_text(
-        "---\ndescription: missing command\nrequires_states: [S1]\n---\nbody\n",
-        encoding="utf-8",
-    )
-
-    import logging
-
-    with caplog.at_level(logging.WARNING, logger="writer.skills.directive_discovery"):
-        directives = discover_directives(tmp_path)
-    assert directives == []
-
-
-def test_discover_directives_skips_unknown_state(tmp_path: Path, caplog) -> None:
-    skills_dir = tmp_path / ".writer" / "skills"
-    skills_dir.mkdir(parents=True)
-    bad = skills_dir / "bad_state"
-    bad.mkdir()
-    (bad / "SKILL.md").write_text(
-        "---\ncommand: /bad\ndescription: bad state\nrequires_states: [S99]\n---\nbody\n",
+        "---\ndescription: missing command\n---\nbody\n",
         encoding="utf-8",
     )
 
@@ -266,10 +239,28 @@ def test_discover_shipped_directives_have_references() -> None:
         assert d.references, f"shipped {d.command} must have at least one reference"
 
 
-def test_discover_shipped_directives_have_requires_states() -> None:
+def test_discover_shipped_directives_lack_requires_states() -> None:
     directives = discover_shipped_directives()
     for d in directives:
-        assert d.requires_states, f"shipped {d.command} must have requires_states"
+        assert not hasattr(d, "requires_states"), (
+            f"shipped {d.command} must not carry requires_states"
+        )
+
+
+def test_shipped_skill_md_frontmatter_lacks_requires_states_key() -> None:
+    """The raw shipped SKILL.md frontmatter must not contain the key."""
+    import importlib.resources as resources
+
+    shipped_root = resources.files("writer.skills._shipped")
+    for sub in shipped_root.iterdir():
+        if not sub.is_dir():
+            continue
+        skill_md = sub / "SKILL.md"
+        text = skill_md.read_text(encoding="utf-8")
+        front = text.split("---", 2)[1]
+        assert "requires_states" not in front, (
+            f"shipped {sub.name}/SKILL.md frontmatter must not list requires_states"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -10,8 +10,8 @@ registry 完成实际工作 —— 没有 Python ``run()`` 方法。
 位于 ``writer/skills/_shipped/``）发现。两者的产物都汇入
 :class:`writer.skills.registry.DirectiveRegistry`。
 
-元数据契约（``command`` / ``description`` / ``requires_states`` /
-``body`` / ``references`` / ``scripts`` / ``root``）驱动 4 个
+元数据契约（``command`` / ``description`` / ``body`` /
+``references`` / ``scripts`` / ``root``）驱动 3 个
 下游表面：
 
 * ``/帮助`` —— :func:`writer.cli.main.print_repl_help` 使用
@@ -19,9 +19,6 @@ registry 完成实际工作 —— 没有 Python ``run()`` 方法。
   渲染命令表，无需触及 SKILL.md 解析。
 * REPL 补全 —— :func:`writer.cli.main.build_prompt_session` 使用
   :meth:`DirectiveRegistry.commands` 做 Tab 补全。
-* 状态机拦截 —— :func:`writer.project.validate_command_available`
-  查询 :meth:`DirectiveRegistry.state_matrix`，新增 directive 时
-  自动接入其可用性映射。
 * Engine dispatch —— :func:`writer.engine.loop.run_engine` 识别
   匹配的 ``command``，把 directive 的 body + references 通过既有
   工具循环喂给 LLM。
@@ -31,10 +28,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from writer.project.state import ProjectState
 
 
 @dataclass(frozen=True)
@@ -45,8 +38,6 @@ class SkillDirective:
 
     * ``command`` —— 斜杠命令（来自 YAML frontmatter）。
     * ``description`` —— 人类可读的一行说明（来自 YAML frontmatter）。
-    * ``requires_states`` —— 生命周期门控（来自 YAML frontmatter，
-      解析为合法的 ``ProjectState`` 名称列表）。
     * ``body`` —— ``SKILL.md`` 的完整 Markdown body（去掉 frontmatter，
       末尾空白被规范化）。
     * ``references`` —— ``<command>/references/`` 下每个 ``*.md``
@@ -59,7 +50,6 @@ class SkillDirective:
 
     command: str
     description: str
-    requires_states: frozenset[ProjectState]
     body: str
     references: dict[str, str] = field(default_factory=dict)
     scripts: list[str] = field(default_factory=list)

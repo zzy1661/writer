@@ -1,7 +1,6 @@
 ---
 command: /大纲
 description: 生成或查看大纲
-requires_states: [INITIALIZED, HAS_OUTLINE]
 ---
 
 # 大纲 (Outline)

@@ -271,24 +271,6 @@ def test_engine_init_brief_blocks_creative_text_at_s0(
     assert done_events[-1].reason == "aborted"
 
 
-def test_engine_init_blocks_init_command_after_outline_state(tmp_path: Path) -> None:
-    deps = production_deps()
-    workspace = create_workspace("创意项目", tmp_path)
-    (workspace.root / "outline" / "大纲.md").write_text("大纲", encoding="utf-8")
-
-    events = _consume(
-        run_engine(_workspace_ctx("/init 新的故事创意", workspace.root), deps)
-    )
-
-    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
-    done_events = [e for e in events if isinstance(e, Done)]
-
-    assert "当前不可用" in text_blob
-    assert "S2" in text_blob
-    assert done_events[-1].reason == "aborted"
-    assert not (workspace.root / "创意" / "核心创意.md").exists()
-
-
 # ---------------------------------------------------------------------------
 # Wiring integration (Phase 2)
 # ---------------------------------------------------------------------------
@@ -377,16 +359,6 @@ def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
     assert "review_gate" in text_blob
     # PR1: same as above — workflow_completed is the new terminal reason.
     assert any(isinstance(e, Done) and e.reason == "workflow_completed" for e in events)
-
-
-def test_engine_blocks_write_before_toc() -> None:
-    deps = production_deps()
-
-    events = _consume(run_engine(_ctx("/创作 1.3"), deps))
-
-    text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
-    assert "/创作 当前不可用" in text_blob
-    assert any(isinstance(e, Done) and e.reason == "aborted" for e in events)
 
 
 def test_engine_workflow_unknown_name_raises_domain_error() -> None:

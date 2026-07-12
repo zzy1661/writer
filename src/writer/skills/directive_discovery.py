@@ -23,13 +23,9 @@ import logging
 import re
 from importlib import metadata
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from writer.skills.errors import SkillError
 from writer.skills.protocol import SkillDirective
-
-if TYPE_CHECKING:
-    pass
 
 log = logging.getLogger(__name__)
 
@@ -241,7 +237,6 @@ def _parse_skill_md(skill_md_path: Path) -> SkillDirective | None:
     return SkillDirective(
         command=meta["command"],
         description=meta["description"],
-        requires_states=meta["requires_states"],
         body=body.rstrip("\n"),
         references=references,
         scripts=scripts,
@@ -296,7 +291,6 @@ def _parse_traversable_skill_md(traversable) -> SkillDirective | None:
     return SkillDirective(
         command=meta["command"],
         description=meta["description"],
-        requires_states=meta["requires_states"],
         body=body.rstrip("\n"),
         references=references,
         scripts=scripts,
@@ -342,47 +336,9 @@ def _validate_frontmatter(front_str: str) -> dict:
         msg = "description must be a non-empty string"
         raise SkillError(msg)
 
-    raw_states = data.get("requires_states", [])
-    if isinstance(raw_states, str):
-        raw_states = [raw_states]
-    if not isinstance(raw_states, list) or not raw_states:
-        msg = "requires_states must be a non-empty list"
-        raise SkillError(msg)
-
-    # 把 requires_states 字符串解析为 ProjectState enum 成员。
-    # ProjectState 是 StrEnum，value 是规范的 S0..S5 字符串，NAME
-    # 是人类可读标识符。我们接受两种形式，让 SKILL.md frontmatter
-    # 可以选择更清楚的那个：
-    #   ``requires_states: [INITIALIZED, HAS_OUTLINE]``  ← 名称形式
-    #   ``requires_states: [S1, S2]``                    ← value 形式
-    # 本地 import：避免每次 skills import 都强制加载 project.state。
-    from writer.project.state import ProjectState  # noqa: PLC0415
-
-    # 一次性构造 name → ProjectState 映射，用于 name-form 查找。
-    name_to_state = {member.name: member for member in ProjectState}
-
-    resolved_states: set = set()
-    for raw in raw_states:
-        if not isinstance(raw, str):
-            msg = f"requires_states entries must be strings; got {type(raw).__name__}"
-            raise SkillError(msg)
-        if raw in name_to_state:
-            resolved_states.add(name_to_state[raw])
-            continue
-        try:
-            resolved_states.add(ProjectState(raw))
-        except ValueError as exc:
-            valid = sorted(s for s in ProjectState)
-            msg = (
-                f"requires_states entry {raw!r} is not a valid ProjectState; "
-                f"expected one of {valid} (by name) or their S0..S5 values"
-            )
-            raise SkillError(msg) from exc
-
     return {
         "command": command,
         "description": description.strip(),
-        "requires_states": frozenset(resolved_states),
     }
 
 
@@ -394,9 +350,6 @@ def _validate(directive: SkillDirective) -> None:
         raise SkillError(msg)
     if not isinstance(directive.description, str) or not directive.description.strip():
         msg = "directive description must be a non-empty string"
-        raise SkillError(msg)
-    if not isinstance(directive.requires_states, frozenset) or not directive.requires_states:
-        msg = "directive requires_states must be a non-empty frozenset"
         raise SkillError(msg)
     if not isinstance(directive.body, str):
         msg = "directive body must be a string"
