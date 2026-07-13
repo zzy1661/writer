@@ -18,13 +18,13 @@ import pytest
 
 from writer.engine import (
     Done,
+    Engine,
     EngineContext,
     TextChunk,
     run_engine,
 )
 from writer.engine.config import build_engine_config
 from writer.engine.deps import EngineDeps
-from writer.engine.loop import _run_directive
 from writer.llm.prose import DeterministicProseClient
 from writer.project import create_workspace, detect_state
 from writer.routing import AgentAction
@@ -84,11 +84,13 @@ async def test_run_directive_preview_emits_metadata() -> None:
         # the attribute so the engine's isinstance check passes.
         prose_client = DeterministicProseClient()
 
-    async for event in _run_directive(
+    engine = Engine(
+        deps=_StubDeps(),  # type: ignore[arg-type]
+        cfg=build_engine_config(EngineContext(user_input="/x")),
+    )
+    async for event in engine._run_directive(
         directive,
         EngineContext(user_input="/x", project_root=None),
-        _StubDeps(),  # type: ignore[arg-type]
-        build_engine_config(EngineContext(user_input="/x")),
     ):
         events.append(event)
 
@@ -113,11 +115,13 @@ async def test_run_directive_resolves_at_references(tmp_path: Path) -> None:
     )
 
     events: list = []
-    async for event in _run_directive(
+    engine = Engine(
+        deps=type("_StubDeps", (), {"tool_loop": None})(),  # type: ignore[arg-type]
+        cfg=build_engine_config(EngineContext(user_input="/x")),
+    )
+    async for event in engine._run_directive(
         directive,
         EngineContext(user_input="/x"),
-        type("_StubDeps", (), {"tool_loop": None})(),  # type: ignore[arg-type]
-        build_engine_config(EngineContext(user_input="/x")),
     ):
         events.append(event)
 

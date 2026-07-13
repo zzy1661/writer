@@ -5,15 +5,17 @@
 - **身份**（冻结）：``session_id``（UUID）和 ``started_at``（datetime）。
 - **项目上下文**（可变）：``project_root``（Path | None）和从磁盘
   检测到的最新状态。
-- **deps**（可变）：``EngineDeps`` 实例，在构造时构建一次。
-  ``tool_runtime`` 通过 :meth:`set_project_root` 替换，router /
-  tool_registry 保持不变。
+- **engine**（可变）：:class:`writer.engine.Engine` 实例，构造时
+  一次性构建。``set_project_root`` 通过 :meth:`Engine.replace_deps`
+  整体替换 engine 内部的 deps，保持 router / tool_registry /
+  cfg 不变的前提下换掉 ``tool_runtime`` + ``tool_loop`` +
+  ``directive_registry`` + ``agent_registry``。
 - **turns**（可变）：仅追加的 :class:`TurnRecord` 列表。
 - **pending_interrupt**（可变）：引擎产出的最近一个 ``Interrupt`` 事件，
   在下一轮完成时清空。
 
 EngineSession 并*不*替代每轮的 ``EngineContext`` —— 后者保持不变，
-作为 ``run_engine`` 的不可变输入契约。EngineSession 位于引擎*外部*，
+作为 :meth:`Engine.run` 的不可变输入契约。EngineSession 位于引擎*外部*，
 每轮喂给引擎一个 context。
 """
 
@@ -26,7 +28,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 if TYPE_CHECKING:
-    from writer.engine.deps import EngineDeps
+    from writer.engine.engine import Engine
     from writer.engine.events import DoneReason, Interrupt
 
 
@@ -58,8 +60,9 @@ class EngineSession:
     project_state: str = "S0"
     project_genre: str = "other"
 
-    # Deps —— 构造时构建一次；project_root 变更时替换 tool_runtime。
-    deps: EngineDeps = field(default=None)  # type: ignore[assignment]
+    # Engine —— 构造时构建一次；project_root 变更时通过
+    # ``engine.replace_deps(new_deps)`` 替换内部 deps。
+    engine: Engine | None = field(default=None)  # type: ignore[assignment]
 
     # 仅追加的轮次历史。
     turns: list[TurnRecord] = field(default_factory=list)
@@ -68,10 +71,11 @@ class EngineSession:
     pending_interrupt: Interrupt | None = None
 
     def __post_init__(self) -> None:
-        # 延迟 import 以避免循环 import（engine.deps 引入
-        # writer.routing，后者从 session 什么也不允许 import）。
-        if self.deps is None:
+        # 延迟 import 以避免循环 import（engine.engine 引入
+        # writer.routing 等较重模块，按需加载）。
+        if self.engine is None:
             from writer.engine.deps import production_deps
+            from writer.engine.engine import Engine
 
             if self.project_root is not None:
                 # 刷新 ``project_genre`` 让首次 ``/状态`` 读到正确值；
@@ -82,14 +86,41 @@ class EngineSession:
             # 已绑定项目接线（per chg-markdown-skills），让首次 ``/大纲`` 等
             # 查找能看到项目级覆盖。我们*不*在此事后重建 —— 后续 project
             # 变更由 session 的 ``set_project_root`` 处理。
-            self.deps = production_deps(project_root=self.project_root)
+            deps = production_deps(project_root=self.project_root)
+            self.engine = Engine(deps=deps)
 
     # ------------------------------------------------------------------
-    # project_root + deps 管理
+    # 顶层入口（per-turn）
+    # ------------------------------------------------------------------
+
+    def run_turn(
+        self,
+        user_input: str,
+    ):
+        """便利方法：构造 :class:`EngineContext` 并委派给 :meth:`Engine.run`。
+
+        若上一轮产出了 :class:`Interrupt` 事件，则把待回答的 prompt
+        与用户输入拼好后喂给引擎（per :func:`compose_pending_input`）。
+        """
+        # 延迟 import 以避免循环 import（engine.session ↔ engine.engine）
+        from writer.engine.context import EngineContext
+
+        composed_input = compose_pending_input(user_input, self.pending_interrupt)
+        ctx = EngineContext(
+            user_input=composed_input,
+            project_root=self.project_root,
+            project_state=self.project_state,
+            session_id=str(self.session_id),
+        )
+        assert self.engine is not None  # 由 __post_init__ 保障
+        return self.engine.run(ctx)
+
+    # ------------------------------------------------------------------
+    # project_root + engine 重建
     # ------------------------------------------------------------------
 
     def set_project_root(self, new_root: Path | None) -> None:
-        """更新 ``project_root`` 并重建 ``deps`` 层的协作者。
+        """更新 ``project_root`` 并重建 ``engine`` 内部的 deps。
 
         Router / tool_registry 在替换过程中保持不变。``tool_runtime``
         被重建，因为它持有用于 ``safe_path`` 检查的 project_root。
@@ -106,8 +137,8 @@ class EngineSession:
         把 ``new_root`` 设为同一路径是 no-op（不重建）。
         把 ``new_root`` 设为 ``None`` 回退到 S0 哨兵根。
 
-        实际替换通过 :meth:`EngineDeps.rebind_*` 进行，让我们永远不必
-        关心具体 ``EngineDeps`` 是 dataclass、普通对象还是测试 fake。
+        实际替换通过 :meth:`EngineDeps.rebind_*` 整体换 ``deps`` 后
+        :meth:`Engine.replace_deps` 包装新 ``Engine`` 实现。
         """
 
         if new_root == self.project_root:
@@ -126,7 +157,8 @@ class EngineSession:
         self.project_root = new_root
         resolved = (new_root or _SENTINEL_PROJECT_ROOT).resolve()
         new_runtime = ToolRuntime(project_root=resolved)
-        self.deps = self.deps.rebind_tool_runtime(new_runtime)
+        assert self.engine is not None
+        new_deps = self.engine.deps.rebind_tool_runtime(new_runtime)
         self.refresh_project_state()
         self.refresh_project_genre()
 
@@ -136,13 +168,13 @@ class EngineSession:
         # stub 可以依赖真实路径；实际上哨兵不是目录，``discover_directives``
         # 返回 ``[]``。
         new_registry = built_directive_registry(project_root=resolved)
-        self.deps = self.deps.rebind_directive_registry(new_registry)
+        new_deps = new_deps.rebind_directive_registry(new_registry)
 
         # 重建 agent registry，让新项目的 ``.writer/agents/``
         # 覆盖（per ``fea-agent-mirror``）在下一 REPL 轮次生效。
         # 与上方的 directive registry rebind 对称。
         new_agent_registry = built_agent_registry(project_root=resolved)
-        self.deps = self.deps.rebind_agent_registry(new_agent_registry)
+        new_deps = new_deps.rebind_agent_registry(new_agent_registry)
 
         # 重建 tool_loop(Bug 01):当原 deps 带 tool_loop 时,
         # 用新 runtime 重新构造,确保 ReActAgent._runtime 指向新根。
@@ -151,13 +183,16 @@ class EngineSession:
         from writer.llm.agent import ReActAgent
 
         new_loop: ReActAgent | None = None
-        if self.deps.tool_loop is not None:
+        if new_deps.tool_loop is not None:
             new_loop = ReActAgent(
-                settings=self.deps.settings,
-                registry=self.deps.tool_registry,
+                settings=new_deps.settings,
+                registry=new_deps.tool_registry,
                 runtime=new_runtime,
             )
-        self.deps = self.deps.rebind_tool_loop(new_loop)
+        new_deps = new_deps.rebind_tool_loop(new_loop)
+
+        # 整体替换 engine.deps；cfg / router / tool_registry 保持不变。
+        self.engine = self.engine.replace_deps(new_deps)
 
     def refresh_project_state(self) -> str:
         """从磁盘文件刷新 ``project_state`` 并返回它。"""

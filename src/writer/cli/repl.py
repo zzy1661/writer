@@ -27,22 +27,21 @@ from writer.config import load_env_file, load_project_settings, refresh_settings
 from writer.engine import (
     ActionEvent,
     Done,
-    EngineContext,
     ErrorEvent,
     Interrupt,
     TextChunk,
     ToolCall,
     ToolResult,
-    run_engine,
 )
 from writer.project import (
     STATE_DESCRIPTIONS,
     ProjectState,
     discover_project_root,
     inspect_project,
+    prompt_genres,
     safe_cwd,
 )
-from writer.session import EngineSession, compose_pending_input
+from writer.session import EngineSession
 from writer.skills import DirectiveRegistry, built_directive_registry
 
 console = Console()
@@ -160,6 +159,85 @@ def _parse_repl_init_argv(text: str) -> tuple[str, Path, bool, str | None]:
     )
 
 
+def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
+    """REPL 简洁 ``/init <brief>`` 处理器。
+
+    返回 ``True`` 表示已处理（消费输入），``False`` 表示不是 brief
+    形式（让既有路径继续走）。短路条件：
+
+    - 文本不是 brief 形式（``looks_like_creative_brief(rest)`` 为 ``False``）
+    - ``session.project_root`` 与 ``discover_project_root()`` 都找不到项目
+      （此时打印红色错误，仍返回 ``True`` —— 已处理，避免引擎再次询问）
+
+    处理流程：
+
+    1. 找 ``project_root = session.project_root or discover_project_root()``；
+       找不到则提示「请先在 ``writer new`` 创建的目录内执行」并返回 ``True``。
+    2. 当前题材回退（``session.project_genre`` 或 ``read_genre_from_agent``），
+       打印「当前题材: <label>」+ 多选提示。
+    3. ``prompt_genres(console, default=None)`` —— 每次让用户重选；
+       非 TTY 走 ``["其他"]`` 兜底。
+    4. :func:`writer.cli._init_backend.apply_genre_and_brief` 一步完成
+       「补脚手架 + 更新题材行 + 写 brief」。
+    5. ``session.refresh_project_genre()`` 同步缓存。
+    6. 打印摘要：所选题材、新建文件数（>0 时）、题材行变更、brief 来源。
+    """
+
+    from writer.project.init_brief import extract_init_brief_text, looks_like_creative_brief
+
+    rest = extract_init_brief_text(text)
+    if not looks_like_creative_brief(rest):
+        return False
+
+    project_root = session.project_root or discover_project_root()
+    if project_root is None:
+        console.print(
+            "[red]未找到小说项目。请先在 `writer new` 创建的目录内执行此命令，"
+            "或使用 `/init --name <书名> --dir <目录>` 创建新项目。[/red]"
+        )
+        return True
+
+    # ``session.set_project_root`` 在绑定时已经 ``refresh_project_genre()``，
+    # ``session.project_genre`` 即磁盘题材行的权威缓存。
+    current_genre = session.project_genre
+
+    console.print(f"[dim]当前题材: {current_genre}[/dim]")
+    selected = prompt_genres(console, default=None)
+    if not selected:
+        selected = ["其他"]
+
+    # 跨模块懒加载（与 flag 形式保持一致）。
+    from writer.cli._init_backend import apply_genre_and_brief
+    from writer.config import get_settings
+
+    try:
+        outcome = apply_genre_and_brief(
+            project_root,
+            genres=selected,
+            brief=rest,
+            settings=get_settings(),
+        )
+    except Exception as exc:  # noqa: BLE001 — 把任何 LLM / 写入错误转成 UI 提示
+        console.print(f"[red]初始化失败：{exc}[/red]")
+        return True
+
+    session.refresh_project_genre()
+
+    console.print(f"[green]已选择题材：[/green]{', '.join(outcome.selected_genres) or '其他'}")
+    if outcome.created_files:
+        console.print(f"[green]新增文件：[/green]{len(outcome.created_files)} 个")
+        for path in outcome.created_files:
+            console.print(f"  - {path}")
+    if outcome.genre_line_changed:
+        console.print("[green]已更新 AGENT.md 题材行[/green]")
+    console.print(
+        f"[green]已写入 创意/核心创意.md[/green]"
+        f"（来源: {outcome.brief_source}）"
+    )
+    console.print("[green]已更新 AGENT.md 基本要求[/green]")
+    return True
+
+
 def handle_repl_input(line: str, session: EngineSession) -> bool:
     """处理一行 REPL 输入。
 
@@ -248,6 +326,18 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         console.print(f"[dim]session.project_genre={resolved_genre}[/dim]")
         return True
 
+    # Brief 形式（``/init <故事梗概>``）：先于引擎分发拦截，做多选题材 +
+    # 补脚手架 + 写 brief。判定条件：开头 ``/init`` 且无 ``--`` / `` -`` flag，
+    # 且看起来像故事概要（``looks_like_creative_brief``，由 helper 内
+    # 检测）。helper 返回 False（短 token / 项目名形式）时落给引擎。
+    if (
+        text.startswith("/init ")
+        and "--" not in text
+        and " -" not in text
+        and _try_handle_repl_init_brief(text, session)
+    ):
+        return True
+
     # 框架命令（退出/帮助/状态）之外的所有输入——斜杠命令与自然语言
     # 一律交给 agent engine 统一分发，避免 CLI 层重复维护命令路由。
     asyncio.run(_run_engine(text, session, console))
@@ -261,20 +351,14 @@ async def _run_engine(
 ) -> None:
     """为单轮自然语言驱动 agent engine。
 
-    使用 ``session.deps``（REPL 启动时一次性构建）和
-    ``session.session_id``（跨轮次冻结）。若上一轮产出了 ``Interrupt``
-    事件，则把待回答的 prompt 与用户输入拼好后喂给引擎。
+    委托给 :meth:`EngineSession.run_turn`，由 session 构造
+    :class:`EngineContext` 并调用 :meth:`Engine.run`。若上一轮产出了
+    ``Interrupt`` 事件，则把待回答的 prompt 与用户输入拼好后喂给
+    引擎。
     """
     session.refresh_project_state()
-    composed_input = compose_pending_input(user_input, session.pending_interrupt)
-    ctx = EngineContext(
-        user_input=composed_input,
-        project_root=session.project_root,
-        project_state=session.project_state,
-        session_id=str(session.session_id),
-    )
 
-    async for event in run_engine(ctx, session.deps):
+    async for event in session.run_turn(user_input):
         match event:
             case TextChunk(text=chunk):
                 # engine 输出是纯文本 —— 关闭 Rich markup，让
@@ -486,7 +570,8 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
     # ``EngineDeps.directive_registry``）；把它透传给 prompt session
     # 与 ``/帮助`` 渲染器，让帮助表和 Tab 补全与本次 REPL 运行所注册
     # 的 skills（包括 import 时由 entry point 发现的插件）保持同步。
-    directive_registry = engine_session.deps.directive_registry
+    assert engine_session.engine is not None  # __post_init__ 保障
+    directive_registry = engine_session.engine.deps.directive_registry
 
     if prompt_session is None and sys.stdin.isatty():
         prompt_session = build_prompt_session(directive_registry=directive_registry)

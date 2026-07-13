@@ -7,7 +7,7 @@ from uuid import UUID
 
 from writer.agents import builtin_agent_registry
 from writer.config import get_settings
-from writer.engine import Interrupt
+from writer.engine import Engine, Interrupt
 from writer.engine.context import EngineContext
 from writer.engine.deps import EngineDeps
 from writer.llm.prose import DeterministicProseClient
@@ -68,20 +68,20 @@ def test_session_defaults() -> None:
 def test_session_deps_built_once_at_construction() -> None:
     s1 = EngineSession()
     s2 = EngineSession()
-    deps1 = s1.deps
-    deps2 = s2.deps
+    deps1 = s1.engine.deps
+    deps2 = s2.engine.deps
 
     # Each session owns its own deps
     assert deps1 is not deps2
     assert isinstance(deps1.router, IntentRouter)
 
     # Deps identity is stable across calls within the same session
-    assert s1.deps is deps1
+    assert s1.engine.deps is deps1
 
 
 def test_session_deps_router_is_intent_router() -> None:
     session = EngineSession()
-    assert isinstance(session.deps.router, IntentRouter)
+    assert isinstance(session.engine.deps.router, IntentRouter)
 
 
 # ---------------------------------------------------------------------------
@@ -93,28 +93,28 @@ def test_session_tool_runtime_rebuilt_when_project_root_changes(
     tmp_path: Path,
 ) -> None:
     session = EngineSession()
-    original_router = session.deps.router
-    original_runtime = session.deps.tool_runtime
+    original_router = session.engine.deps.router
+    original_runtime = session.engine.deps.tool_runtime
 
     session.set_project_root(tmp_path)
 
     assert session.project_root == tmp_path
     # Router preserved
-    assert session.deps.router is original_router
+    assert session.engine.deps.router is original_router
     # ToolRuntime swapped to one pointing at the new root
-    assert session.deps.tool_runtime is not original_runtime
-    assert session.deps.tool_runtime.project_root == tmp_path.resolve()
+    assert session.engine.deps.tool_runtime is not original_runtime
+    assert session.engine.deps.tool_runtime.project_root == tmp_path.resolve()
 
 
 def test_session_persists_project_root_across_turns(tmp_path: Path) -> None:
     session = EngineSession()
     session.set_project_root(tmp_path)
-    after_id = id(session.deps)
+    after_id = id(session.engine.deps)
 
     session.record_turn("hello", "answered")
 
     assert session.project_root == tmp_path
-    assert id(session.deps) == after_id  # no rebuild on record_turn
+    assert id(session.engine.deps) == after_id  # no rebuild on record_turn
 
 
 def test_session_set_project_root_to_none_uses_sentinel() -> None:
@@ -123,16 +123,16 @@ def test_session_set_project_root_to_none_uses_sentinel() -> None:
     session.set_project_root(None)
 
     assert session.project_root is None
-    assert session.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
+    assert session.engine.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
 
 
 def test_session_set_project_root_same_path_is_noop(tmp_path: Path) -> None:
     session = EngineSession()
     session.set_project_root(tmp_path)
-    runtime_after_first = session.deps.tool_runtime
+    runtime_after_first = session.engine.deps.tool_runtime
 
     session.set_project_root(tmp_path)  # same path
-    assert session.deps.tool_runtime is runtime_after_first
+    assert session.engine.deps.tool_runtime is runtime_after_first
 
 
 # ---------------------------------------------------------------------------
@@ -320,8 +320,8 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
     # Inject into session (skip the default production_deps construction).
     session = EngineSession()
-    session.deps = stub
-    original_router = session.deps.router
+    session.engine = Engine(deps=stub)
+    original_router = session.engine.deps.router
 
     # ``set_project_root`` must NOT raise ``AttributeError`` (regression
     # on M6: the old duck-typed branch needed ``is_dataclass(self.deps)``).
@@ -329,9 +329,9 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
     assert session.project_root == tmp_path
     # Router preserved across the swap (no full production_deps rebuild).
-    assert session.deps.router is original_router
+    assert session.engine.deps.router is original_router
     # Runtime swapped to the new root.
-    assert session.deps.tool_runtime.project_root == tmp_path.resolve()
+    assert session.engine.deps.tool_runtime.project_root == tmp_path.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -367,13 +367,13 @@ def test_set_project_root_rebuilds_tool_loop(tmp_path: Path) -> None:
     assert deps.tool_loop._runtime.project_root == proj_a.resolve()
 
     session = EngineSession()
-    session.deps = deps
+    session.engine = Engine(deps=deps)
     session.project_root = proj_a
 
     # 切到 B:tool_loop 应被重建,新 runtime 指向 B
     session.set_project_root(proj_b)
-    assert session.deps.tool_loop is not None
-    assert session.deps.tool_loop._runtime.project_root == proj_b.resolve()
+    assert session.engine.deps.tool_loop is not None
+    assert session.engine.deps.tool_loop._runtime.project_root == proj_b.resolve()
 
 
 def test_set_project_root_with_protocol_only_deps(tmp_path: Path) -> None:
@@ -382,11 +382,11 @@ def test_set_project_root_with_protocol_only_deps(tmp_path: Path) -> None:
     # 仍然为真,确保 Protocol 字段扩展未破坏 stub 验证。
     stub_factory = _build_plain_deps_stub()  # type: ignore[func-returns-value]
     session = EngineSession()
-    session.deps = stub_factory
-    assert isinstance(session.deps, EngineDeps)
+    session.engine = Engine(deps=stub_factory)
+    assert isinstance(session.engine.deps, EngineDeps)
     # 调用 set_project_root 不抛 AttributeError
     session.set_project_root(tmp_path)
-    assert session.deps.tool_runtime.project_root == tmp_path.resolve()
+    assert session.engine.deps.tool_runtime.project_root == tmp_path.resolve()
 
 
 def _build_plain_deps_stub() -> EngineDeps:
@@ -459,14 +459,14 @@ def test_set_project_root_none_does_not_error(tmp_path: Path) -> None:
     assert deps.tool_loop is not None
 
     session = EngineSession()
-    session.deps = deps
+    session.engine = Engine(deps=deps)
     session.project_root = proj_a
 
     # 切到 None:不应抛错;tool_loop 仍指向 ReActAgent(因为 settings
     # 还有 API key);runtime 已切到 sentinel。
     session.set_project_root(None)
     # 不抛错,tool_runtime 已切到 sentinel
-    assert session.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
+    assert session.engine.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
 
 
 # ---------------------------------------------------------------------------
