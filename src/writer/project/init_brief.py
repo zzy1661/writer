@@ -13,14 +13,12 @@ _MAX_PROJECT_NAME_LEN = 30
 
 
 def extract_init_brief_text(user_input: str) -> str:
-    """从一行 REPL ``/init ...`` 中返回梗概文本（可为空）。"""
+    """从一行 REPL ``/init ...`` 中返回梗概文本（可为空）。
 
-    rest = user_input.removeprefix("/init").strip()
-    if rest.startswith("--brief"):
-        return rest.removeprefix("--brief").strip()
-    if rest.startswith("-b "):
-        return rest[3:].strip()
-    return rest
+    per 2026-07-14 收紧：``/init`` 后只跟故事核心创意，不再支持
+    ``--brief`` / ``-b`` flag 形式。
+    """
+    return user_input.removeprefix("/init").strip()
 
 
 def looks_like_creative_brief(text: str) -> bool:
@@ -29,8 +27,6 @@ def looks_like_creative_brief(text: str) -> bool:
     normalized = text.strip()
     if not normalized:
         return False
-    if normalized.startswith(("-", "--")):
-        return normalized.startswith(("--brief", "-b "))
     if len(normalized) > _MAX_PROJECT_NAME_LEN:
         return True
     return any(char in normalized for char in _SENTENCE_PUNCTUATION)
@@ -40,7 +36,7 @@ def looks_like_project_name(text: str) -> bool:
     """启发式：适合作为 workspace 目录名的短 token。"""
 
     normalized = text.strip()
-    if not normalized or normalized.startswith(("-", "--")):
+    if not normalized:
         return False
     if len(normalized) > _MAX_PROJECT_NAME_LEN:
         return False
@@ -55,17 +51,17 @@ def should_run_init_brief(
     project_root: Path | None,
     project_state: str | ProjectState,
 ) -> bool:
-    """``/init`` 是否应在已绑定项目上跑创意梗概流程。"""
+    """``/init <故事梗概>`` 是否应在已绑定项目上跑创意梗概流程。
+
+    per 2026-07-14 收紧：判别只看「非空 + 项目已绑定且 S1」，不再
+    兼顾 ``--brief`` flag（旧 flag 形式已删除）。
+    """
 
     del project_state  # 已绑定时 ``detect_state(project_root)`` 是权威。
 
     rest = extract_init_brief_text(user_input)
     if not rest:
         return False
-
-    raw_rest = user_input.removeprefix("/init").strip()
-    if raw_rest.startswith(("--brief", "-b ")):
-        return True
 
     return (
         project_root is not None

@@ -1,7 +1,12 @@
 """REPL 交互层：交互式 writer 命令循环 + 引擎事件桥接。
 
-与 Typer 子命令层（``commands``）解耦；``/init`` flag 形式复用
-``_init_backend.init_project``，避免 CLI 层重复维护项目创建逻辑。
+与 Typer 子命令层（``commands``）解耦；REPL ``/init <创意>`` 简洁形式
+复用 :func:`writer.cli._init_backend.apply_genre_and_brief` 完成
+"补脚手架 + 更新题材行 + 写 brief"。
+
+REPL 不再支持 ``/init --name X --dir Y`` flag 形式 —— 创建项目请用
+CLI 子命令 ``writer new <书名>``（per 2026-07-14 收紧）。``/init``
+后只允许跟故事核心创意。
 """
 
 from __future__ import annotations
@@ -11,10 +16,8 @@ import os
 import re
 import sys
 import tempfile
-from argparse import ArgumentParser
 from pathlib import Path
 
-import typer
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
@@ -124,41 +127,6 @@ def print_repl_help(directive_registry: DirectiveRegistry | None = None) -> None
     console.print(table)
 
 
-def _init_prompt_genre_labels() -> list[str]:
-    from writer.project.genre import GENRE_OPTIONS
-
-    return list(GENRE_OPTIONS)
-
-
-def _parse_repl_init_argv(text: str) -> tuple[str, Path, bool, str | None]:
-    """解析 ``"/init --name 双生 --dir . --genre 言情"`` 风格的输入。
-
-    返回 ``(name, directory, force, genre)``。``--name`` 缺失或
-    为空时抛 ``ValueError``。REPL 形式不支持位置参数 ``name``
-    （它是单行 shell-ish 字符串，``/init`` 后第一个 token 必须
-    是 flag）—— 显式 ``--name`` 让解析保持确定性，并在省略时
-    给出更清晰的报错。
-    """
-    rest = text[len("/init"):].strip()
-    parser = ArgumentParser(prog="init", add_help=False)
-    parser.add_argument("--name", "-n", required=True, dest="name")
-    parser.add_argument("--dir", "-d", default=".", dest="directory")
-    parser.add_argument("--genre", "-g", default=None, dest="genre")
-    parser.add_argument(
-        "--force", action="store_true", default=False, dest="force"
-    )
-    args = parser.parse_args(rest.split())
-    if not args.name.strip():
-        msg = "--name 不能为空"
-        raise ValueError(msg)
-    return (
-        args.name.strip(),
-        Path(args.directory),
-        bool(args.force),
-        args.genre,
-    )
-
-
 def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
     """REPL 简洁 ``/init <brief>`` 处理器。
 
@@ -192,8 +160,8 @@ def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
     project_root = session.project_root or discover_project_root()
     if project_root is None:
         console.print(
-            "[red]未找到小说项目。请先在 `writer new` 创建的目录内执行此命令，"
-            "或使用 `/init --name <书名> --dir <目录>` 创建新项目。[/red]"
+            "[red]未找到小说项目。请先执行 `writer new <书名>` 创建项目，"
+            "再 cd 进入项目目录后使用 `/init <故事梗概>`。[/red]"
         )
         return True
 
@@ -277,65 +245,13 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         )
         return True
 
-    if text.startswith("/init ") and ("--" in text or " -" in text):
-        # ``/init`` 单用（无参数）走 engine 派发；只有 flag 形式
-        # （例如 ``/init --name 双生 --genre 言情``）走本代码路径，
-        # 与 Typer 子命令行为一致。
-        # 按 REPL 形式解析命令后的 argv 风格 flag。
-        # 支持的 flag 与 Typer 子命令对齐：--name, --dir/-d,
-        # --genre/-g, --force。缺失 --genre 时走相同的 Typer 风格
-        # 提示（4 选 1 → 自由文本后续输入）。
-        try:
-            name, directory, force, genre = _parse_repl_init_argv(text)
-        except ValueError as exc:
-            console.print(f"[red]错误：{exc}[/red]")
-            return True
-
-        if genre is None:
-            # 交互式提示 —— 把规范标签作为提示展示；
-            # 实际提示按项目决定为自由文本。
-            console.print(
-                f"可用题材（输入后回车；其它值视为 other）：{', '.join(_init_prompt_genre_labels())}"
-            )
-            picked = typer.prompt("请选择小说题材", default="其他")
-            genre_arg: str | None = picked
-        else:
-            genre_arg = genre
-
-        # 跨模块：repl → _init_backend。函数内懒加载避免模块加载期
-        # 拉进 _init_backend（防御性，无实际循环风险）。
-        from writer.cli._init_backend import init_project
-
-        try:
-            resolved_genre = init_project(
-                name,
-                directory,
-                force=force,
-                genre=genre_arg,
-            )
-        except typer.Exit:
-            return True
-
-        # 把刚创建的项目绑定到当前 session，让后续 engine 轮次能找到
-        # 正确的 RAG 文件 / Agent。
-        try:
-            session.set_project_root(directory / name)
-            session.refresh_project_genre()
-        except Exception:  # noqa: BLE001 — set_project_root 对路径宽容
-            pass
-        console.print(f"[dim]session.project_genre={resolved_genre}[/dim]")
-        return True
-
     # Brief 形式（``/init <故事梗概>``）：先于引擎分发拦截，做多选题材 +
-    # 补脚手架 + 写 brief。判定条件：开头 ``/init`` 且无 ``--`` / `` -`` flag，
-    # 且看起来像故事概要（``looks_like_creative_brief``，由 helper 内
-    # 检测）。helper 返回 False（短 token / 项目名形式）时落给引擎。
-    if (
-        text.startswith("/init ")
-        and "--" not in text
-        and " -" not in text
-        and _try_handle_repl_init_brief(text, session)
-    ):
+    # 补脚手架 + 写 brief。判定条件：开头 ``/init`` 且看起来像故事概要
+    # （``looks_like_creative_brief``）。helper 返回 False（短 token /
+    # 项目名形式）时落给引擎。
+    # 不再支持 ``/init --name X --dir Y`` flag 形式 —— 创建项目请用 CLI
+    # 子命令 ``writer new <书名>``（per 2026-07-14）。
+    if text.startswith("/init ") and _try_handle_repl_init_brief(text, session):
         return True
 
     # 框架命令（退出/帮助/状态）之外的所有输入——斜杠命令与自然语言

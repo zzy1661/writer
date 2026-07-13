@@ -5,7 +5,6 @@ scripts/pyinstaller_entrypoint.py / pyproject.toml 脚本入口)。
 
 最终会移除；现阶段作为 shim，等所有调用方迁到新模块后再删。
 """
-from writer.cli._init_backend import init_project  # noqa: F401
 from writer.cli.commands import (  # noqa: F401
     app,
     doctor,

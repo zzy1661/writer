@@ -267,7 +267,7 @@ def test_engine_init_brief_blocks_creative_text_at_s0(
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
     done_events = [e for e in events if isinstance(e, Done)]
 
-    assert "请先执行 /init <项目名>" in text_blob
+    assert "writer new <书名>" in text_blob
     assert done_events[-1].reason == "aborted"
 
 

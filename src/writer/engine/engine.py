@@ -598,13 +598,16 @@ class Engine:
         self,
         ctx: EngineContext,
     ) -> AsyncIterator[TextChunk | Done]:
-        """在已绑定 S1 项目上处理 REPL ``/init <brief>``，或引导 S0 用户。
+        """在已绑定 S1 项目上处理 REPL ``/init <故事梗概>``，或引导无项目用户。
 
-        Note: REPL ``handle_repl_input`` 在 brief 形式（无 ``--flag``）下
-        抢先消费 —— 调用 :func:`writer.cli._init_backend.apply_genre_and_brief`
-        完成多选题材 + 补脚手架 + 写 brief。本函数现在主要服务于
-        非 REPL 调用方（``Engine.run`` 直接驱动、SDK、e2e pipe 测试）
-        以及 ``S0`` 引导提示。
+        Note: REPL ``handle_repl_input`` 在 brief 形式下抢先消费 —— 调用
+        :func:`writer.cli._init_backend.apply_genre_and_brief` 完成多选题材
+        + 补脚手架 + 写 brief。本函数现在主要服务于非 REPL 调用方
+        （``Engine.run`` 直接驱动、SDK、e2e pipe 测试）以及无项目
+        / S2+ 状态引导提示。
+
+        per 2026-07-14 收紧：``/init`` 后只跟故事核心创意，不再支持
+        ``--brief`` / ``-b`` / ``--name`` / ``--dir`` 等 flag 形式。
         """
 
         if not should_run_init_brief(
@@ -615,8 +618,8 @@ class Engine:
             rest = extract_init_brief_text(ctx.user_input)
             if ctx.project_root is None and rest and looks_like_creative_brief(rest):
                 msg = (
-                    "看起来你在描述故事创意。请先执行 /init <项目名> 创建并绑定项目，"
-                    "再输入 /init <故事梗概> 填写创意。"
+                    "看起来你在描述故事创意。请先执行 `writer new <书名>` "
+                    "创建项目并 cd 进入项目目录，再输入 /init <故事梗概> 填写创意。"
                 )
                 yield TextChunk(text=f"{msg}\n")
                 yield Done(
@@ -627,13 +630,16 @@ class Engine:
 
         brief = extract_init_brief_text(ctx.user_input)
         if not brief:
-            msg = "用法：/init <故事梗概>，或 /init --brief <故事梗概>"
+            msg = "用法：/init <故事核心创意>"
             yield TextChunk(text=f"{msg}\n")
             yield Done(reason="aborted", payload={"command": "/init", "error": msg})
             return
 
         if ctx.project_root is None:
-            msg = "请先执行 /init <项目名> 创建并绑定项目，再输入故事创意。"
+            msg = (
+                "请先执行 `writer new <书名>` 创建并绑定项目，"
+                "再输入 /init <故事梗概>。"
+            )
             yield TextChunk(text=f"{msg}\n")
             yield Done(reason="aborted", payload={"command": "/init", "error": msg})
             return

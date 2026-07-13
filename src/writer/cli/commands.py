@@ -1,8 +1,9 @@
 """Typer 子命令层：``app`` 实例 + ``doctor`` / ``new`` 子命令 + ``main`` 回调。
 
 无子命令调用时（``writer`` 不带参数）默认进入 REPL（``repl.run_repl``）。
-``new`` 子命令的项目创建逻辑通过 ``_init_backend.init_project`` 与 REPL
-共享，避免两边重复维护。
+``new`` 子命令直接通过 :func:`writer.project.create_new_workspace`
+创建项目；REPL 不再暴露 ``/init --name X --dir Y`` flag 形式
+（per 2026-07-14 收紧），创建项目的唯一入口是本子命令。
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import typer
 from rich.table import Table
 
 from writer import __version__
-from writer.cli._init_backend import init_project
 from writer.cli.repl import console, run_repl
 from writer.config import get_settings
 from writer.project import create_new_workspace, normalize_genres, prompt_genres
@@ -110,7 +110,6 @@ def new_project_cmd(
 __all__ = [
     "app",
     "doctor",
-    "init_project",
     "main",
     "new_project_cmd",
     "version_callback",

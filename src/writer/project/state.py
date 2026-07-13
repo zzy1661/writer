@@ -184,7 +184,7 @@ def render_agent_file(
 
     当 ``genre`` 是已知题材（不是 ``"other"``）时，在状态行正下方
     包含一行 ``题材: <genre>``，让下游代码（``EngineSession.refresh_project_genre``
-    和 CLI ``init_project``）可以通过简单正则拿到。默认 ``"other"``
+    和 CLI ``new`` / REPL brief 流程）可以通过简单正则拿到。默认 ``"other"``
     跳过这一行，保持遗留 ``AGENT.md`` 内容不变。
     """
 

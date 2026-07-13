@@ -374,39 +374,12 @@ def test_run_repl_handles_eof() -> None:
 
 
 # ---------------------------------------------------------------------------
-# /init (REPL flag-form & engine fallthrough)
+# /init (only the brief 形式;flag 形式已于 2026-07-14 删除)
 # ---------------------------------------------------------------------------
 
 
-def test_repl_init_with_flags_creates_workspace_and_binds_session(
-    tmp_path: Path,
-) -> None:
-    """REPL ``/init --name 双生 --genre 言情`` form creates and binds a project."""
-
-    cli_input = f"/init --name 双生 --dir {tmp_path} --genre 言情\n/退出\n"
-    result = runner.invoke(app, input=cli_input)
-
-    assert result.exit_code == 0
-    project_root = tmp_path / "双生"
-    assert (project_root / "人设" / "男主.md").is_file()
-
-
-def test_repl_init_with_flags_defaults_to_current_directory(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    result = runner.invoke(app, input="/init --name 双生 --genre 言情\n/退出\n")
-
-    assert result.exit_code == 0
-    assert (tmp_path / "双生" / "人设" / "男主.md").is_file()
-    assert not (tmp_path / "novels" / "双生").exists()
-
-
 def test_repl_init_alone_falls_through_to_engine(tmp_path: Path) -> None:
-    """Plain ``/init`` (no flags) should NOT enter our argv parser
-    and instead fall through to the engine's command_pending branch."""
+    """Plain ``/init`` (no brief args) should fall through to the engine."""
 
     result = runner.invoke(app, input="/init\n/退出\n")
 

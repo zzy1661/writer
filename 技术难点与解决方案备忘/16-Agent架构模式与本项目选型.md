@@ -1,8 +1,18 @@
 # Agent 架构模式与本项目选型
 
-> **2026-07-09 重要修订**:本文档原标题《Agent 架构模式与本项目选型》给出的 engine 结构已大幅演进:EngineDeps 从 1 字段(router)扩展到 **6 字段 + 4 方法**,新增 `tool_loop` (`ReActAgent`,ReAct 风格多步工具循环,2026-07-08)、`directive_registry`(`Skill` 已重命名为 `SkillDirective`,`SkillRegistry` 已重命名为 `DirectiveRegistry`,2026-07-09)、`agent_registry`(2026-07-09 `fea-agent-mirror`)。LlmIntentRouter + CompositeRouter 已实装。EngineDeps.rebind_* 系列方法已替代早期的 duck-typed mutation。
+> **2026-07-14 重要修订**(覆盖 2026-07-09 修订):本文档原版本以 `writer.engine.loop.run_engine` 为主入口 + `_DefaultEngineDeps.run_workflow` 占位 stub 为基础。截至 2026-07-13,**`Engine` 类已成为引擎主入口**(`src/writer/engine/engine.py`),`Engine.run(ctx)` 公开 API;`engine.loop.run_engine` 降级为 compat shim(每次构造临时 `Engine(deps, cfg)` 委派给 `engine.run(ctx)`)。
 >
-> 题材分支(`writer.roles.{History,Romance,Xuanhuan,Story}Agent` Python 类)已通过 [OpenSpec `fea-genre-aware-init`](../../openspec/changes/archive/2026-07-06-fea-genre-aware-init/) 落地,2026-07-09 `fea-agent-mirror` 由 `Consultant` 改名为 `Agent`。**2026-07-09 `chg-remove-roles` 进一步清理**:`writer.roles` 整包删除;`EngineDeps.story_agent` 字段 + `rebind_story_agent` 方法 + `_agent_for_genre` 工厂全部移除;题材分支完全迁移到 `writer.agents.AgentRegistry` Markdown 范式(`writer/agents/_shipped/*.md` 4 份)。`writer.agents.process_init_brief` 是唯一保留的 Python-side capability(原 `StoryAgent.process_init_brief`)。
+> **`Engine` 类形态**(per 2026-07-13 重构):
+> - 主类:`Engine` 持 `EngineDeps`(DI 容器,长生命周期)+ `EngineConfig`(per-loop 配置)
+> - 公开方法:`Engine.run(ctx) -> AsyncIterator[Event]` / `Engine.replace_deps(new_deps)` / `Engine.replace_cfg(new_cfg)`
+> - 私有 helper:`_engine_loop` / `_run_tool` / `_run_tool_loop` / `_run_workflow` / `_run_agent` / `_run_directive` / `_maybe_run_init_brief_or_block` / `_run_init_brief_command` / `_run_init_command`
+> - `EngineSession.engine: Engine` 替代旧 `EngineSession.deps: EngineDeps`,`__post_init__` 一次性构造
+>
+> **`EngineDeps` 当前形态**(2026-07-13 实测):9 字段 + 5 rebind 方法 + 2 普通方法。`tool_loop` / `prose_client` / `review_llm` / `settings` 均存在;`story_agent` 字段已删(`chg-remove-roles`)。
+>
+> **长任务编排**:2026-07-09 `real-writing-pipeline` PR2 把 `write_chapter` 从 sync stub 升级为 LangGraph 5 节点图;`review_chapter` 仍为占位 stub(PR3)。`workflow_pending` 不再是合法 `DoneReason`(`Done(workflow_completed)` 替代)。
+>
+> 本节"已落地的 Engine 层结构"(§5) 描述的是 2026-07-08 形态;2026-07-13 起 `src/writer/engine/` 多出 `engine.py` 主类文件;`EngineDeps` 字段已扩展到 9 个;其余概念(ReAct / Plan-and-Execute / Tool-Use / Markdown directive)仍生效。
 
 ## 问题
 

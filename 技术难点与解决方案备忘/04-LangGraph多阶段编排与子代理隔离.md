@@ -1,8 +1,20 @@
 # LangGraph 多阶段编排与子代理隔离
 
-> **2026-07-09 重要修订**:本文档原描述基于 LangGraph `StateGraph` 的章节写作主图(`plan_outline` → `write_chapter` → `proofread` → `history_check` → `review_gate`)。截至 2026-07-09,LangGraph **未实装**——`_DefaultEngineDeps.run_workflow` 是同步 stub,真实 LangGraph 图待 `EngineDeps.workflow_starter` 扩展点落地。本节保留作为设计稿,标记"待实现"。
+> **2026-07-14 重要修订**(覆盖 2026-07-09 修订):本文档原描述基于 LangGraph `StateGraph` 的章节写作主图(`plan_outline` → `write_chapter` → `proofread` → `history_check` → `review_gate`)。截至 2026-07-09 (`real-writing-pipeline` PR2 apply),`write_chapter` **已实装**为 LangGraph 5 节点图 `prep_context → plan_chapter → draft_chapter → proofread → review_gate → (rewrite | persist_outputs)`(代码 `src/writer/workflows/write_chapter.py`);`review_chapter` 仍为占位 stub,等 PR3 用同模式替换。
 >
-> 当下章节写作的实际路径是:**SKILL.md directive(`/大纲` `/目录`)+ LLM 工具循环 + builtin Tool**——LLM 自由组合 `safe_read_file` / `safe_write_file` / `safe_edit_file` / `safe_list_dir` / `safe_glob` / `project_search` / `foreshadow_search` / `wordcount` 完成"读、改、查"循环。`MAX_LOOP_STEPS=5` 的 `ReActAgent`(`src/writer/llm/agent.py`)提供 ReAct 风格的预算控制。
+> **节点当前实现**(per `build_writer_graph()`):
+> - `prep_context` — 调 `writer.prompts.context.prep_context` 组装 canon block;**纯确定性**
+> - `plan_chapter` — 组装 beats(开场/冲突/高潮/收束);**纯确定性**
+> - `draft_chapter` — 调 `deps.prose_client.generate_text`(real 路径)或确定性模板(deterministic 路径)
+> - `proofread` — 长度 lint;**纯确定性**
+> - `review_gate` — `deps.prose_client.name == "deterministic"` 路径以 score 8 自动通过;real 路径用 `ReviewVerdict` 结构化输出 + `deps.review_llm` 注入,阈值 `REVIEW_THRESHOLD=7`,未通过则回到 `draft_chapter`(`max_retries=2`)
+> - `persist_outputs` — 写 `草稿/chapter-<chapter_id>.md` + 原子更新 `chapter_summaries.json`;**纯确定性**
+>
+> **checkpointer**:`_build_checkpointer(project_root)` 优先 `SqliteSaver`(`<root>/.writer/checkpoints.sqlite`),降级到 `MemorySaver`;`thread_id` 用 `session_id` 或 `f"write-{chapter_id}"`。
+>
+> **历史题材分支**:`history_check` 工作流节点本次**不做**(per 备忘 09 留作未来);LLM 通过 `AGENT.md` 的 `题材: 历史` 行 + `史实/` 目录推断题材,review_llm 自行决定是否读取史实。
+>
+> 本节其余部分(伪代码 + 验收标准 + 双轴映射)保留作概念参考,实现细节以 `src/writer/workflows/write_chapter.py` 为准。
 
 ## 业务背景
 

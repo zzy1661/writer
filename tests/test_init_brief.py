@@ -120,11 +120,16 @@ def test_should_not_run_init_brief_for_project_name_at_s0() -> None:
     )
 
 
-def test_extract_init_brief_text_supports_flag_form() -> None:
+def test_extract_init_brief_text_strips_init_prefix() -> None:
+    """``extract_init_brief_text`` 现在只剥离 ``/init`` 前缀,把
+    剩余文本当作故事核心创意。``--brief`` / ``-b`` flag 形式已于
+    2026-07-14 删除(改用纯 ``/init <故事梗概>`` 形式)。
+    """
     from writer.project.init_brief import extract_init_brief_text
 
-    assert extract_init_brief_text("/init --brief 程序员穿越唐朝") == "程序员穿越唐朝"
-    assert extract_init_brief_text("/init -b 程序员穿越唐朝") == "程序员穿越唐朝"
+    assert extract_init_brief_text("/init 程序员穿越唐朝") == "程序员穿越唐朝"
+    assert extract_init_brief_text("/init") == ""
+    assert extract_init_brief_text("/init   ") == ""
 
 
 # ---------------------------------------------------------------------------
