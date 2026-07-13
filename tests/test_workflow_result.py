@@ -33,7 +33,7 @@ class TestWorkflowResultShape:
             WorkflowResult()  # type: ignore[call-arg]
 
     def test_completed_status_with_artifacts(self, tmp_path: Path) -> None:
-        draft = tmp_path / "manuscript" / "ch1.md"
+        draft = tmp_path / "草稿" / "ch1.md"
         result = WorkflowResult(
             status="completed",
             chunks=("[workflow] done",),
@@ -105,7 +105,7 @@ class TestWorkflowResultSerialization:
         assert d["metrics"]["score"] == 8
 
     def test_to_payload_stringifies_paths(self, tmp_path: Path) -> None:
-        draft = tmp_path / "manuscript" / "ch1.md"
+        draft = tmp_path / "草稿" / "ch1.md"
         result = WorkflowResult(
             status="completed",
             artifacts={"draft_path": draft, "summaries_path": tmp_path / "summaries.json"},

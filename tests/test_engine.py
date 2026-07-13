@@ -153,7 +153,7 @@ def test_engine_yields_done_for_answer() -> None:
 def test_engine_yields_done_for_workflow(tmp_path: Path) -> None:
     deps = production_deps()
     workspace = create_workspace("workflow-test", tmp_path)
-    (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
+    (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
 
     events = _consume(run_engine(_workspace_ctx("/创作 1.3", workspace.root), deps))
 
@@ -321,7 +321,7 @@ def test_engine_dispatches_toc_directive(tmp_path: Path) -> None:
     """
     deps = production_deps()
     workspace = create_workspace("toc-test", tmp_path)
-    (workspace.root / "outline" / "大纲.md").write_text(
+    (workspace.root / "大纲" / "大纲.md").write_text(
         "# 测试书名\n\n## 四幕大纲\n\n"
         "- 第一幕：开端\n"
         "- 第二幕：对抗\n"
@@ -348,7 +348,7 @@ def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
     """``start_workflow`` must dispatch to the registered LangGraph workflow."""
     deps = production_deps()
     workspace = create_workspace("workflow-test", tmp_path)
-    (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
+    (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
 
     events = _consume(run_engine(_workspace_ctx("/创作 1.3", workspace.root), deps))
 

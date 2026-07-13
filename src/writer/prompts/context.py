@@ -121,16 +121,16 @@ def _build_canon_block(project_root: Path | None, *, query: str) -> str:
         return "未绑定项目，暂无正典资料。"
 
     # Per chg-remove-rag：纯文件拼装，无 RAG。分层为：
-    #   1. outline/* 全文（小文件，整篇读）
-    #   2. characters/* 全文（小文件，整篇读）
+    #   1. 大纲/* 全文（小文件，整篇读）
+    #   2. 人物/* 全文（小文件，整篇读）
     #   3. chapter_summaries.json 切片（按 chapter_id 前后 N=2 章）
-    #   4. 最近一章 manuscript/chapter-XXX.md 全文（"上一章" 笔触锚点）
+    #   4. 最近一章 草稿/chapter-XXX.md 全文（"上一章" 笔触锚点）
     # ``query`` 参数仍保留在签名中以兼容 ``prep_context`` 调用方，
     # 但已不再使用：结构化分层在不依赖 embedder 的情况下也能给出相关素材。
     del query  # 之前会传入 ProjectRagIndex(...).query(query, ...)
 
     parts: list[str] = []
-    for relative in ("outline", "characters"):
+    for relative in ("大纲", "人物"):
         path = project_root / relative
         if path.exists():
             parts.extend(_read_markdown_files(path))
@@ -149,12 +149,12 @@ def _build_canon_block(project_root: Path | None, *, query: str) -> str:
 def _build_summary_block(project_root: Path) -> str:
     """为 canon block 返回章节摘要切片。
 
-    读取 ``manuscript/chapter_summaries.json`` 并产出小段头部 +
+    读取 ``草稿/chapter_summaries.json`` 并产出小段头部 +
     最近若干条目（最多 4 条以保持块体积）。文件缺失 / 不可读时
     回退到「暂无章节摘要」。
     """
 
-    summary_file = project_root / "manuscript" / "chapter_summaries.json"
+    summary_file = project_root / "草稿" / "chapter_summaries.json"
     summaries = _load_summary_json(summary_file)
     if not summaries:
         return ""
@@ -165,13 +165,13 @@ def _build_summary_block(project_root: Path) -> str:
 
 
 def _read_last_chapter(project_root: Path) -> str:
-    """将最近的 ``manuscript/chapter-*.md`` 作为 canon anchor 返回。
+    """将最近的 ``草稿/chapter-*.md`` 作为 canon anchor 返回。
 
-    无 manuscript 文件时返回 ""。文件以 ``[last_chapter]`` 前缀，
+    无草稿文件时返回 ""。文件以 ``[last_chapter]`` 前缀，
     让下游消费者一眼能看出素材来源。
     """
 
-    manuscript = project_root / "manuscript"
+    manuscript = project_root / "草稿"
     if not manuscript.exists():
         return ""
     candidates = sorted(
@@ -194,14 +194,14 @@ def _build_history_block(project_root: Path | None, chapter_id: str) -> str:
     if project_root is None:
         return "暂无历史章节摘要。"
 
-    summary_file = project_root / "manuscript" / "chapter_summaries.json"
+    summary_file = project_root / "草稿" / "chapter_summaries.json"
     summaries = _load_summary_json(summary_file)
     if summaries:
         nearby = _select_recent_summaries(summaries, chapter_id, limit=3)
         if nearby:
             return "\n".join(nearby)
 
-    manuscript = project_root / "manuscript"
+    manuscript = project_root / "草稿"
     if manuscript.exists():
         chapters = _read_markdown_files(manuscript)
         return "\n\n".join(chapters[-3:]) if chapters else "暂无历史章节摘要。"

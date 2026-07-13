@@ -16,7 +16,7 @@ def test_create_new_workspace_scaffold(tmp_path: Path) -> None:
     workspace = create_new_workspace("新书", tmp_path, genres=["历史", "言情"])
 
     assert (workspace.root / "创意").is_dir()
-    assert (workspace.root / "创意" / "README.md").is_file()
+    assert (workspace.root / "创意" / "简介.md").is_file()
     assert (workspace.root / ".writer" / "config").is_file()
     assert (workspace.root / ".writer" / "skills").is_dir()
     assert (workspace.root / ".writer" / "agents").is_dir()

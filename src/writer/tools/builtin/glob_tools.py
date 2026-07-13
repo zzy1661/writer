@@ -21,7 +21,7 @@ class SafeGlob:
     """``project_root`` 下的基于模式的文件列出。
 
     ``pattern`` 遵循 :mod:`pathlib` 规则：``"*.md"`` 只匹配直接子项；
-    ``"**/*.md"`` 递归；``"manuscript/ch*.md"`` 限定子目录。隐藏条目
+    ``"**/*.md"`` 递归；``"草稿/ch*.md"`` 限定子目录。隐藏条目
     （``.foo``）会被过滤。
     """
 

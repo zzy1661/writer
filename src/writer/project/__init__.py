@@ -27,8 +27,14 @@ from writer.project.state import (
     refresh_agent_file,
     render_agent_file,
     safe_cwd,
+    update_agent_genre_line,
 )
-from writer.project.workspace import NovelWorkspace, create_new_workspace, create_workspace
+from writer.project.workspace import (
+    NovelWorkspace,
+    apply_genre_scaffolding,
+    create_new_workspace,
+    create_workspace,
+)
 
 __all__ = [
     "ChapterSummariesError",
@@ -40,6 +46,7 @@ __all__ = [
     "SUMMARIES_FILE",
     "append_agent_requirements",
     "append_summary",
+    "apply_genre_scaffolding",
     "count_chapters",
     "create_new_workspace",
     "create_workspace",
@@ -56,4 +63,5 @@ __all__ = [
     "refresh_agent_file",
     "render_agent_file",
     "safe_cwd",
+    "update_agent_genre_line",
 ]

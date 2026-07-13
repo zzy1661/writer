@@ -196,8 +196,8 @@ def test_dispatch_directive_in_s4_does_not_block(tmp_path: Path) -> None:
     from writer.project.state import ProjectState
 
     workspace = create_workspace("s4-outline", tmp_path)
-    (workspace.root / "outline" / "大纲.md").write_text("旧大纲", encoding="utf-8")
-    (workspace.root / "manuscript" / "chapter-01.md").write_text(
+    (workspace.root / "大纲" / "大纲.md").write_text("旧大纲", encoding="utf-8")
+    (workspace.root / "草稿" / "chapter-01.md").write_text(
         "正文", encoding="utf-8"
     )
     assert detect_state(workspace.root) == ProjectState.WRITING
@@ -224,9 +224,9 @@ def test_dispatch_directive_in_s4_does_not_block_toc(tmp_path: Path) -> None:
     from writer.project.state import ProjectState
 
     workspace = create_workspace("s4-toc", tmp_path)
-    (workspace.root / "outline" / "大纲.md").write_text("旧大纲", encoding="utf-8")
-    (workspace.root / "outline" / "toc.md").write_text("第一章", encoding="utf-8")
-    (workspace.root / "manuscript" / "chapter-01.md").write_text(
+    (workspace.root / "大纲" / "大纲.md").write_text("旧大纲", encoding="utf-8")
+    (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
+    (workspace.root / "草稿" / "chapter-01.md").write_text(
         "正文", encoding="utf-8"
     )
     assert detect_state(workspace.root) == ProjectState.WRITING

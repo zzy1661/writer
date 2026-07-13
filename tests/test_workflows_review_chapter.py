@@ -3,7 +3,7 @@
 Added 2026-07-09 (real-writing-pipeline PR3) — covers the 5-node
 reviewer graph, decision gate mapping (pass / tweak / needs_rewrite),
 continuity findings referencing foreshadow IDs, and report
-persistence to ``manuscript/reviews/``.
+persistence to ``草稿/reviews/``.
 """
 
 from __future__ import annotations
@@ -114,8 +114,8 @@ def _make_deps(
 
 
 def _write_chapter(project_root: Path, chapter_id: str, content: str) -> Path:
-    """Helper: write a chapter file under manuscript/."""
-    manuscript_dir = project_root / "manuscript"
+    """Helper: write a chapter file under 草稿/."""
+    manuscript_dir = project_root / "草稿"
     manuscript_dir.mkdir(parents=True, exist_ok=True)
     path = manuscript_dir / f"chapter-{chapter_id}.md"
     path.write_text(content, encoding="utf-8")
@@ -209,11 +209,11 @@ class TestLoadTargetChapter:
     def test_load_missing_chapter_returns_failed(
         self, project_root: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Create the manuscript/ directory so we get past the
+        # Create the 草稿/ directory so we get past the
         # ``manuscript_missing`` check; the chapter file itself is
         # what we expect to be flagged as not found.
         _patch_high_score_llm(monkeypatch)
-        (project_root / "manuscript").mkdir()
+        (project_root / "草稿").mkdir()
         deps = _make_deps(project_root)
         ctx = EngineContext(
             user_input="/审核 99.99", project_root=project_root, project_state="S2"

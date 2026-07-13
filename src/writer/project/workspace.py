@@ -1,11 +1,16 @@
 """小说项目 workspace 脚手架。
 
-``create_workspace`` 把小说项目的目录布局落到磁盘。基础布局
-（``manuscript / outline / characters / world / notes`` +
-``AGENT.md / README.md`` + 每个子目录一个 stub）是**与题材无关**的；
+``create_workspace`` 把小说项目的目录布局落到磁盘。基础布局（7 个
+always-create 顶级目录 ``草稿 / 大纲 / 人物 / 世界观 / 备忘 / 创意 / 正文``
++ ``AGENT.md / README.md`` + 每个子目录一个 stub）是**与题材无关**的；
 题材特定的额外内容（历史 ``史实/``、玄幻 ``伏笔/``、言情 ``人设/``）
-由 :func:`_genre_scaffolding` 层叠上去，并合并到返回的
+由 :func:`apply_genre_scaffolding` 层叠上去，并合并到返回的
 ``created_files`` 列表中。
+
+顶级目录命名沿用项目 2026-07-14 的中文统一约定：
+``草稿/``（写作中草稿）vs ``正文/``（已定稿）独立开。
+``大纲/`` 文件夹承载 premise / volume-plan / toc / 大纲.md 以及题材专属的
+境界表 / 感情线时间轴 stub。
 
 当 ``with_writer_meta=True``（即 :func:`create_new_workspace` 走的
 ``writer new`` 路径）时，:func:`_writer_meta_scaffolding`` 还会创建
@@ -99,11 +104,12 @@ def create_workspace(
         raise FileExistsError(msg)
 
     directories = [
-        root / "manuscript",
-        root / "outline",
-        root / "characters",
-        root / "world",
-        root / "notes",
+        root / "草稿",
+        root / "大纲",
+        root / "人物",
+        root / "世界观",
+        root / "备忘",
+        root / "正文",
     ]
     if with_ideas_dir:
         directories.append(root / "创意")
@@ -117,11 +123,11 @@ def create_workspace(
             genre=format_genre_line(genre_list) or canonical_genre,
         ),
         root / "README.md": f"# {project_name}\n\n长篇小说项目工作区。\n",
-        root / "outline" / "premise.md": "# 一句话创意\n\n",
-        root / "outline" / "volume-plan.md": "# 分卷规划\n\n",
-        root / "characters" / "main.md": "# 主要人物\n\n",
-        root / "world" / "setting.md": "# 世界观设定\n\n",
-        root / "notes" / "todo.md": "# 待办\n\n",
+        root / "大纲" / "一句话创意.md": "# 一句话创意\n\n",
+        root / "大纲" / "分卷规划.md": "# 分卷规划\n\n",
+        root / "人物" / "主要人物.md": "# 主要人物\n\n",
+        root / "世界观" / "世界观设定.md": "# 世界观设定\n\n",
+        root / "备忘" / "待办.md": "# 待办\n\n",
     }
 
     created_files: list[Path] = []
@@ -131,13 +137,16 @@ def create_workspace(
             created_files.append(path)
 
     if with_ideas_dir:
-        ideas_stub = root / "创意" / "README.md"
+        ideas_stub = root / "创意" / "简介.md"
         if force or not ideas_stub.exists():
             ideas_stub.write_text("# 创意库\n\n存放故事创意、灵感与核心设定。\n", encoding="utf-8")
             created_files.append(ideas_stub)
 
-    # 题材特定脚手架叠在基础布局之上。
-    created_files.extend(_genre_scaffolding(root, canonical_genre))
+    # 题材特定脚手架叠在基础布局之上。``apply_genre_scaffolding`` 遍历
+    # ``genre_list`` 的每个题材，每个白名单题材（``历史 / 言情 / 玄幻``）
+    # 都会创建对应脚手架；``other`` 与未知题材是 no-op。多题材项目
+    # （例如 ``["历史", "玄幻"]``）会同时创建两套脚手架文件。
+    created_files.extend(apply_genre_scaffolding(root, genre_list))
 
     if with_writer_meta:
         created_files.extend(
@@ -429,12 +438,14 @@ def _walk_traversable(root) -> list:
     return out
 
 
-def _genre_scaffolding(root: Path, canonical_genre: str) -> list[Path]:
-    """创建题材特定的文件并返回实际写入的路径列表。
+def _genre_scaffolding(
+    root: Path, canonical_genre: str
+) -> dict[Path, str] | None:
+    """题材特定脚手架字典查找表（per-genre 应用）。
 
-    返回列表只包含实际写入的路径；已存在的文件保持不变。
-    ``canonical_genre`` 必须是 ``{历史, 言情, 玄幻, other}`` 之一
-    （:func:`_normalize_genre` 返回的白名单）；``other`` 返回 ``[]``。
+    内部辅助函数：把单个规范题材（``{历史, 言情, 玄幻}``）映射到对应
+    文件模板字典。``other`` 与未知题材返回 ``None``（无脚手架）。
+    多题材应用走 :func:`apply_genre_scaffolding` 公开 API。
     """
     scaffolds: dict[str, dict[Path, str]] = {
         "历史": {
@@ -444,7 +455,7 @@ def _genre_scaffolding(root: Path, canonical_genre: str) -> list[Path]:
             root / "史实" / "考证.md": "# 考证备忘\n\n史实资料的核实状态与争议说明。\n",
         },
         "玄幻": {
-            root / "伏笔" / "foreshadow.md": (
+            root / "伏笔" / "伏笔表.md": (
                 "# 伏笔表\n\n记录伏笔编号、内容、计划回收章节。\n"
             ),
             root / "大纲" / "境界表.md": (
@@ -459,15 +470,35 @@ def _genre_scaffolding(root: Path, canonical_genre: str) -> list[Path]:
             ),
         },
     }
+    return scaffolds.get(canonical_genre)
 
-    mapping = scaffolds.get(canonical_genre)
-    if not mapping:
-        return []
+
+def apply_genre_scaffolding(root: Path, genres: list[str]) -> list[Path]:
+    """为已存在的项目补建多个题材的专属文件（公开 API）。
+
+    遍历 ``genres`` 中每个规范题材（``历史 / 言情 / 玄幻``），应用
+    对应脚手架。``other`` 与未知值是 no-op（无文件创建）。
+
+    已存在的文件保持原样（additive，不覆盖），返回列表只包含
+    **实际新建**的路径。这让 REPL 反复 ``/init``、题材切换场景下
+    旧题材的子目录与文件得到保留 —— 与 chg-remove-state-machine-
+    enforcement 的「不删旧文件」语义一致。
+
+    单题材调用（``apply_genre_scaffolding(root, ["历史"])``）与
+    ``create_workspace(genre="历史")`` 行为一致（向后兼容 5 个
+    ``test_create_workspace_*_genre_*`` 测试）。
+    """
 
     created: list[Path] = []
-    for path, content in mapping.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists():
+    for canonical_genre in genres:
+        mapping = _genre_scaffolding(root, canonical_genre)
+        if not mapping:
+            continue
+        for path, content in mapping.items():
+            if path.exists():
+                # 已存在的文件保持原样（additive），跳过 mkdir + write
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")
             created.append(path)
     return created
@@ -486,6 +517,7 @@ def _normalize_name(name: str) -> str:
 
 __all__ = [
     "NovelWorkspace",
+    "apply_genre_scaffolding",
     "create_new_workspace",
     "create_workspace",
 ]

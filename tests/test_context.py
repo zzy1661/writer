@@ -17,7 +17,7 @@ from writer.prompts.context import prep_context, trim_to_budget
 
 
 def test_prep_context_builds_token_audit_and_trims(tmp_path: Path) -> None:
-    outline = tmp_path / "outline" / "大纲.md"
+    outline = tmp_path / "大纲" / "大纲.md"
     outline.parent.mkdir()
     outline.write_text("主角在第一章得到玉簪。" * 200, encoding="utf-8")
 
@@ -56,19 +56,19 @@ def test_canon_block_includes_outline_characters_summaries_and_last_chapter(
     """
 
     # Layer 1: outline
-    (tmp_path / "outline").mkdir()
-    (tmp_path / "outline" / "大纲.md").write_text(
+    (tmp_path / "大纲").mkdir()
+    (tmp_path / "大纲" / "大纲.md").write_text(
         "主线：寻找玉簪来历。", encoding="utf-8"
     )
 
     # Layer 2: characters
-    (tmp_path / "characters").mkdir()
-    (tmp_path / "characters" / "主角.md").write_text(
+    (tmp_path / "人物").mkdir()
+    (tmp_path / "人物" / "主角.md").write_text(
         "主角害怕旧匣子。", encoding="utf-8"
     )
 
     # Layer 3: chapter_summaries.json
-    manuscript = tmp_path / "manuscript"
+    manuscript = tmp_path / "草稿"
     manuscript.mkdir()
     import json
 

@@ -39,17 +39,25 @@ class ProjectSnapshot:
 
 
 _OUTLINE_PATHS = (
-    Path("outline") / "大纲.md",
+    # 新中文路径（per 2026-07-14 目录统一）—— 仅"大纲.md"视为正典大纲
     Path("大纲") / "大纲.md",
+    # legacy 英文路径（向后兼容旧项目）
+    Path("outline") / "大纲.md",
 )
 _TOC_PATHS = (
+    # 新中文路径
+    Path("大纲") / "章节目录.md",
+    # legacy 英文路径
     Path("outline") / "toc.md",
     Path("目录") / "目录.md",
 )
 _MANUSCRIPT_DIRS = (
+    # 新中文路径:草稿(工作中)+ 正文(定稿),两个独立
+    Path("草稿"),
+    Path("正文"),
+    # legacy 英文 / 别名(向后兼容旧项目)
     Path("manuscript"),
     Path("正文草稿"),
-    Path("正文"),
 )
 
 #: ``AGENT.md`` 内状态块的 header。导出供写入工具（例如
@@ -197,11 +205,12 @@ def render_agent_file(
             "\n",
             "## 目录约定\n",
             "\n",
-            "- outline/: 大纲、目录与分卷规划\n",
-            "- manuscript/: 正文草稿\n",
-            "- characters/: 人物设定\n",
-            "- world/: 世界观设定\n",
-            "- notes/: 写作笔记\n",
+            "- 大纲/: 大纲、目录与分卷规划\n",
+            "- 草稿/: 写作中的正文草稿\n",
+            "- 正文/: 已定稿的正文\n",
+            "- 人物/: 人物设定\n",
+            "- 世界观/: 世界观设定\n",
+            "- 备忘/: 写作笔记\n",
             "- 创意/: 故事创意与核心设定\n",
         ]
     )
@@ -256,15 +265,114 @@ def read_genre_from_agent(agent_md: Path) -> str:
     except (FileNotFoundError, OSError):
         return "other"
     for line in text.splitlines():
-        stripped = line.strip()
-        # 容忍前导列表字符，让该行可以以 ``题材: 历史`` 或
-        # ``- 题材: 历史`` 两种形式出现而不破坏解析。
-        if stripped.startswith(("- ", "* ", "· ", "• ")):
-            stripped = stripped[2:].lstrip()
+        stripped = _strip_genre_line_prefix(line.strip())
         if stripped.startswith("题材:"):
             value = stripped.split(":", 1)[1].strip()
             return value or "other"
     return "other"
+
+
+#: 可选的 Markdown 列表前缀集合，让 ``题材:`` 行可以以裸形式（``题材: 历史``）
+#: 或列表项形式（``- 题材: 历史`` / ``* 题材: 历史`` / ``· 题材: 历史`` /
+#: ``• 题材: 历史``）出现而不破坏解析。:func:`read_genre_from_agent` 与
+#: :func:`update_agent_genre_line` 共用这一常量，避免列表漂移。
+_GENRE_LINE_PREFIXES: tuple[str, ...] = ("- ", "* ", "· ", "• ")
+
+
+def _strip_genre_line_prefix(stripped: str) -> str:
+    """去掉 ``题材:`` 行的可选 Markdown 列表前缀。"""
+
+    for prefix in _GENRE_LINE_PREFIXES:
+        if stripped.startswith(prefix):
+            return stripped[len(prefix):].lstrip()
+    return stripped
+
+
+def update_agent_genre_line(agent_md: Path, genres: list[str]) -> bool:
+    """原地更新 ``AGENT.md`` 中的 ``题材:`` 行，保留其它所有内容。
+
+    与 :func:`refresh_agent_file` 的区别：本函数是**局部**更新，不重写
+    AGENT.md 整体内容 —— ``## 基本要求`` 等下游段（由
+    :func:`append_agent_requirements` 追加）得到保留。
+
+    处理策略：
+
+    1. ``format_genre_line(genres)`` 返回 ``None``（即全 ``other`` /
+       空列表）时**移除**现有 ``题材:`` 行，让 ``read_genre_from_agent``
+       回退到 ``"other"`` 兜底。
+    2. 否则：
+
+       - 若文件已存在 ``题材: ...`` 行（容忍 ``- `` / ``* `` / ``· `` /
+         ``• `` 前缀，与 :func:`read_genre_from_agent` 一致），就地替换。
+       - 若文件没有该行，则在第一个 ``## ...`` 二级标题前插入
+         ``- 题材: <label>\\n`` —— 找不到任何二级标题时追加到末尾。
+
+    返回 ``True`` 表示文件被改动，``False`` 表示 no-op（无 ``题材:``
+    行可改且无须新增，或新值与旧值相同）。
+
+    文件不存在时静默忽略（视为 no-op），不抛异常 —— 调用方需要
+    提前用 :func:`create_workspace` 等保证 AGENT.md 存在。
+    """
+
+    from writer.project.genre import format_genre_line
+
+    label = format_genre_line(genres)
+    try:
+        original = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return False
+
+    lines = original.splitlines(keepends=True)
+
+    # 第一遍：寻找现有 ``题材:`` 行的索引（与 ``read_genre_from_agent``
+    # 共用 :func:`_strip_genre_line_prefix` 的前缀容忍规则）。
+    target_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("题材:"):
+            target_idx = idx
+            break
+
+    if label is None:
+        # 移除现有行（如果存在）；无现有行是 no-op。
+        if target_idx is None:
+            return False
+        del lines[target_idx]
+        agent_md.write_text("".join(lines), encoding="utf-8")
+        return True
+
+    new_line = f"- 题材: {label}\n"
+
+    if target_idx is not None:
+        # 就地替换 —— 即使新值与旧值相同也写一次以保证尾换行一致；
+        # 调用方按返回值判断是否变更。
+        if lines[target_idx] == new_line:
+            return False
+        lines[target_idx] = new_line
+        agent_md.write_text("".join(lines), encoding="utf-8")
+        return True
+
+    # 没有 ``题材:`` 行：插入到第一个 ``## ...`` 二级标题之前。
+    insert_idx: int | None = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## "):
+            insert_idx = idx
+            break
+    if insert_idx is None:
+        # 没有任何二级标题 —— 追加到末尾。
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] = lines[-1] + "\n"
+        lines.append(new_line)
+    else:
+        # 在标题前留一个空行（若上一行不是空行）。
+        prefix = lines[:insert_idx]
+        suffix = lines[insert_idx:]
+        if prefix and prefix[-1].strip():
+            prefix.append("\n")
+        lines = prefix + [new_line, "\n"] + suffix
+
+    agent_md.write_text("".join(lines), encoding="utf-8")
+    return True
 
 
 def _first_existing_nonempty(root: Path, relatives: tuple[Path, ...]) -> Path | None:
@@ -304,4 +412,5 @@ __all__ = [
     "refresh_agent_file",
     "render_agent_file",
     "safe_cwd",
+    "update_agent_genre_line",
 ]

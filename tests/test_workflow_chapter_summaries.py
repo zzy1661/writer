@@ -125,12 +125,12 @@ class TestProjectRootValidation:
 
 class TestIsolatedTestFixture:
     def test_no_manuscript_dir_side_effect(self, project_root: Path) -> None:
-        # The helper MUST NOT create a manuscript/ directory — that
+        # The helper MUST NOT create a 草稿/ directory — that
         # is write_chapter.persist_outputs' responsibility. The
         # ``isolated test fixture`` contract from the writer-tools
         # spec is verified here.
         append_summary(project_root, "1.1", "x")
-        assert not (project_root / "manuscript").exists()
+        assert not (project_root / "草稿").exists()
 
     def test_no_writer_metadata_side_effect(self, project_root: Path) -> None:
         append_summary(project_root, "1.1", "x")

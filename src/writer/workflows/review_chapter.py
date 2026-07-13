@@ -14,7 +14,7 @@
 * ``decision_gate`` —— 把 ``total_score`` + 每个 concern 的 pass 标志
   映射为 ``"pass" | "tweak" | "needs_rewrite"``。
 * ``persist_review_report`` —— 写入
-  ``manuscript/reviews/chapter-<id>-<ISO-timestamp>.json`` 并返回
+  ``草稿/reviews/chapter-<id>-<ISO-timestamp>.json`` 并返回
   一个 :class:`WorkflowResult`，将决策、总分和 review 路径放入
   ``artifacts`` / ``metrics``。
 
@@ -166,9 +166,9 @@ def _load_target_chapter_node(state: ReviewerState) -> ReviewerState:
     """解析目标章节文件并加载其内容。
 
     若 ``target`` 为 ``"current"``，节点按文件名字典序在
-    ``manuscript/`` 中查找最新章节（``chapter-N.M.md`` 排序正确）。
+    ``草稿/`` 中查找最新章节（``chapter-N.M.md`` 排序正确）。
     若给出具体 chapter_id（``"1.3"``），节点直接查找
-    ``manuscript/chapter-1.3.md``。项目根目录来自 ``deps``（通过 deps
+    ``草稿/chapter-1.3.md``。项目根目录来自 ``deps``（通过 deps
     注入）—— LangGraph state 不携带 project_root 字段。
     """
     deps = _get_deps()
@@ -181,12 +181,12 @@ def _load_target_chapter_node(state: ReviewerState) -> ReviewerState:
         )
 
     target = state.get("target", "current")
-    manuscript_dir = project_root / "manuscript"
+    manuscript_dir = project_root / "草稿"
     if not manuscript_dir.exists():
         return _failed_state(
             state,
             error="manuscript_missing",
-            message=f"项目根 {project_root} 下没有 manuscript/ 目录",
+            message=f"项目根 {project_root} 下没有 草稿/ 目录",
         )
 
     if target == "current":
@@ -195,7 +195,7 @@ def _load_target_chapter_node(state: ReviewerState) -> ReviewerState:
             return _failed_state(
                 state,
                 error="chapter_not_found",
-                message="manuscript/ 下没有可审核的章节",
+                message="草稿/ 下没有可审核的章节",
             )
         chapter_path = candidates[-1]  # 字典序末位 = 最高 N.M
     else:
@@ -315,7 +315,7 @@ def _decision_gate_node(state: ReviewerState) -> ReviewerState:
 
 
 def _persist_review_report_node(state: ReviewerState) -> ReviewerState:
-    """把 review 报告写入 ``manuscript/reviews/``。"""
+    """把 review 报告写入 ``草稿/reviews/``。"""
     deps = _get_deps()
     project_root = deps.tool_runtime.project_root
     if project_root is None or str(project_root) == "/__no_project__":
@@ -333,7 +333,7 @@ def _persist_review_report_node(state: ReviewerState) -> ReviewerState:
     active_foreshadows = state.get("active_foreshadows", [])
 
     timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    reviews_dir = project_root / "manuscript" / "reviews"
+    reviews_dir = project_root / "草稿" / "reviews"
     reviews_dir.mkdir(parents=True, exist_ok=True)
     review_path = reviews_dir / f"chapter-{chapter_id}-{timestamp}.json"
 

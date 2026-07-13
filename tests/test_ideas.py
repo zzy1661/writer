@@ -13,7 +13,7 @@ def test_load_ideas_context_reads_core_and_supplementary(tmp_path: Path) -> None
     ideas_dir = workspace.root / "创意"
     (ideas_dir / "核心创意.md").write_text("# 核心\n\n林远穿越到杀戮世界。", encoding="utf-8")
     (ideas_dir / "角色灵感.md").write_text("主角：游戏设计师林远。", encoding="utf-8")
-    (ideas_dir / "README.md").write_text("占位", encoding="utf-8")
+    (ideas_dir / "简介.md").write_text("占位", encoding="utf-8")
 
     ctx = load_ideas_context(workspace.root)
 

@@ -20,21 +20,22 @@ from writer.project.workspace import (
 )
 
 EXPECTED_DIRS = [
-    "manuscript",
-    "outline",
-    "characters",
-    "world",
-    "notes",
+    "草稿",
+    "大纲",
+    "人物",
+    "世界观",
+    "备忘",
+    "正文",
 ]
 
 EXPECTED_FILES = [
     "AGENT.md",
     "README.md",
-    "outline/premise.md",
-    "outline/volume-plan.md",
-    "characters/main.md",
-    "world/setting.md",
-    "notes/todo.md",
+    "大纲/一句话创意.md",
+    "大纲/分卷规划.md",
+    "人物/主要人物.md",
+    "世界观/世界观设定.md",
+    "备忘/待办.md",
 ]
 
 HISTORY_FILES = [
@@ -45,7 +46,7 @@ HISTORY_FILES = [
 ]
 
 XUANHUAN_FILES = [
-    "伏笔/foreshadow.md",
+    "伏笔/伏笔表.md",
     "大纲/境界表.md",
 ]
 
@@ -102,19 +103,19 @@ def test_create_workspace_file_contents_match_template(tmp_path: Path) -> None:
     agent = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
     assert "state: S1" in agent
 
-    premise = (workspace.root / "outline" / "premise.md").read_text(encoding="utf-8")
+    premise = (workspace.root / "大纲" / "一句话创意.md").read_text(encoding="utf-8")
     assert premise == "# 一句话创意\n\n"
 
-    volume_plan = (workspace.root / "outline" / "volume-plan.md").read_text(encoding="utf-8")
+    volume_plan = (workspace.root / "大纲" / "分卷规划.md").read_text(encoding="utf-8")
     assert volume_plan == "# 分卷规划\n\n"
 
-    main_chars = (workspace.root / "characters" / "main.md").read_text(encoding="utf-8")
+    main_chars = (workspace.root / "人物" / "主要人物.md").read_text(encoding="utf-8")
     assert main_chars == "# 主要人物\n\n"
 
-    setting = (workspace.root / "world" / "setting.md").read_text(encoding="utf-8")
+    setting = (workspace.root / "世界观" / "世界观设定.md").read_text(encoding="utf-8")
     assert setting == "# 世界观设定\n\n"
 
-    todo = (workspace.root / "notes" / "todo.md").read_text(encoding="utf-8")
+    todo = (workspace.root / "备忘" / "待办.md").read_text(encoding="utf-8")
     assert todo == "# 待办\n\n"
 
 
@@ -343,3 +344,68 @@ def test_mirror_does_not_overwrite_user_modified_agents(tmp_path: Path) -> None:
     text = history_path.read_text(encoding="utf-8")
     assert "USER MODIFIED" in text
     assert "USER BODY" in text
+
+
+# ---------------------------------------------------------------------------
+# apply_genre_scaffolding — public additive API for REPL ``/init <brief>``
+# ---------------------------------------------------------------------------
+
+
+def test_apply_genre_scaffolding_handles_multiple_genres(tmp_path: Path) -> None:
+    """多题材下，所有白名单题材的脚手架都应创建。"""
+
+    from writer.project.workspace import apply_genre_scaffolding
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text("# novel\n\n", encoding="utf-8")
+
+    created = apply_genre_scaffolding(project, ["历史", "玄幻"])
+
+    relative = sorted(p.relative_to(project).as_posix() for p in created)
+    assert relative == sorted(
+        HISTORY_FILES + XUANHUAN_FILES
+    ), f"expected history + xuanhuan scaffolds, got {relative}"
+
+
+def test_apply_genre_scaffolding_skips_existing_files(tmp_path: Path) -> None:
+    """已存在的文件不被覆盖；返回列表只包含实际新建路径。"""
+
+    from writer.project.workspace import apply_genre_scaffolding
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text("# novel\n\n", encoding="utf-8")
+
+    # 第一次跑：创建所有历史文件
+    first = apply_genre_scaffolding(project, ["历史"])
+    assert len(first) == 4
+    # 用户编辑其中一个
+    user_note = "# 用户备注：不得覆盖\n"
+    (project / "史实" / "年表.md").write_text(user_note, encoding="utf-8")
+
+    # 第二次跑（题材切换 + 玄幻新增）：历史文件原样保留
+    second = apply_genre_scaffolding(project, ["历史", "玄幻"])
+
+    relative = sorted(p.relative_to(project).as_posix() for p in second)
+    assert relative == sorted(XUANHUAN_FILES)
+    # 历史文件未被改写
+    assert (project / "史实" / "年表.md").read_text(encoding="utf-8") == user_note
+
+
+def test_apply_genre_scaffolding_unknown_genre_is_noop(tmp_path: Path) -> None:
+    """``other`` 与未知值不创建任何文件。"""
+
+    from writer.project.workspace import apply_genre_scaffolding
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text("# novel\n\n", encoding="utf-8")
+
+    assert apply_genre_scaffolding(project, ["other"]) == []
+    assert apply_genre_scaffolding(project, [""]) == []
+    assert apply_genre_scaffolding(project, ["科幻", "悬疑"]) == []
+    # 即便混入白名单题材，未知值仍按白名单处理
+    created = apply_genre_scaffolding(project, ["未知", "历史"])
+    relative = sorted(p.relative_to(project).as_posix() for p in created)
+    assert relative == sorted(HISTORY_FILES)

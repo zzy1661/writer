@@ -413,7 +413,7 @@ class TestArgsIntegration:
             project_state="S2",
         )
         result = run(ctx, deps)
-        # The chapter file is written under manuscript/chapter-2.3.md.
+        # The chapter file is written under 草稿/chapter-2.3.md.
         assert "chapter-2.3.md" in str(result.artifacts["draft_path"])
 
     def test_requirements_passed_to_prose_client(self, tmp_path: Path) -> None:

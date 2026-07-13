@@ -297,11 +297,11 @@ def _review_gate_node(state: WriterState) -> WriterState:
 
 
 def _persist_outputs_node(state: WriterState) -> WriterState:
-    """把草稿写入 ``manuscript/`` 并更新 ``chapter_summaries.json``。
+    """把草稿写入 ``草稿/`` 并更新 ``chapter_summaries.json``。
 
     两次写入都是原子的 —— ``chapter_summaries.json`` 通过
     :func:`writer.project.chapter_summaries.append_summary`，
-    章节文件在确保 ``manuscript/`` 目录存在后通过 :func:`Path.write_text` 写入。
+    章节文件在确保 ``草稿/`` 目录存在后通过 :func:`Path.write_text` 写入。
     """
     chapter_id = state.get("chapter_id", "1.1")
     draft = state.get("draft", "")
@@ -313,7 +313,7 @@ def _persist_outputs_node(state: WriterState) -> WriterState:
     metrics: dict[str, float | int | str] = dict(state.get("metrics", {}))
 
     if project_root is not None:
-        manuscript_dir = project_root / "manuscript"
+        manuscript_dir = project_root / "草稿"
         manuscript_dir.mkdir(parents=True, exist_ok=True)
         chapter_path = manuscript_dir / f"chapter-{chapter_id}.md"
         chapter_path.write_text(draft, encoding="utf-8")

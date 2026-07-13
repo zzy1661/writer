@@ -125,3 +125,97 @@ def test_extract_init_brief_text_supports_flag_form() -> None:
 
     assert extract_init_brief_text("/init --brief 程序员穿越唐朝") == "程序员穿越唐朝"
     assert extract_init_brief_text("/init -b 程序员穿越唐朝") == "程序员穿越唐朝"
+
+
+# ---------------------------------------------------------------------------
+# ``apply_genre_and_brief`` — REPL ``/init <brief>`` 后端
+# ---------------------------------------------------------------------------
+
+
+def test_apply_genre_and_brief_creates_scaffold_and_writes_brief(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    """多题材下脚手架补建 + brief 写入一次性完成。"""
+
+    from writer.cli._init_backend import apply_genre_and_brief
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text(
+        "# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n",
+        encoding="utf-8",
+    )
+
+    outcome = apply_genre_and_brief(
+        project,
+        genres=["历史", "玄幻"],
+        brief="林远穿越到他写的游戏中，世界观与预设相反。",
+        settings=Settings(api_key=None),
+    )
+
+    relative = sorted(
+        p.relative_to(project).as_posix() for p in outcome.created_files
+    )
+    assert "史实/年表.md" in relative
+    assert "史实/人物.md" in relative
+    assert "伏笔/伏笔表.md" in relative
+    assert (project / "大纲" / "境界表.md").is_file()
+    assert (project / "创意" / "核心创意.md").is_file()
+    assert outcome.brief_source == "fallback"
+    assert "历史" in outcome.selected_genres
+    assert "玄幻" in outcome.selected_genres
+
+
+def test_apply_genre_and_brief_updates_genre_line_when_changed(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    """当题材与磁盘不同步时 ``genre_line_changed=True``。"""
+
+    from writer.cli._init_backend import apply_genre_and_brief
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text(
+        "# novel\n\n- 题材: 历史\n\n## 当前状态\n",
+        encoding="utf-8",
+    )
+
+    outcome = apply_genre_and_brief(
+        project,
+        genres=["玄幻"],
+        brief="一个废土少年的故事",
+        settings=Settings(api_key=None),
+    )
+
+    assert outcome.genre_line_changed is True
+    text = (project / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 题材: 玄幻" in text
+    assert "题材: 历史" not in text
+
+
+def test_apply_genre_and_brief_no_op_when_genre_unchanged(
+    tmp_path,
+) -> None:  # noqa: ANN001
+    """已同步的题材不应触发 ``genre_line_changed``；所有脚手架已就位。"""
+
+    from writer.cli._init_backend import apply_genre_and_brief
+    from writer.project import apply_genre_scaffolding
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text(
+        "# novel\n\n- 题材: 历史\n\n## 当前状态\n",
+        encoding="utf-8",
+    )
+    # 预先 scaffold，让 ``apply_genre_scaffolding`` 命中既有文件
+    apply_genre_scaffolding(project, ["历史"])
+
+    outcome = apply_genre_and_brief(
+        project,
+        genres=["历史"],
+        brief="林远穿越到他写的游戏中",
+        settings=Settings(api_key=None),
+    )
+
+    assert outcome.genre_line_changed is False
+    assert outcome.created_files == []  # 所有 scaffold 文件已存在

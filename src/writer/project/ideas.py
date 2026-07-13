@@ -12,7 +12,7 @@ from pathlib import Path
 from writer.prompts.agents import OUTLINE_TEMPLATE_STORY
 
 CORE_IDEA_FILENAME = "核心创意.md"
-_SKIP_FILENAMES = frozenset({CORE_IDEA_FILENAME, "README.md"})
+_SKIP_FILENAMES = frozenset({CORE_IDEA_FILENAME, "README.md", "简介.md"})
 _TEXT_SUFFIXES = frozenset({".md", ".txt"})
 
 

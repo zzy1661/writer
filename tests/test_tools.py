@@ -51,11 +51,11 @@ def test_safe_path_rejects_absolute_outside_root(tmp_path: Path) -> None:
 
 def test_safe_path_accepts_relative_and_root(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path)
-    nested = tmp_path / "outline" / "premise.md"
+    nested = tmp_path / "大纲" / "一句话创意.md"
     nested.parent.mkdir(parents=True)
     nested.write_text("hi", encoding="utf-8")
 
-    assert runtime.safe_path("outline/premise.md") == nested
+    assert runtime.safe_path("大纲/一句话创意.md") == nested
     assert runtime.safe_path(str(nested)) == nested
 
 
@@ -136,14 +136,14 @@ def test_wordcount_handles_chinese_with_whitespace() -> None:
 
 def test_wordcount_can_count_project_path(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path)
-    manuscript = tmp_path / "manuscript"
+    manuscript = tmp_path / "草稿"
     manuscript.mkdir()
     (manuscript / "chapter-01.md").write_text("第一章\n\n少年 出门", encoding="utf-8")
 
-    result = Wordcount().run(runtime, path="manuscript")
+    result = Wordcount().run(runtime, path="草稿")
 
     assert result.output == "7"
-    assert result.metadata["path"] == "manuscript"
+    assert result.metadata["path"] == "草稿"
 
 
 def test_wordcount_returns_io_error_on_permission_denied(tmp_path: Path) -> None:
@@ -176,13 +176,13 @@ def test_wordcount_returns_io_error_on_permission_denied(tmp_path: Path) -> None
 
 def test_project_search_finds_keyword_inside_project(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path)
-    target = tmp_path / "outline" / "大纲.md"
+    target = tmp_path / "大纲" / "大纲.md"
     target.parent.mkdir()
     target.write_text("主角得到玉簪\n反派现身", encoding="utf-8")
 
     result = ProjectSearch().run(runtime, query="玉簪")
 
-    assert "outline/大纲.md:1" in result.output
+    assert "大纲/大纲.md:1" in result.output
     assert result.metadata["matched"] == 1
 
 
@@ -257,16 +257,16 @@ def test_langchain_bridge_returns_base_tools(tmp_path: Path) -> None:
 
 
 def _seed_manuscript(tmp_path: Path) -> tuple[ToolRuntime, Path]:
-    """Return a runtime whose project_root has a manuscript/ directory."""
+    """Return a runtime whose project_root has a 草稿/ directory."""
 
-    (tmp_path / "manuscript").mkdir(parents=True, exist_ok=True)
-    return ToolRuntime(project_root=tmp_path), tmp_path / "manuscript"
+    (tmp_path / "草稿").mkdir(parents=True, exist_ok=True)
+    return ToolRuntime(project_root=tmp_path), tmp_path / "草稿"
 
 
 def test_safe_write_file_creates_new_file(tmp_path: Path) -> None:
     runtime, ms_dir = _seed_manuscript(tmp_path)
 
-    result = SafeWriteFile().run(runtime, path="manuscript/ch1.md", content="hello\n")
+    result = SafeWriteFile().run(runtime, path="草稿/ch1.md", content="hello\n")
 
     assert result.metadata["mode"] == "create"
     assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "hello\n"
@@ -278,7 +278,7 @@ def test_safe_write_file_create_mode_refuses_existing(tmp_path: Path) -> None:
     (ms_dir / "ch1.md").write_text("original", encoding="utf-8")
 
     with pytest.raises(ToolDeniedError):
-        SafeWriteFile().run(runtime, path="manuscript/ch1.md", content="new")
+        SafeWriteFile().run(runtime, path="草稿/ch1.md", content="new")
 
     # Original file unchanged
     assert (ms_dir / "ch1.md").read_text(encoding="utf-8") == "original"
@@ -289,7 +289,7 @@ def test_safe_write_file_overwrite_creates_backup(tmp_path: Path) -> None:
     (ms_dir / "ch1.md").write_text("original", encoding="utf-8")
 
     result = SafeWriteFile().run(
-        runtime, path="manuscript/ch1.md", content="new", mode="overwrite"
+        runtime, path="草稿/ch1.md", content="new", mode="overwrite"
     )
 
     assert result.metadata["mode"] == "overwrite"
@@ -305,7 +305,7 @@ def test_safe_write_file_overwrite_no_backup_when_disabled(tmp_path: Path) -> No
 
     result = SafeWriteFile().run(
         runtime,
-        path="manuscript/ch1.md",
+        path="草稿/ch1.md",
         content="new",
         mode="overwrite",
         backup=False,
@@ -321,7 +321,7 @@ def test_safe_write_file_append_skips_backup_and_atomic(tmp_path: Path) -> None:
 
     result = SafeWriteFile().run(
         runtime,
-        path="manuscript/ch1.md",
+        path="草稿/ch1.md",
         content="line2\n",
         mode="append",
     )
@@ -365,14 +365,14 @@ def test_whitelist_matches_subpath(tmp_path: Path) -> None:
 
 
 def test_whitelist_matches_deep_subpath(tmp_path: Path) -> None:
-    """Bug 4: `manuscript/<nested>/chapter.md` 写入应被允许。"""
+    """Bug 4: `草稿/<nested>/chapter.md` 写入应被允许。"""
     runtime = ToolRuntime(project_root=tmp_path)
 
     SafeWriteFile().run(
-        runtime, path="manuscript/novel1/chapter.md", content="deep"
+        runtime, path="草稿/novel1/chapter.md", content="deep"
     )
 
-    assert (tmp_path / "manuscript" / "novel1" / "chapter.md").read_text(
+    assert (tmp_path / "草稿" / "novel1" / "chapter.md").read_text(
         encoding="utf-8"
     ) == "deep"
 
@@ -401,7 +401,7 @@ def test_whitelist_rejects_unrelated_subpath(tmp_path: Path) -> None:
 def test_whitelist_rejects_root_only(tmp_path: Path) -> None:
     """Bug 4: `AGENT.md` 走 `_guard_agent_md` 旁路,白名单检查不触发拒绝。"""
     runtime = ToolRuntime(project_root=tmp_path)
-    (tmp_path / "manuscript").mkdir()
+    (tmp_path / "草稿").mkdir()
 
     # AGENT.md 写入需要 ## 当前状态 段
     content = "# Project\n\n## 当前状态\n\n- state: S0\n"
@@ -415,12 +415,12 @@ def test_whitelist_rejects_root_only(tmp_path: Path) -> None:
 
 def test_safe_write_file_rejects_oversize_content(tmp_path: Path) -> None:
     runtime = ToolRuntime(project_root=tmp_path, max_file_size=10)
-    (tmp_path / "manuscript").mkdir()
+    (tmp_path / "草稿").mkdir()
 
     with pytest.raises(ToolOutputTooLargeError):
         SafeWriteFile().run(
             runtime,
-            path="manuscript/big.md",
+            path="草稿/big.md",
             content="x" * 100,
         )
 
@@ -505,7 +505,7 @@ def test_safe_edit_file_replaces_unique_match(tmp_path: Path) -> None:
 
     result = SafeEditFile().run(
         runtime,
-        path="manuscript/ch1.md",
+        path="草稿/ch1.md",
         old_string="world",
         new_string="earth",
     )
@@ -520,7 +520,7 @@ def test_safe_edit_file_replace_all_when_multiple_matches(tmp_path: Path) -> Non
 
     result = SafeEditFile().run(
         runtime,
-        path="manuscript/ch1.md",
+        path="草稿/ch1.md",
         old_string="foo",
         new_string="bar",
         replace_all=True,
@@ -537,7 +537,7 @@ def test_safe_edit_file_raises_when_old_string_ambiguous(tmp_path: Path) -> None
     with pytest.raises(ToolDeniedError, match="3"):
         SafeEditFile().run(
             runtime,
-            path="manuscript/ch1.md",
+            path="草稿/ch1.md",
             old_string="foo",
             new_string="bar",
             replace_all=False,
@@ -551,7 +551,7 @@ def test_safe_edit_file_raises_when_old_string_missing(tmp_path: Path) -> None:
     with pytest.raises(ToolDeniedError, match="未找到"):
         SafeEditFile().run(
             runtime,
-            path="manuscript/ch1.md",
+            path="草稿/ch1.md",
             old_string="missing",
             new_string="new",
         )
@@ -563,7 +563,7 @@ def test_safe_edit_file_dry_run_returns_diff_no_write(tmp_path: Path) -> None:
 
     result = SafeEditFile().run(
         runtime,
-        path="manuscript/ch1.md",
+        path="草稿/ch1.md",
         old_string="world",
         new_string="earth",
         dry_run=True,
@@ -619,8 +619,8 @@ def test_safe_glob_sort_by_mtime_returns_newest_first(tmp_path: Path) -> None:
     import os
     import time
 
-    old = tmp_path / "manuscript" / "ch1.md"
-    new = tmp_path / "manuscript" / "ch2.md"
+    old = tmp_path / "草稿" / "ch1.md"
+    new = tmp_path / "草稿" / "ch2.md"
     old.parent.mkdir()
     old.write_text("old", encoding="utf-8")
     new.write_text("new", encoding="utf-8")
@@ -631,10 +631,10 @@ def test_safe_glob_sort_by_mtime_returns_newest_first(tmp_path: Path) -> None:
 
     runtime = ToolRuntime(project_root=tmp_path)
     result = SafeGlob().run(
-        runtime, pattern="manuscript/*.md", sort_by="mtime"
+        runtime, pattern="草稿/*.md", sort_by="mtime"
     )
 
-    assert result.metadata["paths"] == ["manuscript/ch2.md", "manuscript/ch1.md"]
+    assert result.metadata["paths"] == ["草稿/ch2.md", "草稿/ch1.md"]
 
 
 # ---------------------------------------------------------------------------
@@ -648,10 +648,13 @@ def test_runtime_default_whitelist_when_none(tmp_path: Path) -> None:
 
 
 def test_runtime_default_whitelist_includes_dot_writer_cache(tmp_path: Path) -> None:
-    """Bug 4: 验证默认白名单字面含 `.writer/cache` 与 `.writer/agents`(8 项)。"""
+    """Bug 4: 验证默认白名单字面含 `.writer/cache` 与 `.writer/agents`(中文 7 + 题材 3 + legacy 5 = 15,共 17 项;per 2026-07-14 目录统一)。"""
     assert ".writer/cache" in DEFAULT_WRITE_WHITELIST
     assert ".writer/agents" in DEFAULT_WRITE_WHITELIST
-    assert len(DEFAULT_WRITE_WHITELIST) == 8
+    assert "草稿" in DEFAULT_WRITE_WHITELIST
+    assert "大纲" in DEFAULT_WRITE_WHITELIST
+    assert "正文" in DEFAULT_WRITE_WHITELIST
+    assert len(DEFAULT_WRITE_WHITELIST) == 17
 
 
 def test_runtime_explicit_frozenset_preserved(tmp_path: Path) -> None:
@@ -665,9 +668,9 @@ def test_empty_whitelist_blocks_all_writes(tmp_path: Path) -> None:
     runtime = ToolRuntime(
         project_root=tmp_path, allowed_write_paths=frozenset()
     )
-    (tmp_path / "manuscript").mkdir()
+    (tmp_path / "草稿").mkdir()
 
     with pytest.raises(ToolDeniedError):
         SafeWriteFile().run(
-            runtime, path="manuscript/x.md", content="y"
+            runtime, path="草稿/x.md", content="y"
         )

@@ -17,12 +17,24 @@ from writer.tools.errors import ToolDeniedError
 # 中的专用 3-stage guard。
 DEFAULT_WRITE_WHITELIST: frozenset[str] = frozenset(
     {
+        # 中文新名（per 2026-07-14 目录统一）
+        "草稿",
+        "大纲",
+        "人物",
+        "世界观",
+        "备忘",
+        "创意",
+        "正文",
+        # 题材专属中文名
+        "史实",
+        "伏笔",
+        "人设",
+        # 英文 legacy（向后兼容旧项目；老用户手动迁移前仍可写入）
         "manuscript",
         "outline",
         "characters",
         "world",
         "notes",
-        "创意",
         ".writer/cache",
         ".writer/agents",
     }
