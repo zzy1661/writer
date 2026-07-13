@@ -101,7 +101,7 @@ class ProjectSearch:
 | chapter_summaries | `chapter_summaries.json` 切片 | 文件存在 |
 | 最近一章 | `manuscript/<latest>.md` | `manuscript/` 非空 |
 
-预算裁剪由 LLM 工具循环的 caller 负责(目前是 `LLMToolLoop` 把 `ContextPack` 喂给 LLM 之前的预处理)。
+预算裁剪由 LLM 工具循环的 caller 负责(目前是 `ReActAgent` 把 `ContextPack` 喂给 LLM 之前的预处理)。
 
 ---
 

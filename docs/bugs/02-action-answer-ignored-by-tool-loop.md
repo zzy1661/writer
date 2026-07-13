@@ -100,7 +100,7 @@ LLM: 不知道有四幕模板,自由发挥生成大纲
 | Rule-only 部署(`tool_loop=None`) | API key 未配 | — (不走 LLM) | 无 |
 | `_parse_ai_message` 解析路径 | 不受影响 | — | — |
 
-**注**:此 bug 与 LLMToolLoop 的"工具循环消费 body"机制形成对照 — 后续 LLM 工具循环(实装日志中)声明"消费 SKILL.md body + references + builtin Tool 写 outline/大纲.md",但**实际 system prompt 拼装代码缺失**,理论上 directive body 没传过去。这与基线"339 测试全过"形成矛盾,推测当前的 339 测试要么(a)走 rule-only 部署根本不触发 LLM 路径,要么(b)用 mock 注入 system prompt 不走 `_initial_messages`。**两种假设都需要在 §6 测试覆盖下被证伪或确认**。
+**注**:此 bug 与 ReActAgent 的"工具循环消费 body"机制形成对照 — 后续 LLM 工具循环(实装日志中)声明"消费 SKILL.md body + references + builtin Tool 写 outline/大纲.md",但**实际 system prompt 拼装代码缺失**,理论上 directive body 没传过去。这与基线"339 测试全过"形成矛盾,推测当前的 339 测试要么(a)走 rule-only 部署根本不触发 LLM 路径,要么(b)用 mock 注入 system prompt 不走 `_initial_messages`。**两种假设都需要在 §6 测试覆盖下被证伪或确认**。
 
 ## 4. 修复方案(Fix)
 
@@ -161,7 +161,7 @@ def _initial_messages(
 1. `src/writer/llm/agent.py` — `_initial_messages` 签名加 `deps` + 重写
 2. `src/writer/engine/loop.py:584` / `:669` / `:685` — 调用点 `deps.tool_loop.run(action, ctx, deps, cfg)` → `deps.tool_loop._initial_messages(action, ctx.user_input, deps=deps)`(loop.py 已有 `deps` 变量,直接传)
 3. `tests/conftest.py`(如有)— 测试 stub `PlainDeps` 补 `directive_registry` / `agent_registry` 字段
-4. `tests/test_llm_tool_loop.py` — 新增 2 个测试
+4. `tests/test_react_agent.py` — 新增 2 个测试
 5. `tests/test_engine_loop.py` — 新增 1 个测试
 6. `tests/test_directive_dispatch.py` — 新增 1 个测试
 
@@ -178,7 +178,7 @@ def _build_initial_messages(action, ctx, deps):
     # ...
     return [SystemMessage("\n\n".join(system_parts)), HumanMessage(ctx.user_input)]
 
-# 然后传给 LLMToolLoop.run(initial_messages=...)
+# 然后传给 ReActAgent.run(initial_messages=...)
 ```
 
 **否决理由**:
@@ -186,10 +186,10 @@ def _build_initial_messages(action, ctx, deps):
 2. 方案 A 的"LLM 工具循环内部拼装"才是对称的(loop.py 调用 `tool_loop.run(action, ctx, deps, cfg)`,其中 `deps` 已在签名里 — 让循环内部读 deps 自然)
 3. 方案 B 在 agent dispatch 路径上需要额外注入(agent identity 不来自 directive)
 
-### 方案 C(备选):`LLMToolLoop` 加 `system_prompt_extras: list[str]` 构造参数
+### 方案 C(备选):`ReActAgent` 加 `system_prompt_extras: list[str]` 构造参数
 
 ```python
-LLMToolLoop(..., system_prompt_extras=[
+ReActAgent(..., system_prompt_extras=[
     directive.body, agent.body,
 ])
 ```
@@ -225,7 +225,7 @@ printf "/大纲 一个穿越到唐朝的程序员\n" | uv run writer
 import asyncio
 from langchain_core.messages import SystemMessage
 from writer.config import Settings
-from writer.llm.agent import LLMToolLoop
+from writer.llm.agent import ReActAgent
 from writer.routing import AgentAction
 from writer.tools import built_tool_registry, ToolRuntime
 
@@ -242,7 +242,7 @@ async def main():
 
     from pathlib import Path
     runtime = ToolRuntime(project_root=Path("/tmp/test-bug02"))
-    loop = LLMToolLoop(
+    loop = ReActAgent(
         settings=Settings(),  # 假设 has_api_key=True
         registry=built_tool_registry(),
         runtime=runtime,
@@ -262,12 +262,12 @@ PY
 
 | 测试文件 | 测试名 | 关键断言 | 类型 |
 |---|---|---|---|
-| `tests/test_llm_tool_loop.py` | `test_initial_messages_includes_directive_body` | mock `deps.directive_registry.get("/大纲")` 返回 mock SkillDirective,断言 `SystemMessage.content` 含 `"[directive body: /大纲]"` + directive body 全文 | NEW |
-| `tests/test_llm_tool_loop.py` | `test_initial_messages_includes_agent_identity` | mock `deps.agent_registry.get("历史")` 返回 mock Agent,断言 SystemMessage 含 `"[agent identity: 历史]"` + agent body | NEW |
-| `tests/test_llm_tool_loop.py` | `test_initial_messages_includes_references` | mock SkillDirective 带 `references={"template.md": "..."}`,断言 SystemMessage 含 `[directive references]` 段 | NEW |
-| `tests/test_llm_tool_loop.py` | `test_initial_messages_no_command_no_body` | `action.command=None` 时不查 directive_registry,SystemMessage 只含 base prompt | NEW |
-| `tests/test_llm_tool_loop.py` | `PlainDeps` | 测试 stub 补 `directive_registry` + `agent_registry` 字段(可不 mock,只要 `get()` 返回 None 即可) | MODIFY |
-| `tests/test_directive_dispatch.py` | `test_directive_body_reaches_tool_loop` | 端到端:`/大纲` 输入 → engine 命中 directive → 调用 `LLMToolLoop._initial_messages` → mock LLM 收到拼好的 system prompt | NEW |
+| `tests/test_react_agent.py` | `test_initial_messages_includes_directive_body` | mock `deps.directive_registry.get("/大纲")` 返回 mock SkillDirective,断言 `SystemMessage.content` 含 `"[directive body: /大纲]"` + directive body 全文 | NEW |
+| `tests/test_react_agent.py` | `test_initial_messages_includes_agent_identity` | mock `deps.agent_registry.get("历史")` 返回 mock Agent,断言 SystemMessage 含 `"[agent identity: 历史]"` + agent body | NEW |
+| `tests/test_react_agent.py` | `test_initial_messages_includes_references` | mock SkillDirective 带 `references={"template.md": "..."}`,断言 SystemMessage 含 `[directive references]` 段 | NEW |
+| `tests/test_react_agent.py` | `test_initial_messages_no_command_no_body` | `action.command=None` 时不查 directive_registry,SystemMessage 只含 base prompt | NEW |
+| `tests/test_react_agent.py` | `PlainDeps` | 测试 stub 补 `directive_registry` + `agent_registry` 字段(可不 mock,只要 `get()` 返回 None 即可) | MODIFY |
+| `tests/test_directive_dispatch.py` | `test_directive_body_reaches_tool_loop` | 端到端:`/大纲` 输入 → engine 命中 directive → 调用 `ReActAgent._initial_messages` → mock LLM 收到拼好的 system prompt | NEW |
 | `tests/test_engine_loop.py` | `test_agent_body_reaches_tool_loop` | 端到端:agent dispatch 路径同样断言 SystemMessage 含 agent identity | NEW |
 | e2e | `tests/e2e/test_repl_dogma_uses_template.py` | 配 API key 后 REPL `/大纲 <题材>`,断言生成的 outline/大纲.md 包含 SKILL.md 中规定的术语("第一幕"/"幕"/"节拍"等) | NEW e2e |
 
@@ -289,6 +289,6 @@ PY
 
 ### 关联 bug
 
-- 与 [Bug 1](./01-tool-loop-not-rebound.md) **间接相关**:rebind tool_loop 后,新的 tool_loop 实例的 `self._runtime` 正确,但 `LLMToolLoop._initial_messages` 仍需要 `deps` 才能读到 directive/agent — 两个 bug 协同修复
+- 与 [Bug 1](./01-tool-loop-not-rebound.md) **间接相关**:rebind tool_loop 后,新的 tool_loop 实例的 `self._runtime` 正确,但 `ReActAgent._initial_messages` 仍需要 `deps` 才能读到 directive/agent — 两个 bug 协同修复
 - 与 [Bug 5](./05-workflow-module-globals.md) **正交**:workflow module globals 是另一类 stale reference 问题,不影响 directive body 注入
 - **未来与 chg-project-skills 联动**:`chg-project-skills` 在 `agents/protocol.py` 加 `extra_instructions: str` 字段(已 apply,2026-07-08),`_initial_messages` 修复时应一并读取该字段,免得二次返工

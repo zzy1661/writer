@@ -1,4 +1,4 @@
-"""Unit tests for the LLM-driven tool loop (``LLMToolLoop``)."""
+"""Unit tests for the LLM-driven tool loop (``ReActAgent``)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from writer.engine import (
 )
 from writer.engine.config import build_engine_config
 from writer.engine.deps import _DefaultEngineDeps
-from writer.llm.agent import MAX_LOOP_STEPS, LLMToolLoop
+from writer.llm.agent import MAX_LOOP_STEPS, ReActAgent
 from writer.llm.prose import DeterministicProseClient
 from writer.routing import AgentAction, IntentRouter
 from writer.skills import built_directive_registry
@@ -41,7 +41,7 @@ class _ScriptedChat(BaseChatModel):
 
     Each ``ainvoke`` pops the next ``tool_calls`` / content payload from
     ``self._script``. The model advertises no real ``bind_tools``
-    support, but ``LLMToolLoop`` is happy because it just calls
+    support, but ``ReActAgent`` is happy because it just calls
     ``ainvoke`` on whatever the bound LLM returns.
 
     Each script entry is a dict:
@@ -89,7 +89,7 @@ class _ScriptedChat(BaseChatModel):
         return ChatResult(generations=[ChatGeneration(message=_scripted_to_ai(self._script.pop(0)))])
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> _ScriptedChat:
-        # ``LLMToolLoop`` calls ``bind_tools`` at construction time on the
+        # ``ReActAgent`` calls ``bind_tools`` at construction time on the
         # native (OpenAI-compatible) path. The fake doesn't read the tool
         # list — the test script decides which tool_calls to emit — so
         # we just return ``self`` and let ``ainvoke`` dispatch.
@@ -115,7 +115,7 @@ def _scripted_to_ai(entry: dict[str, Any]) -> AIMessage:
 
 
 def _settings() -> Settings:
-    """Plain settings instance — LLMToolLoop does not need a real key."""
+    """Plain settings instance — ReActAgent does not need a real key."""
 
     return Settings(
         model="gpt-4o-mini",
@@ -150,7 +150,7 @@ async def _consume(
 # ---------------------------------------------------------------------------
 
 
-async def test_llm_tool_loop_two_steps() -> None:
+async def test_react_agent_two_steps() -> None:
     """A two-step loop yields 1 ToolCall+ToolResult pair, then Done(answered)."""
 
     script = [
@@ -168,7 +168,7 @@ async def test_llm_tool_loop_two_steps() -> None:
     chat = _ScriptedChat(script)
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
-    loop = LLMToolLoop(
+    loop = ReActAgent(
         _settings(),
         registry=registry,
         runtime=runtime,
@@ -212,7 +212,7 @@ async def test_llm_tool_loop_two_steps() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_llm_tool_loop_budget_exhausted() -> None:
+async def test_react_agent_budget_exhausted() -> None:
     """When the model never answers, the loop terminates after MAX_LOOP_STEPS."""
 
     registry = built_tool_registry()
@@ -231,7 +231,7 @@ async def test_llm_tool_loop_budget_exhausted() -> None:
         for i in range(MAX_LOOP_STEPS)
     ]
     chat = _ScriptedChat(script)
-    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+    loop = ReActAgent(_settings(), registry=registry, runtime=runtime, llm=chat)
 
     action = AgentAction(
         action_type="call_tool",
@@ -305,7 +305,7 @@ def _noop_deps() -> _DefaultEngineDeps:
     )
 
 
-async def test_llm_tool_loop_unknown_tool_name_propagates_tool_error() -> None:
+async def test_react_agent_unknown_tool_name_propagates_tool_error() -> None:
     """``ToolNotFoundError`` raised by the registry propagates as ``ToolError``."""
 
     chat = _ScriptedChat(
@@ -323,7 +323,7 @@ async def test_llm_tool_loop_unknown_tool_name_propagates_tool_error() -> None:
     )
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
-    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+    loop = ReActAgent(_settings(), registry=registry, runtime=runtime, llm=chat)
 
     action = AgentAction(
         action_type="call_tool",
@@ -378,7 +378,7 @@ async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() ->
     )
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
-    tool_loop = LLMToolLoop(settings, registry=registry, runtime=runtime, llm=chat)
+    tool_loop = ReActAgent(settings, registry=registry, runtime=runtime, llm=chat)
 
     deps = _DefaultEngineDeps(
         router=_UnknownToolRouter(),
@@ -452,7 +452,7 @@ def test_initial_messages_includes_directive_body() -> None:
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
     chat = _ScriptedChat([{"content": "ok"}])
-    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+    loop = ReActAgent(_settings(), registry=registry, runtime=runtime, llm=chat)
 
     # 构造 mock deps,带 stub directive_registry
     deps = _noop_deps()
@@ -477,7 +477,7 @@ def test_initial_messages_includes_agent_identity() -> None:
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
     chat = _ScriptedChat([{"content": "ok"}])
-    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+    loop = ReActAgent(_settings(), registry=registry, runtime=runtime, llm=chat)
 
     deps = _noop_deps()
     deps.agent_registry = _stub_agent_registry()  # type: ignore[assignment]
@@ -514,7 +514,7 @@ def test_initial_messages_includes_references() -> None:
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
     chat = _ScriptedChat([{"content": "ok"}])
-    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+    loop = ReActAgent(_settings(), registry=registry, runtime=runtime, llm=chat)
 
     deps = _noop_deps()
     deps.directive_registry = _Stub()  # type: ignore[assignment]
@@ -535,7 +535,7 @@ def test_initial_messages_no_command_no_body() -> None:
     registry = built_tool_registry()
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
     chat = _ScriptedChat([{"content": "ok"}])
-    loop = LLMToolLoop(_settings(), registry=registry, runtime=runtime, llm=chat)
+    loop = ReActAgent(_settings(), registry=registry, runtime=runtime, llm=chat)
 
     deps = _noop_deps()
     deps.directive_registry = _stub_directive_registry()  # type: ignore[assignment]

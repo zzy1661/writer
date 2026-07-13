@@ -68,7 +68,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 | `writer.workflows` | L3 长任务 stub（`write_chapter` / `review_chapter` 占位,等真实 LangGraph 图落地）                                              | `workflows/{write,review}_chapter.py`                                      |
 | `writer.tools`     | L3 Tool 基础设施（Protocol + Registry + Runtime + langchain_bridge + 9 个 builtin）                                             | `tools/{protocol,registry,runtime,langchain_bridge,errors}.py` + `tools/builtin/{file,glob,analysis,foreshadow,locate}_tools.py` + `foreshadow_ledger.py` |
 | `writer.skills`    | L3 Markdown SKILL.md directives:shipped 2 个(`/大纲` `/目录`)+ 项目级覆盖(`<project_root>/.writer/skills/`)      | `skills/{protocol,registry,directive_discovery,errors,builtin_sources,loader}.py` |
-| `writer.llm`       | L3 LLM 工具循环与结构化输出(`LLMToolLoop` ReAct 多步 + 双 provider 路径)                                                       | `llm/{agent,provider,structured}.py`                                       |
+| `writer.llm`       | L3 LLM 工具循环与结构化输出(`ReActAgent` ReAct 多步 + 双 provider 路径)                                                       | `llm/{agent,provider,structured}.py`                                       |
 | `writer.agent`     | **兼容层**——re-export 旧的 `WriterCommandAgent` / `NovelAgent` 别名，最终会移除                                                 | `agent/__init__.py`                                                        |
 | `writer.config`    | pydantic-settings，`WRITER_*` 环境变量                                                                                          | `config/settings.py`                                                       |
 | `writer.project`   | `writer new` / `/init` 创建的小说项目目录（`manuscript/` `outline/` `characters/` `world/` `notes/` + `.writer/` 元数据）         | `project/{workspace,state,genre,init_brief,ideas}.py`                      |
@@ -90,7 +90,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 - `command_pending`——其它斜杠命令(尚未实装的占位)
 - `tool_pending`——保留分支(目前未使用,实际工具调用走 `tool_completed` / `tool_loop_completed`)
 - `tool_completed`——`call_tool` 在 rule-only 部署(`tool_loop=None`)走同步 `_run_tool` 后(含 `ToolCall` / `ToolResult` 事件)
-- `tool_loop_completed`——`call_tool` 走 LLM 工具循环(`LLMToolLoop`)后,**预算耗尽**优雅退出(2026-07-08 新增,与 `aborted` 区分)
+- `tool_loop_completed`——`call_tool` 走 LLM 工具循环(`ReActAgent`)后,**预算耗尽**优雅退出(2026-07-08 新增,与 `aborted` 区分)
 - `workflow_pending`——`/创作` `/审核` 工作流(当前为 sync stub,等真实 LangGraph 图)
 - `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮;`/init <故事梗概>` 在 S1 时也走 `answered` 不走 `ask_user`)
 - `aborted`——`ErrorEvent` 后兜底分支(`except ToolError` / `except SkillError` / `except Exception` 三层)

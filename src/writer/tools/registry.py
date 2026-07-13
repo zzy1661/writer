@@ -66,7 +66,7 @@ class ToolRegistry:
     def describe(self) -> list[ToolDescriptor]:
         """返回每个已注册工具元数据的快照。
 
-        2026-07-08 为 LLM 驱动的工具循环增补：``LLMToolLoop`` 需要一个
+        2026-07-08 为 LLM 驱动的工具循环增补：``ReActAgent`` 需要一个
         确定的、registry 视角的工具清单（包含哪些工具、各接受什么参数），
         而不必重新跑桥接（桥接会把 ``runtime`` 捕获进闭包）。args schema
         通过 :func:`writer.tools.langchain_bridge.to_langchain_tools` 使用的

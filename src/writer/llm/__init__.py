@@ -9,7 +9,7 @@ roles / workflows）消费。所有 router / role 代码必须从这里导入
 
 * :mod:`writer.llm.structured` —— 短结构化输出调用（针对 JSON 响应
   校验 Pydantic schema）。
-* :mod:`writer.llm.agent` —— :class:`LLMToolLoop` ReAct 风格的工具调用。
+* :mod:`writer.llm.agent` —— :class:`ReActAgent` ReAct 风格的工具调用。
 * :mod:`writer.llm.prose` —— :class:`LLMProseClient` 长篇散文生成
   （章节草稿、审阅报告）。
 """

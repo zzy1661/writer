@@ -22,7 +22,7 @@
 
 切换条件:`needs_json_prompt_structured_output(settings)`(启发式:模型名含 "deepseek" → True)。
 
-## 9.2 `LLMToolLoop` 类
+## 9.2 `ReActAgent` 类
 
 > 对应代码:`src/writer/llm/agent.py`
 
@@ -31,14 +31,14 @@ MAX_LOOP_STEPS = 5  # 每轮工具调用硬上限
 
 
 @dataclass
-class ToolLoopState:
+class ReActState:
     """LLM 工具循环的每轮状态。生命周期为单轮。"""
     messages: list[BaseMessage] = field(default_factory=list)
     tool_calls_made: int = 0
     last_tool_result: ProtocolToolResult | None = None
 
 
-class LLMToolLoop:
+class ReActAgent:
     def __init__(
         self,
         settings: Settings,
@@ -82,7 +82,7 @@ class LLMToolLoop:
 async def run(
     self, action: AgentAction, ctx: EngineContext, deps: EngineDeps, cfg: EngineConfig
 ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
-    state = ToolLoopState(
+    state = ReActState(
         messages=self._initial_messages(action, ctx.user_input, deps=deps),
     )
 
@@ -346,7 +346,7 @@ def _build_tool_message(self, ai_message, tool_name, output) -> ToolMessage:
 ## 9.9 `_budget_fallback` — 预算耗尽兜底
 
 ```python
-def _budget_fallback(self, state: ToolLoopState) -> str:
+def _budget_fallback(self, state: ReActState) -> str:
     head = (
         f"工具调用已达上限 ({state.tool_calls_made}/{MAX_LOOP_STEPS});"
         " 请基于以下最近结果继续追问或缩小范围："
@@ -362,7 +362,7 @@ def _budget_fallback(self, state: ToolLoopState) -> str:
 
 > 对应代码:`src/writer/llm/prose.py`
 
-章节正文生成是另一个独立 client(不通过 LLMToolLoop)。
+章节正文生成是另一个独立 client(不通过 ReActAgent)。
 
 ```python
 class LLMProseClient(Protocol):
@@ -468,8 +468,8 @@ _run_tool_loop:
     async for event in deps.tool_loop.run(action, ctx, deps, cfg):
         yield event
    ↓
-LLMToolLoop.run():
-    state = ToolLoopState(messages=[
+ReActAgent.run():
+    state = ReActState(messages=[
         SystemMessage(base + router hint),
         HumanMessage("查一下伏笔 F003,告诉我它在第几章被回收"),
     ])

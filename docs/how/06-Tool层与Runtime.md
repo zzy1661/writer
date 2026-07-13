@@ -116,7 +116,7 @@ class ToolRegistry:
         return tool.run(runtime, **kwargs)
 
     def describe(self) -> list[ToolDescriptor]:
-        """暴露给 LLM 的工具目录。LLMToolLoop 用它构造 system prompt。"""
+        """暴露给 LLM 的工具目录。ReActAgent 用它构造 system prompt。"""
         return list(self._descriptors.values())
 ```
 
@@ -287,7 +287,7 @@ def safe_read_file_impl(runtime, *, path):
 
 > 对应代码:`src/writer/tools/langchain_bridge.py`
 
-LLMToolLoop 需要把 Tool 暴露给 LangChain(`bind_tools(tools)`)。包装:
+ReActAgent 需要把 Tool 暴露给 LangChain(`bind_tools(tools)`)。包装:
 
 ```python
 def to_langchain_tools(registry: ToolRegistry, runtime: ToolRuntime) -> list[BaseTool]:
@@ -322,7 +322,7 @@ LLM 思考:我需要先了解项目状态,然后写大纲
    ↓
 LLM 产出 AgentAction(call_tool, tool_name="safe_write_file", arguments={"path": "outline/大纲.md", "content": "..."})
    ↓
-LLMToolLoop 调用 registry.invoke("safe_write_file", runtime, path="outline/大纲.md", content="...")
+ReActAgent 调用 registry.invoke("safe_write_file", runtime, path="outline/大纲.md", content="...")
    ↓
 SafeWriteFile.run(runtime, path="outline/大纲.md", content="...", mode="create"):
     target = runtime.safe_write_path("outline/大纲.md")
@@ -331,7 +331,7 @@ SafeWriteFile.run(runtime, path="outline/大纲.md", content="...", mode="create
     # ...
     return ToolResult(output="已写入 outline/大纲.md", metadata={"bytes": 1234})
    ↓
-LLMToolLoop yield ToolResult(output="已写入 outline/大纲.md")
+ReActAgent yield ToolResult(output="已写入 outline/大纲.md")
    ↓
 Engine 继续 ReAct 循环 → LLM 看到 ToolResult → 产出 answer_directly
 ```

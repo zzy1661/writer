@@ -145,14 +145,14 @@ class EngineSession:
         self.deps = self.deps.rebind_agent_registry(new_agent_registry)
 
         # 重建 tool_loop(Bug 01):当原 deps 带 tool_loop 时,
-        # 用新 runtime 重新构造,确保 LLMToolLoop._runtime 指向新根。
+        # 用新 runtime 重新构造,确保 ReActAgent._runtime 指向新根。
         # rule-only 部署(tool_loop=None)时保持 None。
         # 延迟 import 避免 engine.deps → llm.agent 循环。
-        from writer.llm.agent import LLMToolLoop
+        from writer.llm.agent import ReActAgent
 
-        new_loop: LLMToolLoop | None = None
+        new_loop: ReActAgent | None = None
         if self.deps.tool_loop is not None:
-            new_loop = LLMToolLoop(
+            new_loop = ReActAgent(
                 settings=self.deps.settings,
                 registry=self.deps.tool_registry,
                 runtime=new_runtime,

@@ -310,7 +310,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
         ) -> EngineDeps:
             # Added 2026-07-09 (Bug 01). Symmetric to rebind_tool_runtime.
             # ``set_project_root`` calls this with a newly constructed
-            # ``LLMToolLoop`` (or ``None`` for rule-only deployment).
+            # ``ReActAgent`` (or ``None`` for rule-only deployment).
             self.tool_loop = new_loop
             return self
 
@@ -462,7 +462,7 @@ def test_set_project_root_none_does_not_error(tmp_path: Path) -> None:
     session.deps = deps
     session.project_root = proj_a
 
-    # 切到 None:不应抛错;tool_loop 仍指向 LLMToolLoop(因为 settings
+    # 切到 None:不应抛错;tool_loop 仍指向 ReActAgent(因为 settings
     # 还有 API key);runtime 已切到 sentinel。
     session.set_project_root(None)
     # 不抛错,tool_runtime 已切到 sentinel

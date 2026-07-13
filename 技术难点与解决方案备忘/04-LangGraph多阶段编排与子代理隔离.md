@@ -2,7 +2,7 @@
 
 > **2026-07-09 重要修订**:本文档原描述基于 LangGraph `StateGraph` 的章节写作主图(`plan_outline` → `write_chapter` → `proofread` → `history_check` → `review_gate`)。截至 2026-07-09,LangGraph **未实装**——`_DefaultEngineDeps.run_workflow` 是同步 stub,真实 LangGraph 图待 `EngineDeps.workflow_starter` 扩展点落地。本节保留作为设计稿,标记"待实现"。
 >
-> 当下章节写作的实际路径是:**SKILL.md directive(`/大纲` `/目录`)+ LLM 工具循环 + builtin Tool**——LLM 自由组合 `safe_read_file` / `safe_write_file` / `safe_edit_file` / `safe_list_dir` / `safe_glob` / `project_search` / `foreshadow_search` / `wordcount` 完成"读、改、查"循环。`MAX_LOOP_STEPS=5` 的 `LLMToolLoop`(`src/writer/llm/agent.py`)提供 ReAct 风格的预算控制。
+> 当下章节写作的实际路径是:**SKILL.md directive(`/大纲` `/目录`)+ LLM 工具循环 + builtin Tool**——LLM 自由组合 `safe_read_file` / `safe_write_file` / `safe_edit_file` / `safe_list_dir` / `safe_glob` / `project_search` / `foreshadow_search` / `wordcount` 完成"读、改、查"循环。`MAX_LOOP_STEPS=5` 的 `ReActAgent`(`src/writer/llm/agent.py`)提供 ReAct 风格的预算控制。
 
 ## 业务背景
 

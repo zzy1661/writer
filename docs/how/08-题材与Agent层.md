@@ -430,7 +430,7 @@ _run_agent:
     async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
         yield event
    ↓
-LLMToolLoop.run():
+ReActAgent.run():
     _initial_messages(): 拼 system prompt = base + directive body + agent body + router hint
     LLM 看到:
         1. 工具循环说明

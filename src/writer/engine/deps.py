@@ -27,7 +27,7 @@ from writer.workflows import WORKFLOWS, WorkflowResult, WorkflowStub
 
 if TYPE_CHECKING:
     from writer.engine.context import EngineContext
-    from writer.llm.agent import LLMToolLoop
+    from writer.llm.agent import ReActAgent
     from writer.llm.prose import LLMProseClient
 
 # 未初始化项目（S0 路径）时使用的哨兵 project_root。
@@ -77,7 +77,7 @@ class EngineDeps(Protocol):
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry
-    tool_loop: LLMToolLoop | None
+    tool_loop: ReActAgent | None
     prose_client: LLMProseClient | None
     # review LLM 的可选覆盖。设置后，``write_chapter`` 在结构化
     # ReviewVerdict 调用中使用此 LLM，而不是从 settings 重新构造
@@ -158,7 +158,7 @@ class EngineDeps(Protocol):
         ...
 
     def rebind_tool_loop(
-        self, new_loop: LLMToolLoop | None
+        self, new_loop: ReActAgent | None
     ) -> EngineDeps:
         """返回一个新的（或就地变更后的） ``EngineDeps``，其中 ReAct 工具循环已替换。
 
@@ -187,7 +187,7 @@ class _DefaultEngineDeps:
     tool_registry: ToolRegistry
     tool_runtime: ToolRuntime
     directive_registry: DirectiveRegistry
-    tool_loop: LLMToolLoop | None = None
+    tool_loop: ReActAgent | None = None
     prose_client: LLMProseClient | None = None
     review_llm: Any = None
     settings: Settings = field(default=None)  # type: ignore[assignment]
@@ -245,11 +245,11 @@ class _DefaultEngineDeps:
         return replace(self, agent_registry=new_registry)
 
     def rebind_tool_loop(
-        self, new_loop: LLMToolLoop | None
+        self, new_loop: ReActAgent | None
     ) -> EngineDeps:
         # 与 ``rebind_tool_runtime`` 对称；2026-07-09 增补以修复 Bug 01：
         # set_project_root 时必须用新 runtime 重建 tool_loop，
-        # 否则 LLMToolLoop._runtime 仍指向旧 project_root。
+        # 否则 ReActAgent._runtime 仍指向旧 project_root。
         return replace(self, tool_loop=new_loop)
 
 
@@ -326,15 +326,15 @@ def production_deps(
     root = (project_root or _NO_PROJECT_ROOT).resolve()
     tool_registry = built_tool_registry()
     tool_runtime = ToolRuntime(project_root=root)
-    tool_loop: LLMToolLoop | None = None
+    tool_loop: ReActAgent | None = None
     if resolved.has_api_key:
         # 延迟 import：纯规则部署（无 API key）永不加载 LLM 客户端栈；
         # engine 包也不对 ``writer.llm.agent`` 产生运行时依赖。
         # :class:`EngineDeps.tool_loop` 中的前向引用使 mypy 在类型
         # 检查时也不需要 import 该模块。
-        from writer.llm.agent import LLMToolLoop
+        from writer.llm.agent import ReActAgent
 
-        tool_loop = LLMToolLoop(
+        tool_loop = ReActAgent(
             settings=resolved,
             registry=tool_registry,
             runtime=tool_runtime,

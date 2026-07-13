@@ -4,10 +4,10 @@
 
 * :mod:`writer.llm.structured` —— 短结构化输出调用（针对 JSON
   响应校验 Pydantic schema）。
-* :mod:`writer.llm.agent` —— :class:`LLMToolLoop` ReAct 风格的工具调用。
+* :mod:`writer.llm.agent` —— :class:`ReActAgent` ReAct 风格的工具调用。
 
 两者都不适合**章节长度散文生成**：章节草稿是数千中文字符且无
-schema，而 ``LLMToolLoop`` 针对与工具调用交错的短模型响应进行了
+schema，而 ``ReActAgent`` 针对与工具调用交错的短模型响应进行了
 优化。本模块补齐缺失的第三条路径：
 
 * :class:`LLMProseClient` —— 单方法

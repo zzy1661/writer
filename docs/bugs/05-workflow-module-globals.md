@@ -285,7 +285,7 @@ uv run python -c "from writer.workflows import review_chapter; assert not hasatt
 - **LangGraph `checkpointer` 序列化兼容**:Lambda 闭包不可 pickle,如果未来切到 `SqliteSaver` + 多进程部署,需要 `pickle.dumps(graph)` 必须能成功 — 闭包(lambda + deps 对象)pickle 行为依赖 deps 内部组件是否可序列化。**留给未来的 LangGraph 持久化提案**。
 - **节点函数签名变化破坏旧测试**:所有直接调 `_draft_chapter_node(state)` 的测试必须改成 `_draft_chapter_node(state, deps=deps)`。**预估 5-10 个测试需要更新**。
 - **`_get_deps` 兜底保留 vs 删除**:方案 A 保留 `_get_deps()` 作为旧路径兜底(测试直接 `graph.invoke(state)` 而不通过 `run()`)。如果完全删除,旧 fixture 必须重构。如果保留,需要明确"测试 only"语义。
-- **`engine.config.EngineConfig.cfg` 仍未使用**:`LLMToolLoop.run(..., cfg)` 当前 `del cfg`,未读取。如果未来需要 per-loop config,可考虑让 `build_*_graph` 也接 cfg。
+- **`engine.config.EngineConfig.cfg` 仍未使用**:`ReActAgent.run(..., cfg)` 当前 `del cfg`,未读取。如果未来需要 per-loop config,可考虑让 `build_*_graph` 也接 cfg。
 
 ### 与 OpenSpec 的关系
 

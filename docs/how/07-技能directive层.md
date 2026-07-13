@@ -339,7 +339,7 @@ CLI 启动:
         ├─ resolve_references(body, references) → 4-act-template.md / examples.md 内容
         ├─ 构造 agent_action (answer_directly, command="/大纲", answer=body)
         └─ async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
-            LLMToolLoop.run():
+            ReActAgent.run():
                 _initial_messages(): 拼 system prompt = base + directive body + refs + extra_instructions
                 LLM 读到 directive body,按指令调 safe_read_file / safe_write_file
 ```

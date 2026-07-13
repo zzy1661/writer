@@ -31,7 +31,7 @@ writer-agent/
 │       ├── skills/            # SKILL.md directives
 │       ├── agents/            # AgentRegistry + 4 份题材 .md
 │       ├── workflows/         # 写章节 / 审核 stub
-│       ├── llm/               # LLMToolLoop + Provider
+│       ├── llm/               # ReActAgent + Provider
 │       ├── project/           # workspace 脚手架
 │       ├── config/            # pydantic-settings
 │       ├── prompts/           # LLM prompt 模板(字符串字面量)

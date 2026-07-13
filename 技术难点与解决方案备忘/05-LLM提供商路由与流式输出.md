@@ -5,7 +5,7 @@
 > 真正落地的是:
 >
 > - **双 provider 路径**(per `writer.llm.structured.needs_json_prompt_structured_output`):native `bind_tools` / `with_structured_output` (OpenAI 兼容) vs JSON-prompt (DeepSeek 等)
-> - **`LLMToolLoop` 多步工具循环**(`src/writer/llm/agent.py`):ReAct 风格,`MAX_LOOP_STEPS=5` 预算控制
+> - **`ReActAgent` 多步工具循环**(`src/writer/llm/agent.py`):ReAct 风格,`MAX_LOOP_STEPS=5` 预算控制
 > - **流式输出**:由 LangChain `BaseChatModel.astream()` 直接推 token;engine 把 chunk 透传到 REPL `TextChunk` 事件
 >
 > 本文以**新形态**重写。
@@ -25,7 +25,7 @@
 
 ## 解决方案
 
-L4 是 LangChain `BaseChatModel`,通过 `WRITER_*` 环境变量切换 Provider;`writer.llm.get_llm(settings)` 返回当前模型实例。LLM 路由器(`LlmIntentRouter`)与 LLM 工具循环(`LLMToolLoop`)都基于这个统一入口。
+L4 是 LangChain `BaseChatModel`,通过 `WRITER_*` 环境变量切换 Provider;`writer.llm.get_llm(settings)` 返回当前模型实例。LLM 路由器(`LlmIntentRouter`)与 LLM 工具循环(`ReActAgent`)都基于这个统一入口。
 
 ### 双 provider 路径
 
@@ -43,14 +43,14 @@ L4 是 LangChain `BaseChatModel`,通过 `WRITER_*` 环境变量切换 Provider;`
 
 切换条件由 `Settings` 派生(当前是模型名字符串匹配,可改成更严格的 capability 探测)。
 
-### `LLMToolLoop` 多步循环
+### `ReActAgent` 多步循环
 
 `src/writer/llm/agent.py`:
 
 ```python
 MAX_LOOP_STEPS = 5
 
-class LLMToolLoop:
+class ReActAgent:
     def __init__(self, settings, *, registry, runtime, llm=None, max_steps=MAX_LOOP_STEPS):
         ...
 
@@ -75,7 +75,7 @@ class LLMToolLoop:
 ### 流式输出
 
 - LLM 路由器(`LlmIntentRouter.route`)目前是**一次性**调用,不走流式(命令路由的 latency 容忍度低)
-- `LLMToolLoop` 当前也是**一次性**调用(等 LangGraph 真实落地后再考虑 stream token 到 `TextChunk` 事件)
+- `ReActAgent` 当前也是**一次性**调用(等 LangGraph 真实落地后再考虑 stream token 到 `TextChunk` 事件)
 - `EngineConfig.fast_mode` 抑制诊断 `[engine]` log chunks(2026-07-05 起)
 
 ## 最小 demo / 伪代码

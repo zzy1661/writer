@@ -241,7 +241,14 @@ async def _maybe_run_init_brief_or_block(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | Done]:
-    """在已绑定 S1 项目上处理 REPL ``/init <brief>``，或引导 S0 用户。"""
+    """在已绑定 S1 项目上处理 REPL ``/init <brief>``，或引导 S0 用户。
+
+    Note: REPL ``handle_repl_input`` 在 brief 形式（无 ``--flag``）下
+    抢先消费 —— 调用 :func:`writer.cli._init_backend.apply_genre_and_brief`
+    完成多选题材 + 补脚手架 + 写 brief。本函数现在主要服务于
+    非 REPL 调用方（``run_engine`` 直接驱动、SDK、e2e pipe 测试）
+    以及 ``S0`` 引导提示。
+    """
 
     if not should_run_init_brief(
         ctx.user_input,
@@ -399,7 +406,7 @@ async def _run_tool_loop(
     deps: EngineDeps,
     cfg: EngineConfig,
 ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
-    """多步调用委托给 :class:`writer.llm.agent.LLMToolLoop`。
+    """多步调用委托给 :class:`writer.llm.agent.ReActAgent`。
 
     前置条件：``deps.tool_loop is not None``（引擎的 ``case "call_tool"``
     分支只在这种情况下路由到这里）。
@@ -496,7 +503,7 @@ async def _run_agent(
     Per ``fea-agent-mirror`` Decision 7：引擎组装一次 LLM 调用，
     其 system prompt 由所选 agent 的 ``body``（agent 的身份 / 角色描述）
     与题材特定的大纲模板拼接。LLM 通过现有的
-    :class:`writer.llm.agent.LLMToolLoop` 路径调用（配置了 API key 时），
+    :class:`writer.llm.agent.ReActAgent` 路径调用（配置了 API key 时），
     让模型在产出结构化大纲前可用 tool registry 读取项目状态。
 
     没有 LLM 时（``deps.tool_loop is None``）helper 产出一段预览

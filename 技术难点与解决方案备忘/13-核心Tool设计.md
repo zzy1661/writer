@@ -183,7 +183,7 @@ def register(self, tool: Tool) -> "ToolRegistry":
 
 ### 6. ToolDescriptor 提供给 LLM 的工具目录
 
-`ToolRegistry.describe()` 2026-07-08 新增(`src/writer/tools/registry.py`),返回 `list[ToolDescriptor]`,`LLMToolLoop` 用它喂 LLM 的 `bind_tools` / JSON-prompt:
+`ToolRegistry.describe()` 2026-07-08 新增(`src/writer/tools/registry.py`),返回 `list[ToolDescriptor]`,`ReActAgent` 用它喂 LLM 的 `bind_tools` / JSON-prompt:
 
 ```python
 @dataclass(frozen=True)

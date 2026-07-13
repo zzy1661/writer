@@ -55,7 +55,7 @@
 
 ### LangChain 角色
 
-LangChain 在 L4(LLM Provider)+ L3(LLM tool loop 桥接)仍然使用;`writer/tools/langchain_bridge.py::_build_args_schema` 复用 `inspect.signature + get_type_hints + pydantic.create_model` 给 builtin Tools 生成 LC `StructuredTool.args_schema`。`LLMToolLoop` (`src/writer/llm/agent.py`) 用 native `bind_tools` 或 JSON-prompt 路径消费工具列表。
+LangChain 在 L4(LLM Provider)+ L3(LLM tool loop 桥接)仍然使用;`writer/tools/langchain_bridge.py::_build_args_schema` 复用 `inspect.signature + get_type_hints + pydantic.create_model` 给 builtin Tools 生成 LC `StructuredTool.args_schema`。`ReActAgent` (`src/writer/llm/agent.py`) 用 native `bind_tools` 或 JSON-prompt 路径消费工具列表。
 
 ---
 

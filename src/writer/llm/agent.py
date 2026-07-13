@@ -24,7 +24,7 @@ ReAct 风格的循环里：
 
 分层：本模块位于 ``writer.llm``（而非 ``writer.engine``），让 engine
 包从不直接 import LLM 类型。``EngineDeps`` 持有一个
-``Optional[LLMToolLoop]`` 引用；当引擎想要循环时
+``Optional[ReActAgent]`` 引用；当引擎想要循环时
 ``await deps.tool_loop.run(...)`` 并原样转发产出事件。
 """
 
@@ -76,10 +76,10 @@ MAX_LOOP_STEPS = 5
 
 
 @dataclass
-class ToolLoopState:
-    """LLM 工具循环的每轮状态。
+class ReActState:
+    """ReAct agent 的每轮状态。
 
-    生命周期为单轮：引擎每次委托给 ``LLMToolLoop.run`` 时构造一份
+    生命周期为单轮：引擎每次委托给 :meth:`ReActAgent.run` 时构造一份
     全新状态。跨轮记忆属于 ``EngineSession``（按计划刻意排除在外）。
 
     Attributes:
@@ -97,8 +97,8 @@ class ToolLoopState:
     last_tool_result: ProtocolToolResult | None = None
 
 
-class LLMToolLoop:
-    """驱动 LLM 完成多步工具调用直至给出答案。
+class ReActAgent:
+    """驱动 LLM 完成多步工具调用直至给出答案（ReAct 风格 agent）。
 
     支持两条 provider 路径，镜像 :class:`writer.routing.LlmIntentRouter`：
 
@@ -113,11 +113,11 @@ class LLMToolLoop:
 
     构造：
 
-    * ``LLMToolLoop(settings, registry, runtime)`` —— 生产装配，通过
+    * ``ReActAgent(settings, registry, runtime)`` —— 生产装配，通过
       :func:`writer.llm.provider.get_llm`。
-    * ``LLMToolLoop(..., llm=fake_chat_model)`` —— 测试注入；绕过
+    * ``ReActAgent(..., llm=fake_chat_model)`` —— 测试注入；绕过
       :func:`get_llm`。
-    * ``LLMToolLoop(..., langchain_tools=[...])`` —— 测试注入；绕过
+    * ``ReActAgent(..., langchain_tools=[...])`` —— 测试注入；绕过
       ``to_langchain_tools``（它会在 ``runtime`` 上构建闭包）。当测试
       想观察循环如何处理 tool 消息而无需真实 registry 装配时很有用。
     """
@@ -190,7 +190,7 @@ class LLMToolLoop:
 
         del cfg  # 当前未使用；为未来 per-loop 配置保留
 
-        state = ToolLoopState(
+        state = ReActState(
             messages=self._initial_messages(action, ctx.user_input, deps=deps),
         )
 
@@ -460,7 +460,7 @@ class LLMToolLoop:
             tool_call_id = f"{tool_name}-{len(self._descriptors)}"
         return ToolMessage(content=output, tool_call_id=tool_call_id)
 
-    def _budget_fallback(self, state: ToolLoopState) -> str:
+    def _budget_fallback(self, state: ReActState) -> str:
         """构建预算耗尽时的兜底块。
 
         让用户知情：打印跑了几步并展示最后一次工具输出的尾部，让
@@ -477,4 +477,4 @@ class LLMToolLoop:
         return f"{head}\n{tail}"
 
 
-__all__ = ["LLMToolLoop", "MAX_LOOP_STEPS", "ToolLoopState"]
+__all__ = ["ReActAgent", "MAX_LOOP_STEPS", "ReActState"]

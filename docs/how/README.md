@@ -2,7 +2,7 @@
 
 > **本教程目标**:把 `writer-agent`(中文长篇小说写作 CLI)的每一层、每一包的设计与实现都讲清楚,让你即便没有读过代码,也能在一天内把整套架构重建出来。
 >
-> 写作日期:2026-07-11 · 对应基线:`339 个测试 / ruff+mypy clean / Engine AsyncGenerator + IntentRouter Protocol + 9 builtin Tool + LLMToolLoop`。
+> 写作日期:2026-07-11 · 对应基线:`339 个测试 / ruff+mypy clean / Engine AsyncGenerator + IntentRouter Protocol + 9 builtin Tool + ReActAgent`。
 >
 > 阅读建议:先读 [01-总览与四层架构](01-总览与四层架构.md) 建立心智地图,然后按章节顺序读;每章都有「核心代码 + 伪代码 + 设计动机」三段式。
 
@@ -18,7 +18,7 @@
 | [06](06-Tool层与Runtime.md) | Tool 协议 + Runtime + 9 个 builtin | `src/writer/tools/` |
 | [07](07-技能directive层.md) | SKILL.md + DirectiveRegistry + 项目级覆盖 | `src/writer/skills/` |
 | [08](08-题材与Agent层.md) | `AgentRegistry` + 4 份题材 Markdown | `src/writer/agents/` |
-| [09](09-LLM工具循环.md) | `LLMToolLoop` ReAct + 双 provider | `src/writer/llm/` |
+| [09](09-ReAct工具循环.md) | `ReActAgent` ReAct + 双 provider | `src/writer/llm/` |
 | [10](10-项目workspace脚手架.md) | `create_workspace` + AGENT.md 状态字段 | `src/writer/project/` |
 | [11](11-配置与设置.md) | `Settings` + env 优先级 | `src/writer/config/` |
 | [12](12-工作流与审核.md) | `write_chapter` / `review_chapter` stub | `src/writer/workflows/` |

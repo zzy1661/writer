@@ -17,7 +17,7 @@ Markdown 范式的 agent 系统（``writer.agents.AgentRegistry`` /
   传入。
 * 它不分 ``genre``（prompt 模板和 schema 与题材无关；每个题材的专门
   化由 Markdown agent 处理）。
-* 类形态的 ``LLMToolLoop`` 仅因它循环并持有状态而存活；本函数两者
+* 类形态的 ``ReActAgent`` 仅因它循环并持有状态而存活；本函数两者
   都不需要。
 
 公开 API（per ``chg-remove-roles``）：
