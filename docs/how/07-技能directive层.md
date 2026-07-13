@@ -257,27 +257,30 @@ def built_directive_registry(project_root: Path | None = None) -> DirectiveRegis
 
 ## 7.8 `_run_directive` — Engine 怎么消费 SKILL.md
 
-> 对应代码:`src/writer/engine/loop.py::_run_directive`
+> 对应代码:`src/writer/engine/engine.py::Engine._run_directive`
 
 ```python
-async def _run_directive(directive, ctx, deps, cfg):
-    from writer.skills.directive_discovery import resolve_references
-    resolved = resolve_references(directive.body, directive.references)
+class Engine:
+    async def _run_directive(self, directive, ctx):
+        from writer.skills.directive_discovery import resolve_references
+        deps = self._deps
+        cfg = self._cfg
+        resolved = resolve_references(directive.body, directive.references)
 
-    if deps.tool_loop is not None:
-        # 1. 把 directive body 喂给 LLM
-        action = AgentAction(
-            action_type="answer_directly",
-            command=directive.command,
-            answer=directive.body,
-        )
-        # 2. LLM 读 body 后,用 tool registry 完成任务
-        async for event in deps.tool_loop.run(action, ctx, deps, cfg):
-            yield event
-    else:
-        # 纯规则部署(无 API key):只输出 preview
-        yield TextChunk(text=f"[engine] directive body (preview, no LLM configured):\n...")
-        yield Done(reason="answered", payload={"directive": directive.command, "llm_available": False})
+        if deps.tool_loop is not None:
+            # 1. 把 directive body 喂给 LLM
+            action = AgentAction(
+                action_type="answer_directly",
+                command=directive.command,
+                answer=directive.body,
+            )
+            # 2. LLM 读 body 后,用 tool registry 完成任务
+            async for event in deps.tool_loop.run(action, ctx, deps, cfg):
+                yield event
+        else:
+            # 纯规则部署(无 API key):只输出 preview
+            yield TextChunk(text=f"[engine] directive body (preview, no LLM configured):\n...")
+            yield Done(reason="answered", payload={"directive": directive.command, "llm_available": False})
 ```
 
 **关键设计**:LLM 收到 `directive.body` 作为 system identity(由 `_initial_messages` 拼接),user input 作为 human message。LLM 看到指令后,自己决定调哪个 tool、调用顺序。
@@ -325,7 +328,7 @@ def _initial_messages(self, action, user_input, *, deps):
 ```
 CLI 启动:
     EngineSession(project_root=auto_discovered)
-        └─ production_deps(project_root=...)
+        └─ __post_init__ 构造 Engine(deps=production_deps(project_root=...))
             └─ built_directive_registry(project_root=...)
                 ├─ discover_shipped_directives() → [大纲, 目录]
                 ├─ discover_project_directives(project_root) → []
@@ -333,15 +336,17 @@ CLI 启动:
                 └─ DirectiveRegistry: {"/大纲": ..., "/目录": ...}
 
 用户输入 "/大纲 穿越到唐朝":
-    deps.route() → AgentAction(action_type="run_command", command="/大纲")
-    engine 分派 → directive = deps.directive_registry.get("/大纲")
-    _run_directive(directive, ctx, deps, cfg)
-        ├─ resolve_references(body, references) → 4-act-template.md / examples.md 内容
-        ├─ 构造 agent_action (answer_directly, command="/大纲", answer=body)
-        └─ async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
-            ReActAgent.run():
-                _initial_messages(): 拼 system prompt = base + directive body + refs + extra_instructions
-                LLM 读到 directive body,按指令调 safe_read_file / safe_write_file
+    session.run_turn(user_input) → 构造 EngineContext + 委派给 session.engine.run(ctx)
+    Engine._engine_loop:
+        self._deps.route() → AgentAction(action_type="run_command", command="/大纲")
+        directive = self._deps.directive_registry.get("/大纲")
+        self._run_directive(directive, ctx)
+            ├─ resolve_references(body, references) → 4-act-template.md / examples.md 内容
+            ├─ 构造 agent_action (answer_directly, command="/大纲", answer=body)
+            └─ async for event in self._deps.tool_loop.run(agent_action, ctx, self._deps, self._cfg):
+                ReActAgent.run():
+                    _initial_messages(): 拼 system prompt = base + directive body + refs + extra_instructions
+                    LLM 读到 directive body,按指令调 safe_read_file / safe_write_file
 ```
 
 ## 7.10 关键设计约束

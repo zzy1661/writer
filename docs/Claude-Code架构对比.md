@@ -18,8 +18,8 @@
 
 | 维度 | Claude Code 做法 | writer-agent 做法 | 数据来源 |
 | --- | --- | --- | --- |
-| 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `run_engine` AsyncIterator[Event] + `match action.action_type` 单层 dispatch | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
-| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `EngineDeps` 5 字段 + 4 方法(router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop + route / run_workflow / rebind_tool_runtime / rebind_directive_registry);`story_agent` 字段于 2026-07-09 `chg-remove-roles` 删除 | [05](#) / `src/writer/engine/deps.py` |
+| 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `Engine.run(ctx)` AsyncIterator[Event] + `Engine._engine_loop` 内 `match action.action_type` 单层 dispatch(`Engine` 类主入口,持 `EngineDeps` + `EngineConfig`) | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
+| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `EngineDeps` 5 字段 + 4 方法(router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop + route / run_workflow / rebind_tool_runtime / rebind_directive_registry);被 `Engine` 类持有,`Engine.replace_deps` 整体替换;`story_agent` 字段于 2026-07-09 `chg-remove-roles` 删除 | [05](#) / `src/writer/engine/deps.py` + `src/writer/engine/engine.py` |
 | 路由 | `RuleBasedRouter` + `LlmRouter` 同一 Protocol 下;`CompositeRouter` rule-first + LLM fallback | `RuleBasedIntentRouter` + `LlmIntentRouter` + `CompositeRouter`(本会话 M5/M6 已对齐 production_deps 接受 `primary_router` kwarg) | [15](#) / `src/writer/routing/` |
 | 扩展点 | 27 个 Hook 事件 + Markdown frontmatter 协议同构(Skill/Agent/Command/OutputStyle)+ Plugin manifest | 仅 SKILL.md frontmatter;`writer/hooks/` 未实装;`writer/commands/` / `writer/agents/` / `writer/output_styles/` 空缺 | [20-Hooks系统.md](~/Desktop/sources/Claude-Code-Source-Study/docs/20) / [21](#) |
 | 配置 | 5+1 层优先级(user/project/local/policy/managed)+ TRUSTED_SETTING_SOURCES + SAFE_ENV_VARS | 单一 Pydantic BaseSettings | [03-配置体系与企业MDM.md](~/Desktop/sources/Claude-Code-Source-Study/docs/03) |
@@ -81,7 +81,7 @@
 - 消息预处理管线按成本递增:`snip → microcompact → context collapse → autocompact`
 - `withhold-recover` 模式:可恢复错误不立即 yield,等流结束尝试恢复
 
-**我们的现状**:`engine/loop.py` 用 `match action.action_type` 单层 dispatch + 顶层 `try/except`。错误恢复只有 `except ToolError` + `except Exception` 两层。
+**我们的现状**:`Engine._engine_loop`(`src/writer/engine/engine.py`,`Engine` 类的私有方法)用 `match action.action_type` 单层 dispatch + 顶层 `try/except`。错误恢复只有 `except ToolError` + `except Exception` 两层。
 
 **为什么是 Major**:当前只支持"成功 → Done"或"异常 → aborted"两条路径。一旦未来需要:
 - 上下文压缩重试(413 → drain → reactive compact → surface)
@@ -92,7 +92,7 @@
 ——都需要 `state.transition` 机制。当前架构会让这些功能被迫改 `_engine_loop` 主循环,违反"engine 包严格 5 文件布局,新增能力只通过 `EngineDeps` 扩展"原则(见 [备忘 16 §408](技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md))。
 
 **建议做法**(优先级 1):
-- 在 `_engine_loop` 引入新一代 `EngineState`(注意:**不是**之前 m4 删除的那个老 EngineState —— 老的是空 mutable dataclass,新的是 frozen transition 标记)
+- 在 `Engine._engine_loop`(`src/writer/engine/engine.py`)引入新一代 `EngineState`(注意:**不是**之前 m4 删除的那个老 EngineState —— 老的是空 mutable dataclass,新的是 frozen transition 标记)
 - 形态参考:
   ```python
   @dataclass(frozen=True)
@@ -166,8 +166,8 @@
 | Claude Code 模式 | 我们的实现 | 评价 |
 | --- | --- | --- |
 | **Protocol-as-slot** | `IntentRouter` Protocol + `RuleBasedIntentRouter` / `LlmIntentRouter` / `CompositeRouter` | ✅ 完美对齐(本会话 M1-M6 修复后甚至更好) |
-| **AsyncGenerator 循环核心** | `run_engine` AsyncIterator[Event] | ✅ 对齐 |
-| **DI 边界** | `EngineDeps` Protocol + `_DefaultEngineDeps` + `production_deps()` | ✅ 对齐(M6 后 Protocol-only stub 也工作,见 `test_session_set_project_root_with_protocol_only_deps`) |
+| **AsyncGenerator 循环核心** | `Engine.run(ctx)` AsyncIterator[Event](`Engine` 类主入口,2026-07-13 重构后从自由函数升级为主类) | ✅ 对齐 |
+| **DI 边界** | `EngineDeps` Protocol + `_DefaultEngineDeps` + `production_deps()`(被 `Engine` 类持有,通过 `Engine.replace_deps` 整体替换) | ✅ 对齐(M6 后 Protocol-only stub 也工作,见 `test_session_set_project_root_with_protocol_only_deps`) |
 | **Done 分支事件流** | 7 个 `DoneReason`(本会话 M4 修复后 ErrorEvent 加 traceback 字段) | ✅ 对齐 |
 | **Tool 命名 kwarg 协议** | builtin Tools 全部 `*, path: str` 模式 | ✅ 对齐(CLAUDE.md 备忘 13 明确要求) |
 | **structured output** | `AgentAction` Pydantic BaseModel + `model_config={"frozen": True}` | ✅ 对齐(甚至比 dataclass 更适合 LLM structured output) |
@@ -193,9 +193,9 @@
 
 ### 优先级 1:`state.transition` 状态机(Medium effort, High impact)
 
-**理由**:当前 `engine/loop.py` 是单层 match + try/except,未来要做上下文压缩重试 / max_tokens 升级 / Sub-agent 续转时**必然要改**。现在引入干净的状态机比之后 refactor 便宜。
+**理由**:当前 `Engine._engine_loop` 是单层 match + try/except,未来要做上下文压缩重试 / max_tokens 升级 / Sub-agent 续转时**必然要改**。现在引入干净的状态机比之后 refactor 便宜。
 
-**第一步**:在 `engine/loop.py` 引入 `EngineTransition` + `EngineLoopState`(frozen),把所有 `yield Done` 的判断从"一次 yield 即终"改为"state.transition 决定是否继续"。
+**第一步**:在 `engine/engine.py` 的 `Engine._engine_loop` 引入 `EngineTransition` + `EngineLoopState`(frozen),把所有 `yield Done` 的判断从"一次 yield 即终"改为"state.transition 决定是否继续"。
 
 ### 优先级 2:Hooks 协议骨架(Mini-MDE effort, H impact)
 

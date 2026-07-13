@@ -124,7 +124,7 @@ def outline(brief: str):
 def _run_repl() -> None:
     settings = load_project_settings()
     project_root = discover_project_root()
-    session = EngineSession(project_root=project_root, deps=production_deps(...))
+    session = EngineSession(project_root=project_root)  # __post_init__ 装配 EngineDeps 后包装 Engine
     print_welcome()
 
     history = FileHistory(str(HISTORY_FILE))
@@ -163,18 +163,8 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         # flag 形式(走 Typer 风格交互 prompt)
         handle_init_with_flags(text, session); return True
 
-    # 2. 拼 pending interrupt(若有)
-    final_input = compose_pending_input(text, session.pending_interrupt)
-
-    # 3. 构造 ctx + 跑引擎
-    ctx = EngineContext(
-        user_input=final_input,
-        project_root=session.project_root,
-        project_state=session.project_state,
-        session_id=str(session.session_id),
-    )
-    config = build_engine_config(ctx)
-    asyncio.run(_run_engine(ctx, session.deps, config, session))
+    # 2. 委派给 session.run_turn()(构造 ctx 并调 engine.run)
+    asyncio.run(_run_engine(text, session, console))
     return True
 ```
 
@@ -187,31 +177,31 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
 
 ## 2.7 `_run_engine`:CLI ↔ Engine 桥接
 
-CLI 在 `_run_engine` 里逐事件消费引擎的 AsyncGenerator,并按事件类型渲染:
+CLI 在 `_run_engine` 里通过 `session.run_turn(user_input)` 拿到 AsyncGenerator,并逐事件消费:
 
 ```python
-async def _run_engine(ctx, deps, config, session):
-    pending = None
-    async for event in run_engine(ctx, deps, config=config):
+async def _run_engine(user_input, session, console):
+    session.refresh_project_state()
+    async for event in session.run_turn(user_input):
         match event:
             case TextChunk(text=t):
                 console.print(t, markup=False, highlight=False)  # 防 Rich 吞 [xxx]
             case ActionEvent(action=a):
-                # 不渲染(用户只需要看结果)
-                pass
-            case ToolCall(name=n, arguments=args):
-                console.print(f"[tool] {n}({args})")
+                console.print(f"[dim]→ {a.action_type}[/dim]")
+            case ToolCall(name=n):
+                console.print(f"[tool] {n}")
             case ToolResult(name=n, output=o):
                 console.print(f"[result] {o[:200]}...")
-            case Interrupt(type=ty, prompt=p, options=opts):
-                pending = (ty, p, opts)
+            case Interrupt() as interrupt:
+                pending = interrupt
+                session.set_pending_interrupt(interrupt)
             case Done(reason=r, payload=payload):
                 console.print(f"[done] {r}")
-                session.record_turn(text, r)
+                session.record_turn(user_input, r)
                 session.clear_pending_interrupt()
                 # 若是 /init 创建项目,绑定 project_root
-                if r == "answered" and payload.get("project_root"):
-                    session.set_project_root(Path(payload["project_root"]))
+                if payload is not None and "project_root" in payload:
+                    session.set_project_root(Path(str(payload["project_root"])))
             case ErrorEvent(message=m, traceback=tb):
                 console.print(f"[red]{m}[/red]")
                 if tb:
@@ -221,8 +211,8 @@ async def _run_engine(ctx, deps, config, session):
 ### 关键陷阱
 
 - **`markup=False, highlight=False`** —— Rich 默认会把 `[xxx]` 当 markup,会把文本里的方括号吞掉。LLM 输出的 Markdown 链接 / 列表 / 强调都包含方括号,必须关掉 markup。
-- **session 与 engine 解耦** —— engine 不知道 session 存在,所有跨 turn 状态在 CLI 层维护。
-- **`project_root` 反向回填** —— 当 `/init` 走 `command_pending`/`answered` 路径创建项目时,payload 里会有 `project_root`,CLI 负责调用 `session.set_project_root(path)` 把新项目绑回去。
+- **session / engine / Engine 三层解耦** —— `session` 持跨 turn 状态;`session.engine: Engine` 持 `EngineDeps` + `EngineConfig`;`engine.run(ctx)` 是纯函数式事件流。CLI 不需要 import `EngineDeps`。
+- **`project_root` 反向回填** —— 当 `/init` 走 `answered` 路径创建项目时,payload 里会有 `project_root`,CLI 负责调用 `session.set_project_root(path)` 把新项目绑回去,后者经 `Engine.replace_deps(new_deps)` 整体替换 engine 内部 deps。
 
 ## 2.8 e2e 管道
 

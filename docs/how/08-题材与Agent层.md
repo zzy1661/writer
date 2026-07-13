@@ -244,34 +244,37 @@ def built_agent_registry(project_root: Path | None = None) -> AgentRegistry:
 
 ## 8.7 `_run_agent` — Engine 怎么派发 agent
 
-> 对应代码:`src/writer/engine/loop.py::_run_agent`
+> 对应代码:`src/writer/engine/engine.py::Engine._run_agent`
 
 ```python
-async def _run_agent(action, ctx, deps, cfg):
-    from writer.agents import AgentRegistryError
-    agent_name = action.target_agent or ""
-    try:
-        agent = deps.agent_registry.require(agent_name)
-    except AgentRegistryError as exc:
-        yield ErrorEvent(message=f"Agent 错误: {exc}", traceback=str(exc))
-        yield Done(reason="aborted", payload={"error": str(exc), "command": agent_name})
-        return
+class Engine:
+    async def _run_agent(self, action, ctx):
+        from writer.agents import AgentRegistryError
+        deps = self._deps
+        cfg = self._cfg
+        agent_name = action.target_agent or ""
+        try:
+            agent = deps.agent_registry.require(agent_name)
+        except AgentRegistryError as exc:
+            yield ErrorEvent(message=f"Agent 错误: {exc}", traceback=str(exc))
+            yield Done(reason="aborted", payload={"error": str(exc), "command": agent_name})
+            return
 
-    if deps.tool_loop is not None:
-        # 把 agent body 作为 system identity,user input 作为 human message
-        agent_action = AgentAction(
-            action_type="answer_directly",
-            command=None,
-            kind="agent",
-            target_agent=agent_name,
-            answer=f"[agent {agent_name!r} system identity]\n{agent.body}\n\n[user input]\n{ctx.user_input}",
-        )
-        async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
-            yield event
-    else:
-        # 纯规则部署:输出 agent 预览
-        yield TextChunk(text=f"[agent {agent_name!r} preview, no LLM configured]\n...")
-        yield Done(reason="answered", payload={"agent": agent_name, "llm_available": False})
+        if deps.tool_loop is not None:
+            # 把 agent body 作为 system identity,user input 作为 human message
+            agent_action = AgentAction(
+                action_type="answer_directly",
+                command=None,
+                kind="agent",
+                target_agent=agent_name,
+                answer=f"[agent {agent_name!r} system identity]\n{agent.body}\n\n[user input]\n{ctx.user_input}",
+            )
+            async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
+                yield event
+        else:
+            # 纯规则部署:输出 agent 预览
+            yield TextChunk(text=f"[agent {agent_name!r} preview, no LLM configured]\n...")
+            yield Done(reason="answered", payload={"agent": agent_name, "llm_available": False})
 ```
 
 **关键**:`answer` 字段拼成 `[agent identity]\n{body}\n\n[user input]\n{user_input}`,LLM 在 `_initial_messages` 里把它当 system hint 提取(`action.answer` 进 `[router hint]` 段)。
@@ -412,13 +415,15 @@ class StoryAgent:
    ↓
 LLM IntentRouter 产出 AgentAction(action_type="run_command", command="/大纲", kind="agent", target_agent="玄幻题材 Agent")
    ↓
-Engine:
+session.run_turn(user_input) → 构造 EngineContext + 委派给 session.engine.run(ctx)
+   ↓
+Engine._engine_loop:
     if action.kind == "agent":
-        async for event in _run_agent(action, ctx, deps, cfg):
+        async for event in self._run_agent(action, ctx):
             yield event
    ↓
-_run_agent:
-    agent = deps.agent_registry.require("玄幻题材 Agent")
+self._run_agent:
+    agent = self._deps.agent_registry.require("玄幻题材 Agent")
     # 把 agent body 作为 system identity
     agent_action = AgentAction(
         action_type="answer_directly",
@@ -427,7 +432,7 @@ _run_agent:
         target_agent="玄幻题材 Agent",
         answer=f"[agent identity]\n{agent.body}\n\n[user input]\n主角修仙",
     )
-    async for event in deps.tool_loop.run(agent_action, ctx, deps, cfg):
+    async for event in self._deps.tool_loop.run(agent_action, ctx, self._deps, self._cfg):
         yield event
    ↓
 ReActAgent.run():
