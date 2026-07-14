@@ -4,7 +4,7 @@
 > 设计备忘：[`备忘 08-REPL交互体验`](../../技术难点与解决方案备忘/08-REPL交互体验与命令解析.md)
 >
 > **2026-07-14 修订**：本文原版本把 CLI 入口全部写在 `cli/main.py`、列出 `writer outline` 子命令、引用测试基线 ~339。
-> 截至 2026-07-14，CLI 已拆分为 `main.py` + `commands.py` + `repl.py` + `_init_backend.py` 四个文件；只剩 `writer doctor` / `writer new <书名>` 两个 Typer 子命令（`writer outline` 等价命令已下线）；测试基线 **490**。
+> 截至 2026-07-14，CLI 已拆分为 `main.py` + `commands.py` + `repl.py` + `_init_backend.py` 四个文件；只剩 `writer doctor` / `writer new <书名>` 两个 Typer 子命令（`writer outline` 等价命令已下线）；测试基线 **483**。
 
 ---
 
@@ -38,13 +38,13 @@ writer-agent/
 │       ├── tools/             # Tool 协议 + 9 builtin
 │       ├── skills/            # SKILL.md directives (2 shipped: /大纲 /目录)
 │       ├── agents/            # AgentRegistry + 4 份题材 .md + process_init_brief capability
-│       ├── workflows/         # LangGraph write_chapter (PR2) + review_chapter stub
+│       ├── workflows/         # LangGraph write_chapter (PR2) + review_chapter (PR3)
 │       ├── llm/               # ReActAgent + Provider + prose clients
 │       ├── project/           # workspace 脚手架 + chapter_summaries + init_brief
 │       ├── config/            # pydantic-settings
 │       ├── prompts/           # LLM prompt 模板（含 context.py）
 │       └── agent/             # 兼容层 re-export
-├── tests/                     # pytest + pytest-asyncio（基线 490）
+├── tests/                     # pytest + pytest-asyncio（基线 483）
 ├── e2e/                       # e2e 测试项目（REPL stdin）
 ├── docs/                      # 设计文档 + how 教程
 ├── 技术难点与解决方案备忘/     # 17 个技术决策备忘
@@ -242,7 +242,7 @@ printf "/大纲 一个穿越到唐朝的程序员\n" | .venv/bin/writer
 ## 2.9 测试入口
 
 ```bash
-uv run pytest                                       # 全量（基线 490 个测试，per 2026-07-13 实测）
+uv run pytest                                       # 全量（基线 483 个测试，per 2026-07-14 实测）
 uv run pytest tests/test_engine.py                  # 单文件
 uv run pytest -k router                             # 按名字匹配
 uv run pytest tests/test_engine.py::test_router_... # 单测

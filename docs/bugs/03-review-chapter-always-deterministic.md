@@ -1,10 +1,14 @@
 # Bug 03: `review_chapter` 几乎永远走 deterministic,API key 配了也无效
 
+> ✅ **状态: 已修**(per commit `ad45896`,2026-07-09 之后)
+> 修复方式:`_aggregate_reviews_node` 推迟 fallback 到 `_llm_review` 内部;`_llm_review` 走 `review_llm = getattr(deps, "review_llm", None) or _get_llm(get_settings())`,让"未注入 review_llm + production API key 已配"路径自然走真实 LLM。LLM 调用失败时降级到 `ConcernVerdict(score=4, pass=False)` + findings 含错误信息,让 `decision_gate` 标 `needs_rewrite`。新增测试 `test_aggregate_reviews_uses_llm_when_api_key_set` + `test_no_api_key_fallback_message_includes_error` 守住契约。
+> **本文档保留**作为历史档案。
+
 ## 元信息
 
 | 严重程度 | 🟠 Major |
 |---|---|
-| 状态 | 待修 |
+| 状态 | ✅ 已修 (commit `ad45896`) |
 | 发现日期 | 2026-07-09 |
 | 关联文件 | `src/writer/workflows/review_chapter.py:265-288`、`src/writer/workflows/review_chapter.py:444-484`、`src/writer/workflows/write_chapter.py:494-509`、`备忘 03-审核工作流.md` |
 | 测试盲区 | 测试 `review_llm` 注入有覆盖,但不覆盖 production 默认路径(`deps.review_llm=None` 时 + API key 配了) |

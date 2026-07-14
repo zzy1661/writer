@@ -1,10 +1,14 @@
 # Bug 04: 写入白名单字面值(`.writer/cache`)与匹配规则(`rel.parts[0]`)不一致
 
+> ✅ **状态: 已修**(per commit `aa89c78`,2026-07-09 之后)
+> 修复方式:`file_tools._check_whitelist` 从"取 `rel.parts[0]` 单段匹配"改为"祖先路径前缀匹配" —— `for ancestor in [rel, *rel.parents]: if ancestor.as_posix() in whitelist: return`,支持 `.writer/cache/llm-state.md`(任意深层 `.writer/cache/x/y/z.md`)的写入同时不被 `manuscript/foo` 误伤。新增测试 `test_whitelist_accepts_descendant_of_writable_root` 守住契约。
+> **本文档保留**作为历史档案。
+
 ## 元信息
 
 | 严重程度 | 🟠 Major |
 |---|---|
-| 状态 | 待修 |
+| 状态 | ✅ 已修 (commit `aa89c78`) |
 | 发现日期 | 2026-07-09 |
 | 关联文件 | `src/writer/tools/builtin/file_tools.py:101-119`、`src/writer/tools/runtime.py:18-29`、`docs/技术架构总览.md:278`、`备忘 13-核心Tool设计.md:54-95`、`openspec/specs/writer-tools/spec.md:36` |
 | 测试盲区 | fixture 全用顶层目录(`manuscript/...`),从未构造 `.writer/cache/x.md` |

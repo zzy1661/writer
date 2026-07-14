@@ -1,12 +1,16 @@
 # Bug 01: `set_project_root` 后 `tool_loop` 没重建,LLM 工具调用仍指向旧根目录
 
+> ✅ **状态: 已修**(per commit `8856e67`,2026-07-09 之后)
+> 修复方式:`EngineSession.set_project_root()` 检测旧 deps 带 `tool_loop` 时,基于新 `tool_runtime` 重建 `ReActAgent` 并 `rebind_tool_loop(new_loop)` 后再 `Engine.replace_deps(new_deps)` 整体替换;rule-only 部署(`tool_loop=None`)时跳过重建。新增测试 `tests/test_engine_session.py::test_set_project_root_rebinds_tool_loop` 守住契约。
+> **本文档保留**作为历史档案,记录"为什么 339 baseline 漏检"与修复前的根因,防止未来回归。
+
 > 🔴 **Blocker** — 该 bug 直接导致 `/init` 后切换项目时,LLM 工具调用静默指向旧 `project_root`,用户级错误(可能读到旧项目的状态、写错位置)。是 5 个 bug 中唯一标记 Blocker 的,因为它会跨 turn 影响多轮对话且无明确错误信号。
 
 ## 元信息
 
 | 严重程度 | 🔴 Blocker |
 |---|---|
-| 状态 | 待修 |
+| 状态 | ✅ 已修 (commit `8856e67`) |
 | 发现日期 | 2026-07-09 |
 | 关联文件 | `src/writer/session/engine_session.py:94-154`、`src/writer/engine/deps.py:212-243`、`src/writer/engine/deps.py:333-339`(`ReActAgent` 构造) |
 | 测试盲区 | 测试 `set_project_root` 后只断言 `deps.tool_runtime.project_root == new_root`,从未断言 `deps.tool_loop._runtime.project_root == new_root`(因为根本没想到) |

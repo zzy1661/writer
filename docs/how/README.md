@@ -2,7 +2,7 @@
 
 > **本教程目标**:把 `writer-agent`(中文长篇小说写作 CLI)的每一层、每一包的设计与实现都讲清楚,让你即便没有读过代码,也能在一天内把整套架构重建出来。
 >
-> 写作日期:2026-07-11 · 对应基线:`339 个测试 / ruff+mypy clean / Engine AsyncGenerator + IntentRouter Protocol + 9 builtin Tool + ReActAgent`。
+> 写作日期:2026-07-11 · 对应基线:`483 个测试 / ruff+mypy clean / Engine AsyncGenerator + IntentRouter Protocol + 9 builtin Tool + ReActAgent`。
 >
 > 阅读建议:先读 [01-总览与四层架构](01-总览与四层架构.md) 建立心智地图,然后按章节顺序读;每章都有「核心代码 + 伪代码 + 设计动机」三段式。
 
@@ -21,7 +21,7 @@
 | [09](09-ReAct工具循环.md) | `ReActAgent` ReAct + 双 provider | `src/writer/llm/` |
 | [10](10-项目workspace脚手架.md) | `create_workspace` + AGENT.md 状态字段 | `src/writer/project/` |
 | [11](11-配置与设置.md) | `Settings` + env 优先级 | `src/writer/config/` |
-| [12](12-工作流与审核.md) | `write_chapter` / `review_chapter` stub | `src/writer/workflows/` |
+| [12](12-工作流与审核.md) | `write_chapter` / `review_chapter` LangGraph 5 节点图 | `src/writer/workflows/` |
 | [13](13-打包与发布.md) | PyInstaller + `writer.spec` | `packaging/` |
 | [14](14-测试体系.md) | pytest + LangChain fake model + stub 模式 | `tests/` |
 | [15](15-演进与备忘体系.md) | 17 个技术备忘 + OpenSpec changes + `docs/bugs/` | `技术难点与解决方案备忘/` + `openspec/` |

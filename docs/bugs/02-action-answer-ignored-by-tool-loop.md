@@ -1,10 +1,14 @@
 # Bug 02: `_initial_messages` 完全忽略 `AgentAction.answer`,directive/agent body 不进 LLM
 
+> ✅ **状态: 已修**(per commit `e040d6a`,2026-07-09 之后)
+> 修复方式:`ReActAgent._initial_messages()` 重写为三段式系统提示拼接:① `AGENT_IDENTITY_STORY` 通用身份 → ② `action.answer`(当 `action.command` 命中 `directive_registry` 时拼入 `directive.body` + `directive.references` 解析后的正文;当 `action.target_agent` 命中 `agent_registry` 时拼入 `agent.body`)→ ③ 工具描述 + 用户输入。test 直接断言 `_initial_messages` 返回的消息列表包含 directive / agent body 字符串。
+> **本文档保留**作为历史档案,记录"为什么 339 baseline 漏检"。
+
 ## 元信息
 
 | 严重程度 | 🟠 Major |
 |---|---|
-| 状态 | 待修 |
+| 状态 | ✅ 已修 (commit `e040d6a`) |
 | 发现日期 | 2026-07-09 |
 | 关联文件 | `src/writer/llm/agent.py:281-292`、`src/writer/engine/loop.py:191-204`、`src/writer/routing/intent_router.py`(`AgentAction` 定义) |
 | 测试盲区 | 测试断言 `_system_prompt()` 返回固定文本(`"你是 Writer Agent 的工具循环..."`),从未断言 directive body 或 agent body 是否拼入 |
