@@ -94,7 +94,7 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 - `tool_completed`——`call_tool` 在 rule-only 部署(`tool_loop=None`)走同步 `_run_tool`(`Engine._run_tool` 私有方法)后(含 `ToolCall` / `ToolResult` 事件)
 - `tool_loop_completed`——`call_tool` 走 LLM 工具循环(`ReActAgent`)后,**预算耗尽**优雅退出(2026-07-08 新增,与 `aborted` 区分)
 - `workflow_pending`——`/创作` `/审核` 工作流(当前为 sync stub,等真实 LangGraph 图)
-- `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮;`/init <故事梗概>` 在 S1 时也走 `answered` 不走 `ask_user`)
+- `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮;`/init <故事梗概>` 走 `_try_handle_repl_init_brief` REPL 抢先消费路径,内部仍 yield `answered`,不走 `ask_user`)
 - `aborted`——`ErrorEvent` 后兜底分支(`except ToolError` / `except SkillError` / `except Exception` 三层)
 
 **会话层**：以上每轮事件由 `EngineSession`(`writer.session`)驱动 — REPL 启动时构造一个,跨所有 turn 复用;`session_id` frozen、`engine: Engine` 一次性构建(`__post_init__` 装配 `EngineDeps` 后包装 `Engine`)、`tool_runtime` 在 `set_project_root()` 时按需换(经 `Engine.replace_deps(new_deps)` 整体替换);`session.run_turn(user_input)` 是便利方法,构造 `EngineContext` 后委派给 `engine.run(ctx)`;`Interrupt` 事件入 `session.pending_interrupt`,下一轮 `ctx.user_input` 自动拼接 `"[pending] {prompt}\n[answer] {user_input}"` 后再喂给引擎;`Done` 事件触发 `session.record_turn(...)` + `session.clear_pending_interrupt()`。
