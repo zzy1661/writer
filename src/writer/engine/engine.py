@@ -455,8 +455,6 @@ class Engine:
             # ``ToolError`` 形态的 ``AgentRegistryError``；但由于
             # ``AgentRegistryError`` 是 ``ValueError``（不是 ``ToolError``），
             # 我们改为直接产出事件，避免边界的 catch-all 分支重复包装消息。
-            from writer.engine.events import ErrorEvent
-
             tb_msg = str(exc)
             log.warning("Agent dispatch 错误: %s", exc, exc_info=True)
             yield ErrorEvent(message=f"Agent 错误: {exc}", traceback=tb_msg)

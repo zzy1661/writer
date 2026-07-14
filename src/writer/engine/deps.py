@@ -26,6 +26,8 @@ from writer.tools.errors import WorkflowNotFoundError
 from writer.workflows import WORKFLOWS, WorkflowResult, WorkflowStub
 
 if TYPE_CHECKING:
+    from langchain_core.language_models import BaseChatModel
+
     from writer.engine.context import EngineContext
     from writer.llm.agent import ReActAgent
     from writer.llm.prose import LLMProseClient
@@ -82,7 +84,7 @@ class EngineDeps(Protocol):
     # review LLM 的可选覆盖。设置后，``write_chapter`` 在结构化
     # ReviewVerdict 调用中使用此 LLM，而不是从 settings 重新构造
     # ``ChatOpenAI``。测试在此注入 recording fake；生产保持 None。
-    review_llm: Any
+    review_llm: BaseChatModel | None
     # 全局配置；用于 tool_loop rebind 时复用同一 settings（2026-07-09
     # 增补以修复 Bug 01）。
     settings: Settings
@@ -189,7 +191,7 @@ class _DefaultEngineDeps:
     directive_registry: DirectiveRegistry
     tool_loop: ReActAgent | None = None
     prose_client: LLMProseClient | None = None
-    review_llm: Any = None
+    review_llm: BaseChatModel | None = None
     settings: Settings = field(default=None)  # type: ignore[assignment]
     _workflows: dict[str, WorkflowStub] = field(default_factory=dict)
 

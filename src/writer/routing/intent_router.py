@@ -71,7 +71,7 @@ class IntentRouter(Protocol):
     故意忽略它。
     """
 
-    def route(self, user_input: str, project_state: str) -> AgentAction:
+    def route(self, user_input: str, _project_state: str) -> AgentAction:
         ...
 
 
@@ -83,13 +83,10 @@ class RuleBasedIntentRouter:
     # 就能短路掉它们。
     _FRAMEWORK_KEYWORDS: frozenset[str] = frozenset({"init", "状态", "退出", "帮助"})
 
-    def route(self, user_input: str, project_state: str) -> AgentAction:
-        # ``project_state`` 在此故意不使用；该参数的存在是为了当我们
+    def route(self, user_input: str, _project_state: str) -> AgentAction:
+        # ``_project_state`` 在此故意不使用；该参数的存在是为了当我们
         # 引入 :class:`LlmIntentRouter` 时保持 Protocol 稳定。
-        # 不删除它（而不是改名为 ``_project_state``）可以让公开签名
-        # 与文档保持一致，无需修改路由器的调用点。
-        del project_state
-
+        # 下划线前缀表明该参数在本实现里仅占位。
         text = user_input.strip()
 
         if text.startswith("/字数统计"):
