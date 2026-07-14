@@ -3,11 +3,66 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
 
 from writer.engine.context import EngineContext
-from writer.engine.deps import production_deps
+from writer.engine.deps import EngineDeps, production_deps
+from writer.llm.prose import RealProseClient
 from writer.workflows import WORKFLOWS, WorkflowResult, run_workflow
 from writer.workflows.write_chapter import run as run_write_chapter
+
+# 自 2026-07-14 起,plan_chapter 严格 LLM 驱动。本文件内联最小 fake
+# LLM + deps 工厂,避免与 ``test_workflows_write_chapter`` 共享测试
+# 助手(跨文件 import 在 pytest 下需要 ``tests/__init__.py``,
+# 项目并无此约定)。
+
+
+class _MiniRecordingChatModel(BaseChatModel):
+    """最小 fake LLM —— plan / draft / review 三次调用都返回 pass。"""
+
+    call_count: int = 0
+
+    class Config:
+        arbitrary_types_allowed = True
+
+    @property
+    def _llm_type(self) -> str:
+        return "mini-recording-fake"
+
+    def _generate(  # type: ignore[override]
+        self, messages, stop=None, run_manager=None, **kwargs: Any
+    ) -> ChatResult:
+        self.call_count += 1
+        # ``invoke_structured_json`` 在 messages 前置一个
+        # ``_json_contract_message`` 系统消息,所以「审核节点」不一定
+        # 在 ``messages[0]``。扫描所有消息体。
+        joined = "\n".join(m.content or "" for m in messages)
+        is_review = "审核节点" in joined
+        content = (
+            '{"pass": true, "score": 8, "concerns": []}'
+            if is_review
+            else "stub real draft content " * 30
+        )
+        return ChatResult(
+            generations=[ChatGeneration(message=AIMessage(content=content))]
+        )
+
+    async def _agenerate(  # type: ignore[override]
+        self, messages, stop=None, run_manager=None, **kwargs: Any
+    ) -> ChatResult:
+        return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+
+def _make_real_prose_deps() -> EngineDeps:
+    deps = production_deps()
+    llm = _MiniRecordingChatModel()
+    deps.prose_client = RealProseClient(llm=llm)
+    deps.review_llm = llm
+    return deps
 
 
 def test_workflows_registry_contains_expected_keys() -> None:
@@ -21,7 +76,7 @@ def test_workflow_stubs_are_callable() -> None:
 
 def test_run_workflow_returns_chunks_for_known_name() -> None:
     ctx = EngineContext(user_input="some input")
-    deps = production_deps()
+    deps = _make_real_prose_deps()
 
     result = run_workflow("write_chapter", ctx, deps)
 
@@ -33,6 +88,7 @@ def test_run_workflow_returns_chunks_for_known_name() -> None:
 
 
 def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
+    (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
     (tmp_path / "大纲").mkdir()
     (tmp_path / "大纲" / "章节目录.md").write_text("1.3 回流测试章", encoding="utf-8")
     ctx = EngineContext(
@@ -42,6 +98,7 @@ def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
         session_id="rewrite-test",
     )
     deps = production_deps(project_root=tmp_path)
+    deps = _make_real_prose_deps()
 
     result = run_write_chapter(ctx, deps)
     text = "".join(result.chunks)

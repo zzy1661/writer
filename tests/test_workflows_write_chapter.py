@@ -44,11 +44,19 @@ class _RecordingChatModel(BaseChatModel):
 
     ``response_factory`` lets each test return a different
     ``AIMessage`` for the prose vs. review LLM calls.
+
+    自 2026-07-14（plan_chapter LLM 驱动）新增：
+        - ``call_count`` 跟踪 invoke 次数
+        - ``plan_calls`` 收集 plan_chapter 节点的 (system, user) 元组，
+          让测试可断言计划节点真的调了 LLM
     """
 
     last_messages: list = []  # type: ignore[type-arg]
     response_factory: Any = None
     raise_on_invoke: Exception | None = None
+    call_count: int = 0
+    plan_calls: list = []  # type: ignore[type-arg]
+    review_calls: list = []  # type: ignore[type-arg]
 
     class Config:
         arbitrary_types_allowed = True
@@ -60,7 +68,28 @@ class _RecordingChatModel(BaseChatModel):
     def _generate(  # type: ignore[override]
         self, messages, stop=None, run_manager=None, **kwargs: Any
     ) -> ChatResult:
+        self.call_count += 1
         self.last_messages = list(messages)
+        # ``plan_chapter`` 的 system + user 来自
+        # ``CHAPTER_PLAN_TEMPLATE``：user 含 ``chapter_id=`` 行。
+        # 仅 plan_chapter 调 generate_text；draft 也走同一 channel，
+        # 我们按 system prompt 是否含「规划节点」字样区分。
+        is_plan = bool(messages) and "规划节点" in (messages[0].content or "")
+        is_review = bool(messages) and "审核节点" in (messages[0].content or "")
+        if is_plan:
+            self.plan_calls.append(
+                {
+                    "system": messages[0].content if messages else "",
+                    "user": messages[1].content if len(messages) > 1 else "",
+                }
+            )
+        elif is_review:
+            self.review_calls.append(
+                {
+                    "system": messages[0].content if messages else "",
+                    "user": messages[1].content if len(messages) > 1 else "",
+                }
+            )
         if self.raise_on_invoke is not None:
             raise self.raise_on_invoke
         response = self.response_factory() if self.response_factory else AIMessage(
@@ -124,6 +153,30 @@ def _make_deps_with_real_prose(llm: _RecordingChatModel) -> EngineDeps:
     return deps
 
 
+def _recording_llm_for_happy_path(
+    *, plan_text: str = "stub plan content", draft_text: str = "very long draft content " * 30
+) -> _RecordingChatModel:
+    """构造一个写 plan → draft → review(pass) → persist_outputs 通路的 fake LLM。
+
+    返回的 ``_RecordingChatModel`` 配置好 :attr:`response_factory`,
+    让三次连续 LLM 调用各自返回合适的 AIMessage:第 1 次是 plan 散文,
+    第 2 次是 draft 散文,第 3 次是 score=8 的 review verdict(自动 pass)。
+    """
+    llm = _RecordingChatModel()
+    calls = {"n": 0}
+
+    def factory() -> AIMessage:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _build_fake_prose_response(plan_text)
+        if calls["n"] == 2:
+            return _build_fake_prose_response(draft_text)
+        return _build_fake_review_verdict(pass_=True, score=8)
+
+    llm.response_factory = factory
+    return llm
+
+
 # ---------------------------------------------------------------------------
 # Tests: ReviewVerdict model
 # ---------------------------------------------------------------------------
@@ -180,15 +233,16 @@ class TestGraphTopology:
 
     def test_graph_traverses_5_nodes_in_happy_path(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("very long draft content " * 30)
+        llm = _recording_llm_for_happy_path()
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
         )
         result = run(ctx, deps)
-        # The deterministic path auto-passes; the graph reaches
-        # persist_outputs after one pass through review_gate.
+        # 真实 LLM 路径：plan_chapter 调一次 LLM，draft_chapter 调一次，
+        # review_gate 调一次并以 score 8 通过；graph 抵达 persist_outputs。
         text = "".join(result.chunks)
         assert "prep_context" in text
         assert "plan_chapter" in text
@@ -196,10 +250,14 @@ class TestGraphTopology:
         assert "proofread" in text
         assert "review_gate" in text
         assert "persist_outputs" in text
+        # plan_chapter 节点真的调过 LLM。
+        assert len(llm.plan_calls) == 1
 
     def test_happy_path_writes_draft_to_manuscript(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("deterministic draft text " * 20)
+        draft_text = "deterministic draft text " * 20
+        llm = _recording_llm_for_happy_path(draft_text=draft_text)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
@@ -211,11 +269,13 @@ class TestGraphTopology:
         assert "draft_path" in result.artifacts
         draft_path = result.artifacts["draft_path"]
         assert draft_path.exists()
-        assert draft_path.read_text(encoding="utf-8") == "deterministic draft text " * 20
+        assert draft_path.read_text(encoding="utf-8") == draft_text
 
     def test_happy_path_writes_chapter_summaries(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("摘要测试内容 " * 20)
+        draft_text = "摘要测试内容 " * 20
+        llm = _recording_llm_for_happy_path(draft_text=draft_text)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
@@ -230,14 +290,15 @@ class TestGraphTopology:
 
     def test_workflow_result_carries_score_metric(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("draft " * 30)
+        llm = _recording_llm_for_happy_path(draft_text="draft " * 30)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
         )
         result = run(ctx, deps)
-        # Deterministic path auto-passes at score 8.
+        # Real 路径以 score 8 通过 review_gate。
         assert result.metrics.get("score") == 8
         assert result.metrics.get("retry_count") == 1
 
@@ -311,7 +372,8 @@ class TestRetryLoop:
 class TestWorkflowResultShape:
     def test_completed_status(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
@@ -323,7 +385,8 @@ class TestWorkflowResultShape:
 
     def test_chunks_are_a_tuple(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
@@ -335,7 +398,8 @@ class TestWorkflowResultShape:
 
     def test_metrics_have_score_and_retry_count(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
@@ -347,7 +411,8 @@ class TestWorkflowResultShape:
 
     def test_artifacts_include_draft_path(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
@@ -359,43 +424,85 @@ class TestWorkflowResultShape:
 
 
 # ---------------------------------------------------------------------------
-# Tests: DeterministicProseClient integration
+# Tests: plan_chapter LLM-driven behavior (per 2026-07-14)
 # ---------------------------------------------------------------------------
 
 
-class TestDeterministicIntegration:
-    def test_deterministic_does_not_invoke_llm(self, tmp_path: Path) -> None:
-        (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        # Use the real DeterministicProseClient (no fake).
-        deps = production_deps()
-        deps.prose_client = DeterministicProseClient()
-        assert deps.prose_client.name == "deterministic"
-        ctx = EngineContext(
-            user_input="/创作 1.1",
-            project_root=tmp_path,
-            project_state="S2",
-        )
-        result = run(ctx, deps)
-        # The deterministic path never makes an LLM call.
-        assert result.status == "completed"
-        # The resulting draft must be ≥ 200 chars (per prose-llm spec).
-        draft_path = result.artifacts["draft_path"]
-        assert len(draft_path.read_text(encoding="utf-8")) >= 200
+class TestPlanChapterLLM:
+    def test_plan_chapter_node_raises_when_deterministic(self, tmp_path: Path) -> None:
+        """deterministic prose_client 调 plan_chapter 必须 raise。
 
-    def test_deterministic_auto_passes_review(self, tmp_path: Path) -> None:
-        (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
+        单独测 ``_plan_chapter_node`` 节点,不通过 graph invoke。注入
+        ``DeterministicProseClient`` 后直接调节点函数;期望 RuntimeError,
+        其 message 提示用户配 ``WRITER_API_KEY``。
+        """
+        from writer.llm.prose import DeterministicProseClient
+        from writer.workflows.write_chapter import (
+            _plan_chapter_node,
+            _reset_deps,
+            _set_deps,
+        )
+
         deps = production_deps()
         deps.prose_client = DeterministicProseClient()
-        ctx = EngineContext(
-            user_input="/创作 1.1",
-            project_root=tmp_path,
-            project_state="S2",
+        state = {
+            "chapter_id": "1.1",
+            "task": "/创作 1.1",
+            "requirements": [],
+            "context": {"canon_block": "正典", "history_block": "前情"},
+            "trace": [],
+        }
+        _set_deps(deps)
+        try:
+            with pytest.raises(RuntimeError, match="plan_chapter 需要真实 LLM"):
+                _plan_chapter_node(state)  # type: ignore[arg-type]
+        finally:
+            _reset_deps()
+
+    def test_plan_chapter_node_invokes_prose_client(self, tmp_path: Path) -> None:
+        """real 模式下 plan_chapter 节点调 LLM 一次,plan 字段写入返回值。
+
+        单独测 ``_plan_chapter_node`` + ``_call_plan_chapter``,不通过
+        graph invoke。注入 fake LLM,断言 prose_client.generate_text 被
+        调一次且 plan 字段被写为 LLM 返回的散文。
+        """
+        from writer.workflows.write_chapter import (
+            _plan_chapter_node,
+            _reset_deps,
+            _set_deps,
         )
-        result = run(ctx, deps)
-        # Deterministic review always passes at score 8.
-        assert result.metrics.get("score") == 8
-        # No retries: the loop only runs once.
-        assert result.metrics.get("retry_count") == 1
+
+        llm = _RecordingChatModel()
+        llm.response_factory = lambda: _build_fake_prose_response(
+            "本章核心冲突:主角与对手的路线分歧"
+        )
+        deps = production_deps()
+        deps.prose_client = RealProseClient(llm=llm)
+        deps.review_llm = llm
+        state = {
+            "chapter_id": "1.1",
+            "task": "/创作 1.1",
+            "requirements": ["突出冲突", "结尾留钩"],
+            "context": {
+                "canon_block": "正典片段",
+                "history_block": "前情片段",
+            },
+            "trace": [],
+        }
+        _set_deps(deps)
+        try:
+            new_state = _plan_chapter_node(state)  # type: ignore[arg-type]
+        finally:
+            _reset_deps()
+
+        assert "plan" in new_state
+        assert "主角与对手" in new_state["plan"]
+        assert new_state["trace"][-1] == "plan_chapter"
+        # LLM 确实被调用了一次,且 system 来自 CHAPTER_PLAN_TEMPLATE。
+        assert len(llm.plan_calls) == 1
+        assert "规划节点" in llm.plan_calls[0]["system"]
+        assert "chapter_id=1.1" in llm.plan_calls[0]["user"]
+        assert "突出冲突" in llm.plan_calls[0]["user"]
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +513,8 @@ class TestDeterministicIntegration:
 class TestArgsIntegration:
     def test_chapter_id_extracted_from_user_input(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 2.3 突出冲突",
             project_root=tmp_path,
@@ -418,25 +526,26 @@ class TestArgsIntegration:
 
     def test_requirements_passed_to_prose_client(self, tmp_path: Path) -> None:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1 突出冲突 结尾留钩",
             project_root=tmp_path,
             project_state="S2",
         )
         run(ctx, deps)
-        # The plan is built with the requirements; the prose client
-        # is called with system+user prompts that include them.
-        # We can't easily inspect the exact prompt without the graph
-        # internals, but the call itself must succeed.
-        # Verify the prose client was called.
-        assert deps.prose_client.generate_text.called
+        # Real 路径：plan_chapter 真的被 LLM 调过且 user prompt 含 requirements。
+        assert len(llm.plan_calls) == 1
+        user = llm.plan_calls[0]["user"]
+        assert "突出冲突" in user
+        assert "结尾留钩" in user
 
     def test_rewrite_flag_triggers_extra_loop(self, tmp_path: Path) -> None:
         # When the user input contains "回流" or "重写", the
         # review_gate forces a rewrite (independent of LLM score).
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
-        deps = _make_deps_with_prose("a" * 300)
+        llm = _recording_llm_for_happy_path(draft_text="a" * 300)
+        deps = _make_deps_with_real_prose(llm)
         ctx = EngineContext(
             user_input="/创作 1.1 请回流重写",
             project_root=tmp_path,

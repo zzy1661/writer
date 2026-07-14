@@ -146,6 +146,32 @@ INIT_BRIEF_TEMPLATE: ChatPromptTemplate = ChatPromptTemplate.from_messages(
 
 
 # ---------------------------------------------------------------------------
+# Chapter plan template — used by write_chapter.plan_chapter node
+# (real-only mode per 2026-07-14 plan)
+# ---------------------------------------------------------------------------
+
+CHAPTER_PLAN_TEMPLATE: ChatPromptTemplate = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            AGENT_IDENTITY_STORY
+            + "\n\n你是长篇小说写作规划节点。基于正典与前情,为本章产出"
+            "**自由散文式的章节计划**(不是正文)。计划应包含:核心冲突、"
+            "本章走向、关键转折点、与前情伏笔的呼应。不要写正文段落。",
+        ),
+        (
+            "human",
+            "chapter_id={chapter_id}\n"
+            "task={task}\n"
+            "requirements={requirements}\n"
+            "正典: {canon_block}\n"
+            "前情: {history_block}",
+        ),
+    ]
+)
+
+
+# ---------------------------------------------------------------------------
 # Deterministic fallback chapter lists — used when LLM is unavailable
 # ---------------------------------------------------------------------------
 
@@ -185,6 +211,7 @@ FALLBACK_OUTLINE_CHAPTERS: dict[str, list[str]] = {
 
 
 __all__ = [
+    "CHAPTER_PLAN_TEMPLATE",
     "FALLBACK_OUTLINE_CHAPTERS",
     "INIT_BRIEF_TEMPLATE",
     "OUTLINE_TEMPLATE_HISTORY",

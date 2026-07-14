@@ -2,9 +2,11 @@
 
 > **2026-07-14 重要修订**(覆盖 2026-07-09 修订):本文档原描述基于 LangGraph `StateGraph` 的章节写作主图(`plan_outline` → `write_chapter` → `proofread` → `history_check` → `review_gate`)。截至 2026-07-09 (`real-writing-pipeline` PR2 apply),`write_chapter` **已实装**为 LangGraph 5 节点图 `prep_context → plan_chapter → draft_chapter → proofread → review_gate → (rewrite | persist_outputs)`(代码 `src/writer/workflows/write_chapter.py`);`review_chapter` 仍为占位 stub,等 PR3 用同模式替换。
 >
+> **2026-07-14 二次修订**: `plan_chapter` 节点由纯确定性 beats 模板升级为 LLM 驱动的自由散文式计划。Deterministic 模式(`prose_client.name == "deterministic"`)严格拒绝,通过 raise `RuntimeError` 强制用户配置 `WRITER_API_KEY`。REPL 启动时检测 prose_client 是 deterministic 时打印软警告。
+>
 > **节点当前实现**(per `build_writer_graph()`):
 > - `prep_context` — 调 `writer.prompts.context.prep_context` 组装 canon block;**纯确定性**
-> - `plan_chapter` — 组装 beats(开场/冲突/高潮/收束);**纯确定性**
+> - `plan_chapter` — LLM 自由散文式计划(deterministic 模式 raise RuntimeError 要求 WRITER_API_KEY);调 `deps.prose_client.generate_text` + `prompts.agents.CHAPTER_PLAN_TEMPLATE`
 > - `draft_chapter` — 调 `deps.prose_client.generate_text`(real 路径)或确定性模板(deterministic 路径)
 > - `proofread` — 长度 lint;**纯确定性**
 > - `review_gate` — `deps.prose_client.name == "deterministic"` 路径以 score 8 自动通过;real 路径用 `ReviewVerdict` 结构化输出 + `deps.review_llm` 注入,阈值 `REVIEW_THRESHOLD=7`,未通过则回到 `draft_chapter`(`max_retries=2`)

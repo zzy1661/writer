@@ -167,11 +167,43 @@ class TestRunWorkflowDispatch:
         # produces a ``WorkflowResult`` (the PR1 contract). The
         # underlying workflow is a stub in PR1, but the adapter
         # converts its output to the structured shape.
+        from langchain_core.language_models import BaseChatModel
+        from langchain_core.messages import AIMessage
+        from langchain_core.outputs import ChatGeneration, ChatResult
+
         from writer.engine.context import EngineContext
         from writer.engine.deps import production_deps
+        from writer.llm.prose import RealProseClient
+
+        class _RecordingChatModel(BaseChatModel):
+            class Config:
+                arbitrary_types_allowed = True
+
+            @property
+            def _llm_type(self) -> str:
+                return "recording-fake"
+
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[override]
+                joined = "\n".join(m.content or "" for m in messages)
+                content = (
+                    '{"pass": true, "score": 8, "concerns": []}'
+                    if "审核节点" in joined
+                    else "stub real draft content for workflow_result test"
+                )
+                return ChatResult(
+                    generations=[ChatGeneration(message=AIMessage(content=content))]
+                )
+
+            async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[override]
+                return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+        deps = production_deps()
+        llm = _RecordingChatModel()
+        deps.prose_client = RealProseClient(llm=llm)
+        deps.review_llm = llm
 
         result = run_workflow(
-            "write_chapter", EngineContext(user_input="/创作 1.1"), production_deps()
+            "write_chapter", EngineContext(user_input="/创作 1.1"), deps
         )
         assert isinstance(result, WorkflowResult)
         # PR1: write_chapter returns status="completed" so the engine

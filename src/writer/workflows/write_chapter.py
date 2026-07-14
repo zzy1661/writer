@@ -34,6 +34,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from writer.llm.structured import invoke_structured_json
 from writer.project.chapter_summaries import append_summary
+from writer.prompts.agents import CHAPTER_PLAN_TEMPLATE
 from writer.prompts.context import prep_context
 from writer.workflows.params import extract_write_chapter_args
 from writer.workflows.types import ReviewVerdict, WorkflowResult
@@ -176,27 +177,33 @@ def _prep_context_node(state: WriterState) -> WriterState:
 
 
 def _plan_chapter_node(state: WriterState) -> WriterState:
-    """为该章节组装一个确定性的 beat 列表。
+    """为本章产出 LLM 驱动的自由散文式计划。
 
-    beat 列表是 LLM 在 ``_draft_chapter_node`` 中用作大纲的结构化
-    字符串。我们不在这里调用 LLM —— 计划小且确定性，因此相同输入
-    始终产生相同计划（对测试 + 确定性回退都好）。
+    自 2026-07-14（real-writing-pipeline PR3）起,本节点调
+    :func:`_call_plan_chapter` 让 LLM 自由生成一段计划散文。计划字段
+    是 opaque 字符串——下游 ``_draft_chapter_node`` 不读它,所以格式是
+    自由散文还是 beats 对下游透明。
+
+    Deterministic 模式（``deps.prose_client.name == "deterministic"``）
+    严格拒绝:raise RuntimeError 强制用户配置 ``WRITER_API_KEY``。
+    不再保留确定性回退分支,因为我们不再相信无 LLM 也能产生有意义的
+    章节计划。
     """
-    requirements = state.get("requirements", []) or []
-    requirement_block = (
-        "\n".join(f"- {r}" for r in requirements)
-        if requirements
-        else "- 沿正典设定推进本章"
+    deps = _get_deps()
+    context = state.get("context", {})
+    canon_block = (
+        context.get("canon_block", "") if isinstance(context, dict) else ""
     )
-    plan = (
-        f"chapter_id: {state['chapter_id']}\n"
-        f"task: {state['task']}\n"
-        f"requirements:\n{requirement_block}\n"
-        f"beats:\n"
-        f"- 开场：交代本章情境与人物位置\n"
-        f"- 冲突：制造或推进本章主要矛盾\n"
-        f"- 高潮：关键抉择或转折\n"
-        f"- 收束：留下本章钩子, 衔接下一章\n"
+    history_block = (
+        context.get("history_block", "") if isinstance(context, dict) else ""
+    )
+    plan = _call_plan_chapter(
+        chapter_id=state["chapter_id"],
+        task=state["task"],
+        requirements=list(state.get("requirements", []) or []),
+        canon_block=canon_block,
+        history_block=history_block,
+        prose_client=deps.prose_client,
     )
     trace = [*state.get("trace", []), "plan_chapter"]
     return {"plan": plan, "trace": trace}
@@ -392,6 +399,57 @@ def _get_deps() -> EngineDeps:
 # ---------------------------------------------------------------------------
 # Prose + review 辅助函数
 # ---------------------------------------------------------------------------
+
+
+def _call_plan_chapter(
+    *,
+    chapter_id: str,
+    task: str,
+    requirements: list[str],
+    canon_block: str,
+    history_block: str,
+    prose_client: Any,
+) -> str:
+    """为 ``_plan_chapter_node`` 调 LLM 生成自由散文式章节计划。
+
+    返回 LLM 产出的整段计划文本。下游 ``_draft_chapter_node`` 不解析
+    此字符串——它是 opaque 散文,只在 trace 与调试输出中暴露。
+
+    Deterministic 模式严格拒绝:per 2026-07-14 决定,无 LLM 时
+    ``plan_chapter`` 必须 raise 而不是退化到模板。目的是强制用户
+    配置 ``WRITER_API_KEY`` 才能跑 ``/创作``。
+
+    ``prose_client`` 通过 kw-only 参数注入,让直接调用本 helper 的
+    测试 (例如 ``test_plan_chapter_node_invokes_prose_client`` /
+    ``test_plan_chapter_node_raises_when_deterministic``) 不必操心
+    ``_set_deps / _reset_deps`` 仪式。生产路径始终通过
+    ``_plan_chapter_node`` → ``_get_deps().prose_client`` 注入。
+    """
+    if prose_client is None or getattr(prose_client, "name", "") == "deterministic":
+        msg = (
+            "plan_chapter 需要真实 LLM；请设置 WRITER_API_KEY 环境变量后重启"
+        )
+        raise RuntimeError(msg)
+
+    requirement_block = (
+        "\n".join(f"- {r}" for r in requirements)
+        if requirements
+        else "（无）"
+    )
+    messages = CHAPTER_PLAN_TEMPLATE.format_messages(
+        chapter_id=chapter_id,
+        task=task,
+        requirements=requirement_block,
+        canon_block=canon_block or "（无）",
+        history_block=history_block or "（无）",
+    )
+    system = messages[0].content
+    user = messages[1].content
+    try:
+        return prose_client.generate_text(system=system, user=user)
+    except Exception as exc:  # noqa: BLE001
+        msg = f"plan_chapter LLM 调用失败: {exc}"
+        raise RuntimeError(msg) from exc
 
 
 def _call_prose_client(

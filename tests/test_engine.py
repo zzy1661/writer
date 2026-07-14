@@ -137,6 +137,55 @@ def _workspace_ctx(text: str, root: Path) -> EngineContext:
     )
 
 
+def _deps_with_real_prose() -> EngineDeps:
+    """构造带真实 LLM 假端的 ``EngineDeps``（用于测试 ``write_chapter``）。
+
+    自 2026-07-14 起,``plan_chapter`` 节点严格 LLM 驱动。本 helper 让
+    不配置真实 API key 的 CI 也能跑通整个 5 节点图 —— 把
+    ``RealProseClient`` 与 ``review_llm`` 同时指向同一个
+    :class:`_RecordingChatModel`,后者按消息内容返回 plan / draft /
+    review verdict。
+    """
+    from langchain_core.language_models import BaseChatModel
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    from writer.llm.prose import RealProseClient
+
+    class _RecordingChatModel(BaseChatModel):
+        call_count: int = 0
+
+        class Config:
+            arbitrary_types_allowed = True
+
+        @property
+        def _llm_type(self) -> str:
+            return "recording-fake"
+
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[override]
+            self.call_count += 1
+            # ``invoke_structured_json`` 在 messages 前置一个
+            # ``_json_contract_message`` 系统消息,所以「审核节点」不一定
+            # 在 ``messages[0]``。扫描所有消息体。
+            joined = "\n".join(m.content or "" for m in messages)
+            if "审核节点" in joined:
+                content = '{"pass": true, "score": 8, "concerns": []}'
+            else:
+                content = "stub real draft content for write_chapter engine test"
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content=content))]
+            )
+
+        async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):  # type: ignore[override]
+            return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    deps = production_deps()
+    llm = _RecordingChatModel()
+    deps.prose_client = RealProseClient(llm=llm)
+    deps.review_llm = llm
+    return deps
+
+
 def test_engine_yields_done_for_answer() -> None:
     deps = production_deps()
 
@@ -151,7 +200,7 @@ def test_engine_yields_done_for_answer() -> None:
 
 
 def test_engine_yields_done_for_workflow(tmp_path: Path) -> None:
-    deps = production_deps()
+    deps = _deps_with_real_prose()
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
 
@@ -346,7 +395,7 @@ def test_engine_dispatches_toc_directive(tmp_path: Path) -> None:
 
 def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
     """``start_workflow`` must dispatch to the registered LangGraph workflow."""
-    deps = production_deps()
+    deps = _deps_with_real_prose()
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
 
@@ -400,7 +449,7 @@ def test_production_deps_includes_all_registered_workflows() -> None:
     """production_deps() must register every workflow in writer.workflows.WORKFLOWS."""
     from writer.workflows import WORKFLOWS, WorkflowResult
 
-    deps = production_deps()
+    deps = _deps_with_real_prose()
 
     for name in WORKFLOWS:
         result = deps.run_workflow(name, _ctx("ignored"))

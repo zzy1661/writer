@@ -357,6 +357,31 @@ async def _run_engine(
 NO_HISTORY: object = object()
 
 
+def _warn_deterministic_prose_client(session: EngineSession) -> None:
+    """REPL 启动时检测 prose_client 是否为 deterministic 模式。
+
+    Per 2026-07-14：``plan_chapter`` 在 deterministic 模式下严格拒绝
+    (raise RuntimeError) 以强制用户配 ``WRITER_API_KEY``。为避免用户
+    跑到命令才发现,REPL 启动时打印一次性软警告。
+
+    Real 模式下静默。``prose_client`` 为 ``None`` 时也静默
+    （生产装配始终填充字段,``None`` 通常是手写 stub 的测试 stub,
+    不必用户面对噪音）。
+    """
+    engine = session.engine
+    if engine is None:
+        return
+    prose_client = engine.deps.prose_client
+    if prose_client is None:
+        return
+    if getattr(prose_client, "name", "") != "deterministic":
+        return
+    console.print(
+        "[yellow]⚠ /创作 /审核 工作流需要真实 LLM；当前未配置 WRITER_API_KEY，"
+        "调用将失败。请设置后重启 REPL。[/yellow]"
+    )
+
+
 def _resolve_history_file(
     history_file: Path | None | object = None,
 ) -> Path | None:
@@ -470,6 +495,9 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
     # 一个 EngineSession 撑起 REPL 整个生命周期 —— 持有 session_id、
     # deps、轮次历史与待处理 Interrupt 状态。
     engine_session = EngineSession()
+    # Per 2026-07-14:REPL 启动时检查 prose_client 名,deterministic 模式
+    # 软警告用户 ``/创作`` / ``/审核`` 将不可用。不阻断 REPL 启动。
+    _warn_deterministic_prose_client(engine_session)
     if discovered is not None:
         engine_session.set_project_root(discovered)
         console.print(

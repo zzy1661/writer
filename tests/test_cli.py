@@ -373,6 +373,34 @@ def test_run_repl_handles_eof() -> None:
     assert "已退出 writer" in result.stdout
 
 
+def test_repl_warns_when_deterministic_prose_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REPL 启动时若 ``prose_client.name == "deterministic"`` 必须打印警告。
+
+    Per 2026-07-14:REPL 启动时检测 prose_client,deterministic 模式下
+    提示用户 ``/创作`` / ``/审核`` 将不可用。这是软警告,不阻断 REPL。
+    """
+    from writer.llm.prose import DeterministicProseClient
+    from writer.session import EngineSession
+
+    # ``production_deps`` 在没有 API key 时默认装配 Deterministic
+    # 客户端（conftest 已 scrube env vars）—— 直接断言 ``run_repl``
+    # 的 stdout 包含软警告。
+    result = runner.invoke(app, input="/退出\n")
+
+    assert result.exit_code == 0
+    assert "/创作" in result.stdout
+    assert "/审核" in result.stdout
+    # 软警告文案必须出现（前半句）。
+    assert "需要真实 LLM" in result.stdout
+    # 烟雾测试:构造 DeterministicProseClient 仍可作为 Protocol 实现被
+    # EngineSession 装配的 deps 接受 —— 保证启动预检的判定契约稳定。
+    assert DeterministicProseClient().name == "deterministic"
+    # EngineSession 也在 deps 上承载 prose_client 字段。
+    assert EngineSession().engine.deps.prose_client is not None
+
+
 # ---------------------------------------------------------------------------
 # /init (only the brief 形式;flag 形式已于 2026-07-14 删除)
 # ---------------------------------------------------------------------------
