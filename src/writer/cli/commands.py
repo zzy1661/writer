@@ -17,7 +17,7 @@ from rich.table import Table
 from writer import __version__
 from writer.cli.repl import console, run_repl
 from writer.config import get_settings
-from writer.project import create_new_workspace, normalize_genres, prompt_genres
+from writer.project import create_new_workspace
 
 app = typer.Typer(
     name="writer",
@@ -72,34 +72,19 @@ def new_project_cmd(
         bool,
         typer.Option("--force", help="允许覆盖缺失的初始化文件"),
     ] = False,
-    genre: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--genre",
-            "-g",
-            help="小说题材，可重复指定或逗号分隔（历史 / 言情 / 玄幻 / …）",
-        ),
-    ] = None,
 ) -> None:
     """创建带 ``.writer/`` 元数据与 ``创意/`` 目录的新书项目。"""
-    selected = normalize_genres(genre) if genre else prompt_genres(console)
-
     try:
         workspace = create_new_workspace(
             name,
             directory,
             force=force,
-            genres=selected,
         )
     except (FileExistsError, ValueError) as exc:
         console.print(f"[red]错误：{exc}[/red]")
         raise typer.Exit(code=1) from exc
 
-    from writer.project.genre import format_genre_line
-
-    label = format_genre_line(selected) or "other"
     console.print(f"[green]已创建新书项目：[/green]{workspace.root}")
-    console.print(f"题材：{label}")
     for path in workspace.created_files:
         console.print(f"  - {path}")
     console.print(

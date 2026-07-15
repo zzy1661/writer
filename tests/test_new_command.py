@@ -25,11 +25,12 @@ def test_create_new_workspace_scaffold(tmp_path: Path) -> None:
     assert "题材: 历史, 言情" in agent
 
 
-def test_new_command_with_genre_flags(tmp_path: Path, monkeypatch) -> None:
+def test_new_command_creates_folder_only(tmp_path: Path, monkeypatch) -> None:
+    """``writer new`` 仅创建文件夹，不再暴露 ``--genre`` 参数。"""
     monkeypatch.setenv("WRITER_API_KEY", "")
     result = runner.invoke(
         app,
-        ["new", "我的新书", "--dir", str(tmp_path), "-g", "玄幻", "-g", "科幻"],
+        ["new", "我的新书", "--dir", str(tmp_path)],
     )
 
     assert result.exit_code == 0
