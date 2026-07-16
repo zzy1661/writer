@@ -119,7 +119,7 @@ def test_shipped_directives_reference_files_via_at_reference() -> None:
 def test_shipped_directives_have_real_descriptions() -> None:
     directives = discover_shipped_directives()
     expected = {
-        "/大纲": "生成或查看大纲",
+        "/大纲": "根据 AGENT.md 题材与架构方法生成大纲",
         "/目录": "生成或查看章节目录",
         "/人物": "创建/更新角色卡(写入 人物/<角色名>.md, 包含八项固定字段)",
     }

@@ -67,6 +67,13 @@ _MANUSCRIPT_DIRS = (
 CURRENT_STATE_SECTION_HEADER = "## 当前状态"
 
 
+#: ``架构方法:`` 行写入 ``AGENT.md`` 的默认值（per 2026-07-16 用户选
+#: 择「雪花法」作为默认），与 :func:`render_agent_file` 的默认参数对齐。
+#: ``/大纲`` directive 通过 ``safe_read_file`` 读 AGENT.md，缺失该行
+#: 时回退到此值。
+DEFAULT_ARCHITECTURE_METHOD: str = "雪花法"
+
+
 def safe_cwd() -> Path | None:
     """返回当前工作目录；不可用时返回 ``None``。"""
 
@@ -303,13 +310,6 @@ def read_genre_from_agent(agent_md: Path) -> str:
 _GENRE_LINE_PREFIXES: tuple[str, ...] = ("- ", "* ", "· ", "• ")
 
 
-#: ``架构方法:`` 行写入 ``AGENT.md`` 的默认值（per 2026-07-16 用户选
-#: 择「雪花法」作为默认），与 ``render_agent_file`` 的默认参数对齐。
-#: ``/大纲`` directive 通过 ``safe_read_file`` 读 AGENT.md，缺失该
-#: 行时回退到此值。
-DEFAULT_ARCHITECTURE_METHOD: str = "雪花法"
-
-
 def _strip_genre_line_prefix(stripped: str) -> str:
     """去掉 ``题材:`` / ``架构方法:`` 行的可选 Markdown 列表前缀。"""
 
@@ -544,4 +544,6 @@ __all__ = [
     "render_agent_file",
     "safe_cwd",
     "update_agent_genre_line",
+    "update_agent_architecture_method_line",
+    "DEFAULT_ARCHITECTURE_METHOD",
 ]

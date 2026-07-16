@@ -34,7 +34,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from writer.project.genre import format_genre_line, normalize_genres, primary_genre
-from writer.project.state import ProjectState, render_agent_file
+from writer.project.state import (
+    DEFAULT_ARCHITECTURE_METHOD,
+    ProjectState,
+    render_agent_file,
+)
 
 _WRITER_CONFIG_TEMPLATE = """\
 # 项目级 LLM 配置（优先级高于 .env）
@@ -86,6 +90,7 @@ def create_workspace(
     force: bool = False,
     genre: str = "other",
     genres: list[str] | None = None,
+    architecture_method: str = DEFAULT_ARCHITECTURE_METHOD,
     with_ideas_dir: bool = False,
     with_writer_meta: bool = False,
     seed_agents: bool = False,
@@ -94,6 +99,7 @@ def create_workspace(
     genre_list = normalize_genres(genres if genres is not None else [genre])
     canonical_genre = primary_genre(genre_list)
     root = base_dir / project_name
+    method_label = (architecture_method or "").strip() or DEFAULT_ARCHITECTURE_METHOD
 
     if root.exists() and not force:
         msg = (
@@ -121,6 +127,7 @@ def create_workspace(
             project_name,
             ProjectState.INITIALIZED,
             genre=format_genre_line(genre_list) or canonical_genre,
+            architecture_method=method_label,
         ),
         root / "README.md": f"# {project_name}\n\n长篇小说项目工作区。\n",
         root / "大纲" / "一句话创意.md": "# 一句话创意\n\n",
@@ -162,11 +169,16 @@ def create_new_workspace(
     *,
     force: bool = False,
     genres: list[str] | None = None,
+    architecture_method: str = DEFAULT_ARCHITECTURE_METHOD,
 ) -> NovelWorkspace:
     """创建带 ``创意/`` 和 ``.writer/`` 元数据的小说项目。
 
     ``.writer/`` 元数据脚手架同时镜像 4 个内置 directives 与
     4 个内置 agents（per ``fea-agent-mirror``）。
+
+    ``architecture_method``（per 2026-07-16）会写入 ``AGENT.md`` 的
+    ``架构方法:`` 行，默认雪花法。下游 ``/大纲`` directive 通过
+    ``safe_read_file`` 读取并按方法选择 outline 模板。
     """
 
     return create_workspace(
@@ -174,6 +186,7 @@ def create_new_workspace(
         base_dir,
         force=force,
         genres=genres,
+        architecture_method=architecture_method,
         with_ideas_dir=True,
         with_writer_meta=True,
         seed_agents=True,

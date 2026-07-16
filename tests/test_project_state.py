@@ -186,10 +186,214 @@ def test_update_agent_genre_line_preserves_basic_requirements(tmp_path: Path) ->
 
 def test_update_agent_genre_line_noop_when_unchanged(tmp_path: Path) -> None:
     """相同 ``题材:`` 值再调用应返回 ``False``（no-op）。"""
-
     from writer.project.state import update_agent_genre_line
 
     workspace = create_workspace("novel", tmp_path, genre="历史")
     agent = workspace.root / "AGENT.md"
 
     assert update_agent_genre_line(agent, ["历史"]) is False
+
+
+# ---------------------------------------------------------------------------
+# 架构方法: AGENT.md 元数据契约（per 2026-07-16）
+# ---------------------------------------------------------------------------
+
+
+def test_render_agent_file_default_architecture_method_is_snowflake() -> None:
+    """``render_agent_file`` 默认写 ``架构方法: 雪花法`` 行（per 2026-07-16）。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file("测试项目", ProjectState.INITIALIZED)
+    assert "- 架构方法: 雪花法" in text
+
+
+def test_render_agent_file_custom_architecture_method() -> None:
+    """显式传入 ``architecture_method`` 时,AGENT.md 写入该值。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file(
+        "测试项目",
+        ProjectState.INITIALIZED,
+        genre="玄幻",
+        architecture_method="三步八段式",
+    )
+    assert "- 题材: 玄幻" in text
+    assert "- 架构方法: 三步八段式" in text
+
+
+def test_create_workspace_defaults_to_snowflake(tmp_path: Path) -> None:
+    """新建项目 AGENT.md 默认含 ``架构方法: 雪花法``。"""
+
+    workspace = create_workspace("novel", tmp_path)
+    text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 架构方法: 雪花法" in text
+
+
+def test_create_workspace_accepts_custom_architecture_method(tmp_path: Path) -> None:
+    """``create_workspace(..., architecture_method=...)`` 写入对应 AGENT.md。"""
+
+    workspace = create_workspace(
+        "novel",
+        tmp_path,
+        architecture_method="人物弧光架构",
+    )
+    text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 架构方法: 人物弧光架构" in text
+
+
+def test_read_architecture_method_falls_back_to_snowflake(tmp_path: Path) -> None:
+    """AGENT.md 缺失或没有 ``架构方法:`` 行时,回退 ``雪花法``。"""
+
+    from writer.project.state import (
+        DEFAULT_ARCHITECTURE_METHOD,
+        read_architecture_method_from_agent,
+    )
+
+    # 文件不存在
+    missing = tmp_path / "no_agent.md"
+    assert read_architecture_method_from_agent(missing) == DEFAULT_ARCHITECTURE_METHOD
+
+    # 文件存在但没该行
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original = agent.read_text(encoding="utf-8")
+    # 手动剥离 ``架构方法:`` 行
+    stripped = "\n".join(
+        line for line in original.splitlines() if not line.startswith("- 架构方法:")
+    )
+    agent.write_text(stripped, encoding="utf-8")
+    assert read_architecture_method_from_agent(agent) == DEFAULT_ARCHITECTURE_METHOD
+
+
+def test_read_architecture_method_parses_bare_and_list_forms(tmp_path: Path) -> None:
+    """``架构方法:`` 行兼容 ``- 题材:`` 同样的 list 前缀规则。"""
+
+    from writer.project.state import read_architecture_method_from_agent
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+
+    # bare 形式（手写）
+    original = agent.read_text(encoding="utf-8")
+    text = original.replace("- 架构方法: 雪花法", "架构方法: 三幕结构")
+    agent.write_text(text, encoding="utf-8")
+    assert read_architecture_method_from_agent(agent) == "三幕结构"
+
+    # - list 前缀形式
+    text = original.replace("- 架构方法: 雪花法", "- 架构方法: 英雄之旅")
+    agent.write_text(text, encoding="utf-8")
+    assert read_architecture_method_from_agent(agent) == "英雄之旅"
+
+    # * list 前缀形式
+    text = original.replace("- 架构方法: 雪花法", "* 架构方法: 布莱克节拍表")
+    agent.write_text(text, encoding="utf-8")
+    assert read_architecture_method_from_agent(agent) == "布莱克节拍表"
+
+
+def test_update_agent_architecture_method_line_inserts_when_missing(
+    tmp_path: Path,
+) -> None:
+    """AGENT.md 没有该行时,插入到第一个 ``## ...`` 二级标题之前。"""
+
+    from writer.project.state import update_agent_architecture_method_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    agent.write_text(
+        "# 旧项目\n\n## 目录约定\n\n- 大纲/\n",
+        encoding="utf-8",
+    )
+
+    changed = update_agent_architecture_method_line(agent, "三步八段式")
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert "- 架构方法: 三步八段式" in text
+    # 保留其他内容
+    assert "# 旧项目" in text
+    assert "## 目录约定" in text
+
+
+def test_update_agent_architecture_method_line_replaces_existing(
+    tmp_path: Path,
+) -> None:
+    """AGENT.md 已含该行时,就地替换而非新增第二条。"""
+
+    from writer.project.state import update_agent_architecture_method_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original_count = (
+        agent.read_text(encoding="utf-8").count("- 架构方法:")
+    )
+    assert original_count == 1
+
+    changed = update_agent_architecture_method_line(agent, "英雄之旅")
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert text.count("- 架构方法:") == 1
+    assert "- 架构方法: 英雄之旅" in text
+
+
+def test_update_agent_architecture_method_line_preserves_genre_line(
+    tmp_path: Path,
+) -> None:
+    """更新架构方法不应破坏 ``题材:`` 行（保留其它元数据）。"""
+
+    from writer.project.state import update_agent_architecture_method_line
+
+    workspace = create_workspace("novel", tmp_path, genre="玄幻")
+    agent = workspace.root / "AGENT.md"
+    # 先用 append_agent_requirements 模拟附加段
+    from writer.project.state import append_agent_requirements
+
+    append_agent_requirements(agent, "风格: 轻松")
+
+    changed = update_agent_architecture_method_line(agent, "三明治架构")
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert "- 题材: 玄幻" in text
+    assert "- 架构方法: 三明治架构" in text
+    assert "## 基本要求" in text
+    assert "风格: 轻松" in text
+
+
+def test_update_agent_architecture_method_line_empty_is_noop(
+    tmp_path: Path,
+) -> None:
+    """空字符串 / 纯空白输入视作 no-op,不写也不删。"""
+
+    from writer.project.state import update_agent_architecture_method_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    before = agent.read_text(encoding="utf-8")
+
+    assert update_agent_architecture_method_line(agent, "") is False
+    assert update_agent_architecture_method_line(agent, "   ") is False
+    assert agent.read_text(encoding="utf-8") == before
+
+
+def test_refresh_agent_file_preserves_architecture_method(tmp_path: Path) -> None:
+    """状态切换时, ``refresh_agent_file`` 保留 ``架构方法:`` 行不被清空。"""
+
+    from writer.project.state import refresh_agent_file
+
+    workspace = create_workspace("novel", tmp_path)
+    # 手工把方法改为「三幕结构」
+    agent = workspace.root / "AGENT.md"
+    from writer.project.state import update_agent_architecture_method_line
+
+    update_agent_architecture_method_line(agent, "三幕结构")
+    # 触发状态变化 (S1 → S2 by writing 大纲)
+    (workspace.root / "大纲" / "大纲.md").write_text("x", encoding="utf-8")
+
+    refresh_agent_file(workspace.root)
+
+    text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 架构方法: 三幕结构" in text
+    assert "state: S2" in text
