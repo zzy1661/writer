@@ -397,3 +397,490 @@ def test_refresh_agent_file_preserves_architecture_method(tmp_path: Path) -> Non
     text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
     assert "- 架构方法: 三幕结构" in text
     assert "state: S2" in text
+
+
+# ---------------------------------------------------------------------------
+# 预计总字数 (per 2026-07-16 目录落地)
+# ---------------------------------------------------------------------------
+
+
+def test_render_agent_file_includes_total_words_when_set() -> None:
+    """``render_agent_file(..., total_words=...)`` 写入对应 ``预计总字数:`` 行。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file(
+        "测试项目",
+        ProjectState.INITIALIZED,
+        total_words=300000,
+    )
+    assert "- 预计总字数: 300000" in text
+    # 其它两行未传 → 不渲染
+    assert "预计总章数" not in text
+    assert "- 分卷:" not in text
+
+
+def test_render_agent_file_omits_total_words_when_none() -> None:
+    """``render_agent_file`` 默认不写 ``预计总字数:`` 行。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file("测试项目", ProjectState.INITIALIZED)
+    assert "预计总字数" not in text
+
+
+def test_render_agent_file_includes_total_chapters_and_volumes_when_set() -> None:
+    """三行新字段（字数 / 章数 / 分卷）一起传入时全部渲染。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file(
+        "测试项目",
+        ProjectState.HAS_TOC,
+        total_words=300000,
+        total_chapters=100,
+        volumes_text="卷一(40章)/卷二(30章)/卷三(30章)",
+    )
+    assert "- 预计总字数: 300000" in text
+    assert "- 预计总章数: 100" in text
+    assert "- 分卷: 卷一(40章)/卷二(30章)/卷三(30章)" in text
+
+
+def test_read_total_words_falls_back_to_none(tmp_path: Path) -> None:
+    """AGENT.md 缺失或没有 ``预计总字数:`` 行时,返回 ``None``。"""
+
+    from writer.project.state import read_total_words_from_agent
+
+    assert read_total_words_from_agent(tmp_path / "missing.md") is None
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    assert read_total_words_from_agent(agent) is None
+
+
+def test_read_total_words_parses_bare_and_list_forms(tmp_path: Path) -> None:
+    """``预计总字数:`` 行兼容 bare / ``- `` / ``* `` 前缀。"""
+
+    from writer.project.state import read_total_words_from_agent
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original = agent.read_text(encoding="utf-8")
+
+    text = original + "\n预计总字数: 300000\n"
+    agent.write_text(text, encoding="utf-8")
+    assert read_total_words_from_agent(agent) == 300000
+
+    text = original + "\n- 预计总字数: 500000\n"
+    agent.write_text(text, encoding="utf-8")
+    assert read_total_words_from_agent(agent) == 500000
+
+    text = original + "\n* 预计总字数: 1000000\n"
+    agent.write_text(text, encoding="utf-8")
+    assert read_total_words_from_agent(agent) == 1000000
+
+
+def test_read_total_words_returns_none_for_zero_or_unparseable(tmp_path: Path) -> None:
+    """``预计总字数: 0`` / ``预计总字数: abc`` / 空白值全部回退 ``None``。"""
+
+    from writer.project.state import read_total_words_from_agent
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original = agent.read_text(encoding="utf-8")
+
+    # 0 → None（无 0 字小说）
+    agent.write_text(original + "\n预计总字数: 0\n", encoding="utf-8")
+    assert read_total_words_from_agent(agent) is None
+
+    # 非数字 → None
+    agent.write_text(original + "\n预计总字数: thirty万\n", encoding="utf-8")
+    assert read_total_words_from_agent(agent) is None
+
+    # 空白值 → None
+    agent.write_text(original + "\n预计总字数:    \n", encoding="utf-8")
+    assert read_total_words_from_agent(agent) is None
+
+
+def test_update_agent_total_words_line_inserts_when_missing(tmp_path: Path) -> None:
+    """AGENT.md 没有该行时,插入到第一个 ``## ...`` 二级标题之前。"""
+
+    from writer.project.state import update_agent_total_words_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    agent.write_text(
+        "# 旧项目\n\n## 目录约定\n\n- 大纲/\n",
+        encoding="utf-8",
+    )
+
+    changed = update_agent_total_words_line(agent, 300000)
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert "- 预计总字数: 300000" in text
+    assert "# 旧项目" in text
+    assert "## 目录约定" in text
+
+
+def test_update_agent_total_words_line_replaces_existing(tmp_path: Path) -> None:
+    """AGENT.md 已含该行时,就地替换而非新增第二条。"""
+
+    from writer.project.state import update_agent_total_words_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    update_agent_total_words_line(agent, 300000)
+    assert agent.read_text(encoding="utf-8").count("- 预计总字数:") == 1
+
+    changed = update_agent_total_words_line(agent, 500000)
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert text.count("- 预计总字数:") == 1
+    assert "- 预计总字数: 500000" in text
+
+
+def test_update_agent_total_words_line_preserves_other_fields(tmp_path: Path) -> None:
+    """更新字数不应破坏 ``题材:`` / ``架构方法:`` / ``## 基本要求`` 等元数据。"""
+
+    from writer.project.state import (
+        append_agent_requirements,
+        update_agent_total_words_line,
+    )
+
+    workspace = create_workspace("novel", tmp_path, genre="玄幻")
+    agent = workspace.root / "AGENT.md"
+    append_agent_requirements(agent, "风格: 轻松")
+
+    changed = update_agent_total_words_line(agent, 800000)
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert "- 题材: 玄幻" in text
+    assert "- 架构方法: 雪花法" in text
+    assert "- 预计总字数: 800000" in text
+    assert "## 基本要求" in text
+    assert "风格: 轻松" in text
+
+
+def test_update_agent_total_words_line_zero_or_negative_is_noop(
+    tmp_path: Path,
+) -> None:
+    """``0`` / 负数 / ``None`` 视作无效输入,no-op。"""
+
+    from writer.project.state import update_agent_total_words_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    before = agent.read_text(encoding="utf-8")
+
+    assert update_agent_total_words_line(agent, 0) is False
+    assert update_agent_total_words_line(agent, -100) is False
+    assert update_agent_total_words_line(agent, None) is False
+    assert agent.read_text(encoding="utf-8") == before
+
+
+def test_update_agent_total_words_line_missing_file_is_noop(tmp_path: Path) -> None:
+    """AGENT.md 不存在时静默忽略,返回 ``False``,不抛异常。"""
+
+    from writer.project.state import update_agent_total_words_line
+
+    missing = tmp_path / "no_agent.md"
+    assert missing.exists() is False
+    assert update_agent_total_words_line(missing, 300000) is False
+
+
+# ---------------------------------------------------------------------------
+# 预计总章数 (per 2026-07-16 目录落地)
+# ---------------------------------------------------------------------------
+
+
+def test_render_agent_file_includes_total_chapters_when_set() -> None:
+    """``render_agent_file(..., total_chapters=...)`` 写入对应行。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file(
+        "测试项目",
+        ProjectState.INITIALIZED,
+        total_chapters=100,
+    )
+    assert "- 预计总章数: 100" in text
+
+
+def test_read_total_chapters_falls_back_to_none(tmp_path: Path) -> None:
+    """缺失或没有该行时,回退 ``None``。"""
+
+    from writer.project.state import read_total_chapters_from_agent
+
+    assert read_total_chapters_from_agent(tmp_path / "missing.md") is None
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    assert read_total_chapters_from_agent(agent) is None
+
+
+def test_read_total_chapters_parses_list_prefix(tmp_path: Path) -> None:
+    """兼容 bare / ``- `` 前缀。"""
+
+    from writer.project.state import read_total_chapters_from_agent
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original = agent.read_text(encoding="utf-8")
+
+    agent.write_text(original + "\n- 预计总章数: 120\n", encoding="utf-8")
+    assert read_total_chapters_from_agent(agent) == 120
+
+
+def test_read_total_chapters_returns_none_for_zero_or_unparseable(
+    tmp_path: Path,
+) -> None:
+    """``0`` / 非数字 / 空白 → ``None``。"""
+
+    from writer.project.state import read_total_chapters_from_agent
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original = agent.read_text(encoding="utf-8")
+
+    agent.write_text(original + "\n预计总章数: 0\n", encoding="utf-8")
+    assert read_total_chapters_from_agent(agent) is None
+
+    agent.write_text(original + "\n预计总章数: many\n", encoding="utf-8")
+    assert read_total_chapters_from_agent(agent) is None
+
+
+def test_update_agent_total_chapters_line_inserts_and_replaces(tmp_path: Path) -> None:
+    """插入与就地替换行为,等价 ``架构方法`` 行。"""
+
+    from writer.project.state import update_agent_total_chapters_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    agent.write_text(
+        "# 旧项目\n\n## 目录约定\n\n- 大纲/\n",
+        encoding="utf-8",
+    )
+
+    assert update_agent_total_chapters_line(agent, 100) is True
+    assert "- 预计总章数: 100" in agent.read_text(encoding="utf-8")
+
+    assert update_agent_total_chapters_line(agent, 120) is True
+    text = agent.read_text(encoding="utf-8")
+    assert text.count("- 预计总章数:") == 1
+    assert "- 预计总章数: 120" in text
+
+
+def test_update_agent_total_chapters_line_zero_or_none_is_noop(tmp_path: Path) -> None:
+    """``0`` / 负数 / ``None`` → no-op。"""
+
+    from writer.project.state import update_agent_total_chapters_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    before = agent.read_text(encoding="utf-8")
+
+    assert update_agent_total_chapters_line(agent, 0) is False
+    assert update_agent_total_chapters_line(agent, None) is False
+    assert agent.read_text(encoding="utf-8") == before
+
+
+def test_update_agent_total_chapters_line_missing_file_is_noop(
+    tmp_path: Path,
+) -> None:
+    """文件不存在静默返回 ``False``。"""
+
+    from writer.project.state import update_agent_total_chapters_line
+
+    missing = tmp_path / "no_agent.md"
+    assert update_agent_total_chapters_line(missing, 50) is False
+
+
+# ---------------------------------------------------------------------------
+# 分卷 (per 2026-07-16 目录落地)
+# ---------------------------------------------------------------------------
+
+
+def test_render_agent_file_includes_volumes_text_when_set() -> None:
+    """``render_agent_file(..., volumes_text=...)`` 渲染对应行。"""
+
+    from writer.project.state import render_agent_file
+
+    text = render_agent_file(
+        "测试项目",
+        ProjectState.HAS_TOC,
+        volumes_text="卷一(40章)/卷二(30章)/卷三(30章)",
+    )
+    assert "- 分卷: 卷一(40章)/卷二(30章)/卷三(30章)" in text
+
+
+def test_render_agent_file_omits_volumes_when_empty_or_none() -> None:
+    """``None`` / 空字符串 / 纯空白 → 不写 ``分卷:`` 行。"""
+
+    from writer.project.state import render_agent_file
+
+    # ``分卷`` 字面会出现在 ``## 目录约定`` 段（"大纲、目录与分卷规划"），
+    # 因此断言锚定 ``- 分卷:`` 字段行（非目录约定段）。
+    assert "- 分卷:" not in render_agent_file("测试项目", ProjectState.HAS_TOC)
+    assert "- 分卷:" not in render_agent_file(
+        "测试项目",
+        ProjectState.HAS_TOC,
+        volumes_text="",
+    )
+    assert "- 分卷:" not in render_agent_file(
+        "测试项目",
+        ProjectState.HAS_TOC,
+        volumes_text="   ",
+    )
+
+
+def test_read_volumes_falls_back_to_none(tmp_path: Path) -> None:
+    """缺失或没有该行 → ``None``。"""
+
+    from writer.project.state import read_volumes_from_agent
+
+    assert read_volumes_from_agent(tmp_path / "missing.md") is None
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    assert read_volumes_from_agent(agent) is None
+
+
+def test_read_volumes_parses_bare_and_list_forms(tmp_path: Path) -> None:
+    """兼容 bare / list 前缀。"""
+
+    from writer.project.state import read_volumes_from_agent
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    original = agent.read_text(encoding="utf-8")
+
+    text = original.replace(
+        "- 架构方法: 雪花法",
+        "- 架构方法: 雪花法\n分卷: 卷一(20章)/卷二(40章)",
+    )
+    agent.write_text(text, encoding="utf-8")
+    assert read_volumes_from_agent(agent) == "卷一(20章)/卷二(40章)"
+
+    text = original.replace(
+        "- 架构方法: 雪花法",
+        "- 架构方法: 雪花法\n- 分卷: 卷一(10章)/卷二(10章)",
+    )
+    agent.write_text(text, encoding="utf-8")
+    assert read_volumes_from_agent(agent) == "卷一(10章)/卷二(10章)"
+
+
+def test_update_agent_volumes_line_inserts_and_replaces(tmp_path: Path) -> None:
+    """插入与就地替换等价于 ``架构方法`` 行。"""
+
+    from writer.project.state import update_agent_volumes_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    agent.write_text(
+        "# 旧项目\n\n## 目录约定\n\n- 大纲/\n",
+        encoding="utf-8",
+    )
+
+    assert update_agent_volumes_line(agent, "卷一(20章)/卷二(40章)") is True
+    assert "- 分卷: 卷一(20章)/卷二(40章)" in agent.read_text(encoding="utf-8")
+
+    assert update_agent_volumes_line(agent, "卷一(30章)/卷二(30章)/卷三(40章)") is True
+    text = agent.read_text(encoding="utf-8")
+    assert text.count("- 分卷:") == 1
+    assert "- 分卷: 卷一(30章)/卷二(30章)/卷三(40章)" in text
+
+
+def test_update_agent_volumes_line_empty_or_whitespace_is_noop(
+    tmp_path: Path,
+) -> None:
+    """空字符串 / 纯空白 → no-op。"""
+
+    from writer.project.state import update_agent_volumes_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    before = agent.read_text(encoding="utf-8")
+
+    assert update_agent_volumes_line(agent, "") is False
+    assert update_agent_volumes_line(agent, "   ") is False
+    assert agent.read_text(encoding="utf-8") == before
+
+
+def test_update_agent_volumes_line_preserves_other_fields(tmp_path: Path) -> None:
+    """更新分卷不应破坏字数 / 章数 / 题材等元数据。"""
+
+    from writer.project.state import (
+        update_agent_total_chapters_line,
+        update_agent_total_words_line,
+        update_agent_volumes_line,
+    )
+
+    workspace = create_workspace("novel", tmp_path, genre="玄幻")
+    agent = workspace.root / "AGENT.md"
+    update_agent_total_words_line(agent, 300000)
+    update_agent_total_chapters_line(agent, 100)
+
+    changed = update_agent_volumes_line(agent, "卷一(40章)/卷二(60章)")
+
+    assert changed is True
+    text = agent.read_text(encoding="utf-8")
+    assert "- 题材: 玄幻" in text
+    assert "- 预计总字数: 300000" in text
+    assert "- 预计总章数: 100" in text
+    assert "- 分卷: 卷一(40章)/卷二(60章)" in text
+
+
+def test_update_agent_volumes_line_missing_file_is_noop(tmp_path: Path) -> None:
+    """文件不存在静默返回 ``False``。"""
+
+    from writer.project.state import update_agent_volumes_line
+
+    missing = tmp_path / "no_agent.md"
+    assert update_agent_volumes_line(missing, "卷一(20章)") is False
+
+
+# ---------------------------------------------------------------------------
+# refresh_agent_file 保留三行新字段 (per 2026-07-16 目录落地)
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_agent_file_preserves_total_words_and_chapters(tmp_path: Path) -> None:
+    """状态切换时, ``refresh_agent_file`` 保留字数 / 章数 / 分卷行不被清空。"""
+
+    from writer.project.state import (
+        update_agent_total_chapters_line,
+        update_agent_total_words_line,
+    )
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    update_agent_total_words_line(agent, 300000)
+    update_agent_total_chapters_line(agent, 100)
+
+    # 触发状态变化 (S1 → S2)
+    (workspace.root / "大纲" / "大纲.md").write_text("x", encoding="utf-8")
+    refresh_agent_file(workspace.root)
+
+    text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 预计总字数: 300000" in text
+    assert "- 预计总章数: 100" in text
+    assert "state: S2" in text
+
+
+def test_refresh_agent_file_preserves_volumes(tmp_path: Path) -> None:
+    """状态切换时, ``refresh_agent_file`` 保留 ``分卷:`` 行不被清空。"""
+
+    from writer.project.state import update_agent_volumes_line
+
+    workspace = create_workspace("novel", tmp_path)
+    agent = workspace.root / "AGENT.md"
+    update_agent_volumes_line(agent, "卷一(40章)/卷二(60章)")
+
+    (workspace.root / "大纲" / "大纲.md").write_text("x", encoding="utf-8")
+    refresh_agent_file(workspace.root)
+
+    text = (workspace.root / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 分卷: 卷一(40章)/卷二(60章)" in text

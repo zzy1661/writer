@@ -1,55 +1,42 @@
 ---
 command: /目录
-description: 生成或查看章节目录
-requires_states: [HAS_OUTLINE, HAS_TOC]
+description: 根据 AGENT.md 题材与架构方法及大纲生成章节目录
 ---
 
 # 目录 (Table of Contents)
 
-你是长篇小说项目的**章节目录生成助手**。当用户输入 `/目录` 时，按以下步骤基于已有大纲生成细化的章节列表。
+E2E fixture：根据 AGENT.md 题材 / 架构方法 / 总字数 + 大纲.md 生成章节目录。完整指令见 `src/writer/skills/_shipped/目录/SKILL.md`，本 fixture 用于 pipe-mode e2e 验证管道路由，不重复长 body 以避免污染源文件大小。
 
 ## 输入
 
-- 项目根目录下 `outline/大纲.md` 的当前内容（前置依赖）。
-- 项目根目录下 `outline/volume-plan.md`（如有，用于分卷）。
+- `/目录 [可选 <预计字数> [可选 <N>卷]]`。
+- `AGENT.md` 五条字段（题材 / 架构方法 / 预计总字数 / 预计总章数 / 分卷）。
+- `大纲/大纲.md`（前置依赖，由 `/大纲` 落地）。
 
 ## 输出
 
-- 写入 `outline/toc.md`，标题 `# <书名>`，包含 `## 章节目录` 一节。
-- 每行一条章节（`# 第N章 标题` 或 `- 第N章 标题`）。
-- 写入完成后刷新 `AGENT.md` 基础字段（调用 `refresh_agent_file`）。
+- 写入 `大纲/章节目录.md`，按题材 + 架构方法骨架展开。
+- 回写 `AGENT.md`：`预计总字数:` / `预计总章数:` / `分卷:` 三行（局部更新）。
+- 调 `refresh_agent_file(project_root)` 推进状态到 `HAS_TOC`。
 
 ## 执行步骤
 
-1. 用 `safe_read_file` 读取 `outline/大纲.md`，提取四幕结构与章节标题。
-2. 调 `story_agent.draft_toc(outline_text, project_root=ctx.project_root)` 得到 `TocResult(title, chapters)`。
-3. 按下方模板格式化输出，写入 `outline/toc.md`。
-4. 调 `refresh_agent_file(project_root, project_state=HAS_TOC)`。
-5. yield `TextChunk` 显示前几章示例 + `Done(reason="answered", payload={"chapter_count": N})`。
+1. `safe_read_file` 同时读 `AGENT.md` 与 `大纲/大纲.md`；缺失大纲直接 `SkillError` 报错。
+2. 提取五条 AGENT.md 字段；缺题材 / 架构方法 / 总字数 → `TextChunk` 询问用户。
+3. `总章数 = ceil(预计总字数 / 3000)`；`预计总章数:` 已设定则跳过。
+4. 按题材 + 架构方法骨架展开章节 → 写入 `大纲/章节目录.md`。
+5. 调 `update_agent_total_words_line` / `update_agent_total_chapters_line` / `update_agent_volumes_line`（state.py 新 helper）写回。
+6. 调 `refresh_agent_file(project_root)`。
 
-## 输出模板
+## references
 
-```
-# <title>
-
-## 章节目录
-
-- 第 1 章：<章节标题>
-- 第 2 章：<章节标题>
-...
-```
-
-## 章节格式参考
-
-参考 @reference references/chapter-format.md 取得章节标题命名规则（中文书名章节、卷-章结构等）。
+- 章节标题格式与卷-章排版：@reference chapter-format.md。
+- 分卷策略速查表（题材 + 字数 → 卷数 + 卷长）：@reference volume-strategy.md。
+- 架构方法骨架速选：复用 `/大纲` 的 `references/architecture-methods.md`。
 
 ## 边界与异常
 
-- 项目根目录无 `outline/大纲.md` 时 yield `SkillError("未找到大纲文件，请先执行 /大纲 <创意>")`。
-- `draft_toc` 返回空列表时，提示用户重新生成大纲。
-- 已存在 `outline/toc.md` 时提示用户将覆盖。
-
-## 可调点
-
-- 项目想用"分卷"结构（卷 1 / 卷 2）时，可在 toc.md 头部加 `## 分卷` 节。
-- 玄幻/历史题材常用"卷-章"（如"卷一·崛起 第1章 退婚"），可在调 `draft_toc` 后用 regex 加工。
+- `大纲/大纲.md` 缺失 → `SkillError("未找到大纲文件，请先执行 /大纲 <创意>")`。
+- 用户拒绝分卷 / 留空 → 单卷展开，不写 `分卷:` 行。
+- 既有 `章节目录.md` 存在 → `TextChunk` 提示将覆盖。
+- rule-only 部署 → preview 路径，**不**真正落盘 AGENT.md 三行。

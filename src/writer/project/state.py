@@ -187,6 +187,9 @@ def render_agent_file(
     *,
     genre: str = "other",
     architecture_method: str = DEFAULT_ARCHITECTURE_METHOD,
+    total_words: int | None = None,
+    total_chapters: int | None = None,
+    volumes_text: str | None = None,
 ) -> str:
     """渲染项目控制文件，供状态检测使用。
 
@@ -201,6 +204,12 @@ def render_agent_file(
     与项目「大纲最扎实」的定位匹配。该字段总会被渲染（非题材语义——
     即便方法退回默认"雪花法"，仍显式写入让下游 /大纲 directive 能稳定
     读取），与题材的"other 跳过"语义不同。
+
+    ``total_words`` / ``total_chapters`` / ``volumes_text``（per 2026-07-16
+    目录落地）由 ``/目录`` directive 写入。三者都用 ``None`` 表示"未
+    设定"，与"已知 = 0" 或空字符串区分。三行只在对应参数非 ``None`` 时
+    才渲染 —— ``/目录`` directive 用 ``update_agent_*_line`` 单独设置每行，
+    让下游 ``safe_read_file`` / ``rglob AGENT.md`` 的 LLM 工具循环消费稳定。
 
     reference：``docs/写作方法论/写作架构方法.md`` 列出全部可选方法。
     """
@@ -220,6 +229,12 @@ def render_agent_file(
     # 架构方法始终渲染（不像题材有"other 跳过"语义）—— 即便与默认相同
     # 也写一行，下游 ``/大纲`` directive 用 ``safe_read_file`` 能稳定读到。
     lines.append(f"- 架构方法: {architecture_method}\n")
+    if total_words is not None and total_words >= 0:
+        lines.append(f"- 预计总字数: {total_words}\n")
+    if total_chapters is not None and total_chapters >= 0:
+        lines.append(f"- 预计总章数: {total_chapters}\n")
+    if volumes_text and volumes_text.strip():
+        lines.append(f"- 分卷: {volumes_text.strip()}\n")
     lines.extend(
         [
             "\n",
@@ -258,25 +273,34 @@ def append_agent_requirements(agent_md: Path, requirements: str) -> None:
 def refresh_agent_file(project_root: Path) -> None:
     """用当前检测到的状态更新 ``AGENT.md``。
 
-    保留文件中已有的 ``题材:`` 行与 ``架构方法:`` 行，让状态切换后
-    （例如 S1 → S2）重新渲染不会清掉 ``create_workspace(...)`` /
-    ``update_agent_*_line(...)`` 设置的元数据。
+    保留文件中已有的 ``题材:`` 行、``架构方法:`` 行，以及 ``/目录``
+    directive 在 S3 阶段写入的三行（``预计总字数:`` / ``预计总章数:`` /
+    ``分卷:``），让状态切换后（例如 S2 → S3）重新渲染不会清掉
+    ``create_workspace(...)`` / ``update_agent_*_line(...)`` 设置的元数据。
 
     当文件没有 ``架构方法:`` 行（遗留 / 手工改过）时回退到默认雪花法
-    —— 不会写入 ``other`` 这种隐式值。
+    —— 不会写入 ``other`` 这种隐式值。三行字数 / 章数 / 分卷字段缺一即不渲染，
+    与 ``render_agent_file`` 的 None-pass-through 语义保持一致。
     """
 
     root = project_root.resolve()
     state = detect_state(root)
     project_name = root.name
-    existing_genre = read_genre_from_agent(root / "AGENT.md")
-    existing_method = read_architecture_method_from_agent(root / "AGENT.md")
-    (root / "AGENT.md").write_text(
+    agent_path = root / "AGENT.md"
+    existing_genre = read_genre_from_agent(agent_path)
+    existing_method = read_architecture_method_from_agent(agent_path)
+    existing_total_words = read_total_words_from_agent(agent_path)
+    existing_total_chapters = read_total_chapters_from_agent(agent_path)
+    existing_volumes = read_volumes_from_agent(agent_path)
+    agent_path.write_text(
         render_agent_file(
             project_name,
             state,
             genre=existing_genre,
             architecture_method=existing_method,
+            total_words=existing_total_words,
+            total_chapters=existing_total_chapters,
+            volumes_text=existing_volumes,
         ),
         encoding="utf-8",
     )
@@ -505,6 +529,275 @@ def update_agent_architecture_method_line(
     return True
 
 
+def read_total_words_from_agent(agent_md: Path) -> int | None:
+    """从 ``AGENT.md`` 文件中解析 ``预计总字数:`` 行的整数值。
+
+    文件缺失、不可读、没有该行或值无法解析为正整数时返回 ``None`` —
+    与字符串字段（``题材:`` / ``架构方法:``）不同：数字字段的"未设定"
+    是 ``None`` 而不是 ``0``，让 :func:`refresh_agent_file` / 下游
+    AGENT.md 消费方能区分"还没问用户"与"用户写了 0 字"。
+
+    共用 :func:`_strip_genre_line_prefix` 的前缀容忍规则（``- `` /
+    ``* `` / ``· `` / ``• ``）。
+    """
+
+    text = _read_agent_text(agent_md)
+    if text is None:
+        return None
+    for line in text.splitlines():
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("预计总字数:"):
+            value = stripped.split(":", 1)[1].strip()
+            if not value:
+                return None
+            try:
+                parsed = int(value)
+            except ValueError:
+                return None
+            return parsed if parsed > 0 else None
+    return None
+
+
+def update_agent_total_words_line(agent_md: Path, total_words: int | None) -> bool:
+    """原地更新 ``AGENT.md`` 中的 ``预计总字数:`` 行，保留其它所有内容。
+
+    与 :func:`update_agent_architecture_method_line` 对称 —— 局部更新
+    不重写整体，但 no-op 语义针对数字字段：
+
+    1. ``total_words`` 为 ``None`` / 0 / 负数 → no-op，返回 ``False``。
+       与字段的"未设定 = None"语义保持一致；``0`` / 负数视作无效输入
+       （不存在"零字小说"），调用方应在送入前过滤。
+    2. 若文件已存在 ``预计总字数: ...`` 行（容忍 ``- `` / ``* `` /
+       ``· `` / ``• `` 前缀），就地替换。
+    3. 若文件没有该行，则在第一个 ``## ...`` 二级标题前插入
+       ``- 预计总字数: <int>\\n`` —— 找不到任何二级标题时追加到末尾。
+
+    返回 ``True`` 表示文件被改动，``False`` 表示 no-op。
+
+    文件不存在时静默忽略（视为 no-op），不抛异常 —— 调用方需要
+    提前用 :func:`create_workspace` 等保证 AGENT.md 存在。
+    """
+
+    if total_words is None or total_words <= 0:
+        return False
+
+    try:
+        original = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return False
+
+    lines = original.splitlines(keepends=True)
+
+    target_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("预计总字数:"):
+            target_idx = idx
+            break
+
+    new_line = f"- 预计总字数: {total_words}\n"
+
+    if target_idx is not None:
+        if lines[target_idx] == new_line:
+            return False
+        lines[target_idx] = new_line
+        agent_md.write_text("".join(lines), encoding="utf-8")
+        return True
+
+    insert_idx: int | None = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## "):
+            insert_idx = idx
+            break
+    if insert_idx is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] = lines[-1] + "\n"
+        lines.append(new_line)
+    else:
+        prefix = lines[:insert_idx]
+        suffix = lines[insert_idx:]
+        if prefix and prefix[-1].strip():
+            prefix.append("\n")
+        lines = prefix + [new_line, "\n"] + suffix
+
+    agent_md.write_text("".join(lines), encoding="utf-8")
+    return True
+
+
+def read_total_chapters_from_agent(agent_md: Path) -> int | None:
+    """从 ``AGENT.md`` 文件中解析 ``预计总章数:`` 行的整数值。
+
+    缺失 / 不可读 / 无法解析 / 值 ≤ 0 时返回 ``None``。语义与
+    :func:`read_total_words_from_agent` 对称 —— 数字字段的"未设定"
+    用 ``None`` 表示，让下游能区分"还没 /目录"与"写了 0 章"。
+    """
+
+    text = _read_agent_text(agent_md)
+    if text is None:
+        return None
+    for line in text.splitlines():
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("预计总章数:"):
+            value = stripped.split(":", 1)[1].strip()
+            if not value:
+                return None
+            try:
+                parsed = int(value)
+            except ValueError:
+                return None
+            return parsed if parsed > 0 else None
+    return None
+
+
+def update_agent_total_chapters_line(
+    agent_md: Path, total_chapters: int | None
+) -> bool:
+    """原地更新 ``AGENT.md`` 中的 ``预计总章数:`` 行，保留其它所有内容。
+
+    no-op 语义与 :func:`update_agent_total_words_line` 对称：
+    ``None`` / 0 / 负数视作无效输入。其余等价（容忍 list 前缀、二级
+    标题前插入、文件不存在静默忽略）。
+    """
+
+    if total_chapters is None or total_chapters <= 0:
+        return False
+
+    try:
+        original = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return False
+
+    lines = original.splitlines(keepends=True)
+
+    target_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("预计总章数:"):
+            target_idx = idx
+            break
+
+    new_line = f"- 预计总章数: {total_chapters}\n"
+
+    if target_idx is not None:
+        if lines[target_idx] == new_line:
+            return False
+        lines[target_idx] = new_line
+        agent_md.write_text("".join(lines), encoding="utf-8")
+        return True
+
+    insert_idx: int | None = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## "):
+            insert_idx = idx
+            break
+    if insert_idx is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] = lines[-1] + "\n"
+        lines.append(new_line)
+    else:
+        prefix = lines[:insert_idx]
+        suffix = lines[insert_idx:]
+        if prefix and prefix[-1].strip():
+            prefix.append("\n")
+        lines = prefix + [new_line, "\n"] + suffix
+
+    agent_md.write_text("".join(lines), encoding="utf-8")
+    return True
+
+
+def read_volumes_from_agent(agent_md: Path) -> str | None:
+    """从 ``AGENT.md`` 文件中解析 ``分卷:`` 行的字符串值。
+
+    缺失 / 不可读 / 该行值为空字符串时返回 ``None``。``None`` 与
+    "未设定"等价，让 :func:`refresh_agent_file` / :func:`render_agent_file`
+    在没分卷时跳过这一行渲染。下游 ``/目录`` directive 在卷长过短
+    或单卷可承载时可以不写该行。
+    """
+
+    text = _read_agent_text(agent_md)
+    if text is None:
+        return None
+    for line in text.splitlines():
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("分卷:"):
+            value = stripped.split(":", 1)[1].strip()
+            return value or None
+    return None
+
+
+def update_agent_volumes_line(agent_md: Path, volumes_text: str | None) -> bool:
+    """原地更新 ``AGENT.md`` 中的 ``分卷:`` 行，保留其它所有内容。
+
+    no-op 语义与 :func:`update_agent_architecture_method_line` 对称：
+    空字符串 / 纯空白 → no-op；局部更新不重写整体；前缀容忍；
+    二级标题前插入；文件不存在静默忽略。
+
+    ``volumes_text`` 通常为 ``卷一(20章)/卷二(40章)/卷三(40章)`` 这种
+    紧凑格式（``/目录`` directive 自行拼装），不在本函数里再次切分
+    —— 让调用方保留分卷的展示自由度。
+    """
+
+    label = (volumes_text or "").strip()
+    if not label:
+        return False
+
+    try:
+        original = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return False
+
+    lines = original.splitlines(keepends=True)
+
+    target_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("分卷:"):
+            target_idx = idx
+            break
+
+    new_line = f"- 分卷: {label}\n"
+
+    if target_idx is not None:
+        if lines[target_idx] == new_line:
+            return False
+        lines[target_idx] = new_line
+        agent_md.write_text("".join(lines), encoding="utf-8")
+        return True
+
+    insert_idx: int | None = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## "):
+            insert_idx = idx
+            break
+    if insert_idx is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] = lines[-1] + "\n"
+        lines.append(new_line)
+    else:
+        prefix = lines[:insert_idx]
+        suffix = lines[insert_idx:]
+        if prefix and prefix[-1].strip():
+            prefix.append("\n")
+        lines = prefix + [new_line, "\n"] + suffix
+
+    agent_md.write_text("".join(lines), encoding="utf-8")
+    return True
+
+
+def _read_agent_text(agent_md: Path) -> str | None:
+    """读取 ``AGENT.md`` 文本；不可读时返回 ``None``。
+
+    三个新增的数字 / 字符串 reader 共用：共享
+    :func:`_strip_genre_line_prefix` 的前缀容忍，并集中处理
+    ``FileNotFoundError`` / ``OSError``。
+    """
+
+    try:
+        return agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return None
+
+
 def _first_existing_nonempty(root: Path, relatives: tuple[Path, ...]) -> Path | None:
     for relative in relatives:
         candidate = root / relative
@@ -540,10 +833,16 @@ __all__ = [
     "inspect_project",
     "read_genre_from_agent",
     "read_architecture_method_from_agent",
+    "read_total_chapters_from_agent",
+    "read_total_words_from_agent",
+    "read_volumes_from_agent",
     "refresh_agent_file",
     "render_agent_file",
     "safe_cwd",
     "update_agent_genre_line",
     "update_agent_architecture_method_line",
+    "update_agent_total_chapters_line",
+    "update_agent_total_words_line",
+    "update_agent_volumes_line",
     "DEFAULT_ARCHITECTURE_METHOD",
 ]
