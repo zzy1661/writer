@@ -459,9 +459,9 @@ def needs_json_prompt_structured_output(settings: Settings) -> bool:
 ```
 LLM IntentRouter 产出 AgentAction(call_tool, tool_name="foreshadow_search", arguments={"id": "F003"})
    ↓
-session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.engine.run(ctx)
+session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.runner.run(ctx)
    ↓
-Engine._engine_loop:
+Runner._engine_loop:
     if self._deps.tool_loop is not None:
         async for event in self._run_tool_loop(action, ctx):
             yield event

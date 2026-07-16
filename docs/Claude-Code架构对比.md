@@ -1,8 +1,10 @@
 # 架构对比 — writer-agent vs Claude Code
 
-**Date**: 2026-07-06
+**Date**: 2026-07-16 修订(原 2026-07-06)
 **Status**: 一次性分析,非活跃维护文档(若 Claude-Code 架构演进需重跑)
 **作者**: arch-optimizer (基于 [Claude-Code-Source-Study](https://...) 项目源码解析)
+>
+> **2026-07-16 修订**:本文原版本引用 `Engine.run(ctx)` + `src/writer/engine/engine.py`,均已过时(per `chg-rename-engine-runner` 2026-07-16):状态机主类改为 `Runner`(`src/writer/runner/runner.py`),会话层仍叫 `Engine`(`src/writer/session/engine.py`);`write_chapter` / `review_chapter` LangGraph 已实装;shipped directives 3 个(新增 `/人物`)。本文同步这些演进。
 
 ---
 
@@ -18,13 +20,13 @@
 
 | 维度 | Claude Code 做法 | writer-agent 做法 | 数据来源 |
 | --- | --- | --- | --- |
-| 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `Engine.run(ctx)` AsyncIterator[Event] + `Engine._engine_loop` 内 `match action.action_type` 单层 dispatch(`Engine` 类主入口,持 `RunnerDeps` + `RunnerConfig`) | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
-| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `RunnerDeps` 5 字段 + 4 方法(router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop + route / run_workflow / rebind_tool_runtime / rebind_directive_registry);被 `Engine` 类持有,`Engine.replace_deps` 整体替换;`story_agent` 字段于 2026-07-09 `chg-remove-roles` 删除 | [05](#) / `src/writer/engine/deps.py` + `src/writer/engine/engine.py` |
+| 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `Runner.run(ctx)` AsyncIterator[Event] + `Runner._engine_loop` 内 `match action.action_type` 单层 dispatch(`Runner` 类主入口,per `chg-rename-engine-runner` 2026-07-16,持 `RunnerDeps` + `RunnerConfig`) | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
+| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `RunnerDeps` 9 字段 + 5 rebind 方法 + 2 普通方法(router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop / prose_client / review_llm / settings + route / run_workflow / rebind_tool_runtime / rebind_directive_registry / rebind_agent_registry / rebind_tool_loop);被 `Runner` 类持有;**不保留 compat shim** | [05](#) / `src/writer/runner/deps.py` + `src/writer/runner/runner.py` |
 | 路由 | `RuleBasedRouter` + `LlmRouter` 同一 Protocol 下;`CompositeRouter` rule-first + LLM fallback | `RuleBasedIntentRouter` + `LlmIntentRouter` + `CompositeRouter`(本会话 M5/M6 已对齐 production_deps 接受 `primary_router` kwarg) | [15](#) / `src/writer/routing/` |
-| 扩展点 | 27 个 Hook 事件 + Markdown frontmatter 协议同构(Skill/Agent/Command/OutputStyle)+ Plugin manifest | 仅 SKILL.md frontmatter;`writer/hooks/` 未实装;`writer/commands/` / `writer/agents/` / `writer/output_styles/` 空缺 | [20-Hooks系统.md](~/Desktop/sources/Claude-Code-Source-Study/docs/20) / [21](#) |
-| 配置 | 5+1 层优先级(user/project/local/policy/managed)+ TRUSTED_SETTING_SOURCES + SAFE_ENV_VARS | 单一 Pydantic BaseSettings | [03-配置体系与企业MDM.md](~/Desktop/sources/Claude-Code-Source-Study/docs/03) |
+| 扩展点 | 27 个 Hook 事件 + Markdown frontmatter 协议同构(Skill/Agent/Command/OutputStyle)+ Plugin manifest | 仅 SKILL.md frontmatter(**3 shipped:`/大纲` `/目录` `/人物`**);`writer/hooks/` 未实装;`writer/commands/` / `writer/output_styles/` 空缺;Agent Markdown 范式 4 份 | [20-Hooks系统.md](~/Desktop/sources/Claude-Code-Source-Study/docs/20) / [21](#) |
+| 配置 | 5+1 层优先级(user/project/local/policy/managed)+ TRUSTED_SETTING_SOURCES + SAFE_ENV_VARS | 单一 Pydantic BaseSettings + `.writer/config` 项目级覆盖 | [03-配置体系与企业MDM.md](~/Desktop/sources/Claude-Code-Source-Study/docs/03) |
 | 工具注册 | 三层漏斗(编译期 DCE / 模块加载期 env / 运行时 isEnabled)+ deny 规则 | `ToolRegistry` 名字索引;无运行时启用/禁用 | [10-工具协议-注册与-ToolSearch.md](~/Desktop/sources/Claude-Code-Source-Study/docs/10) |
-| 错误恢复 | 7 层(withRetry / FallbackTriggeredError / 413 三级恢复 / MaxOutputTokens 两阶段 / Stop hook 阻塞 / withhold-recover / microcompact) | `except ToolError` + `except Exception` 两层;无 max_output 升级;无 413 恢复 | [05](#) |
+| 错误恢复 | 7 层(withRetry / FallbackTriggeredError / 413 三级恢复 / MaxOutputTokens 两阶段 / Stop hook 阻塞 / withhold-recover / microcompact) | `except ToolError` + `except SkillError` + `except Exception` 三层(2026-07-13);无 max_output 升级;无 413 恢复 | [05](#) |
 
 ---
 
@@ -81,7 +83,7 @@
 - 消息预处理管线按成本递增:`snip → microcompact → context collapse → autocompact`
 - `withhold-recover` 模式:可恢复错误不立即 yield,等流结束尝试恢复
 
-**我们的现状**:`Engine._engine_loop`(`src/writer/engine/engine.py`,`Engine` 类的私有方法)用 `match action.action_type` 单层 dispatch + 顶层 `try/except`。错误恢复只有 `except ToolError` + `except Exception` 两层。
+**我们的现状**:`Runner._engine_loop`(`src/writer/runner/runner.py`,`Runner` 类的私有方法,2026-07-16 前是 `Engine._engine_loop`)用 `match action.action_type` 单层 dispatch + 顶层 `try/except`。错误恢复有 `except ToolError` + `except SkillError` + `except Exception` 三层(2026-07-13)。
 
 **为什么是 Major**:当前只支持"成功 → Done"或"异常 → aborted"两条路径。一旦未来需要:
 - 上下文压缩重试(413 → drain → reactive compact → surface)
@@ -89,22 +91,22 @@
 - Stop hook 阻塞(hook 说"再想想"就把反馈塞成 user message 继续 turn)
 - token_budget_continuation(预算耗尽时降级到低质量模式继续)
 
-——都需要 `state.transition` 机制。当前架构会让这些功能被迫改 `_engine_loop` 主循环,违反"engine 包严格 5 文件布局,新增能力只通过 `RunnerDeps` 扩展"原则(见 [备忘 16 §408](技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md))。
+——都需要 `state.transition` 机制。当前架构会让这些功能被迫改 `_engine_loop` 主循环,违反"Runner 包严格 5 文件布局,新增能力只通过 `RunnerDeps` 扩展"原则(见 [备忘 16 §408](技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md))。
 
 **建议做法**(优先级 1):
-- 在 `Engine._engine_loop`(`src/writer/engine/engine.py`)引入新一代 `EngineState`(注意:**不是**之前 m4 删除的那个老 EngineState —— 老的是空 mutable dataclass,新的是 frozen transition 标记)
+- 在 `Runner._engine_loop`(`src/writer/runner/runner.py`)引入新一代 `RunnerState`(注意:**不是**之前 m4 删除的那个老 EngineState —— 老的是空 mutable dataclass,新的是 frozen transition 标记)
 - 形态参考:
   ```python
   @dataclass(frozen=True)
-  class EngineTransition:
+  class RunnerTransition:
       """Why the previous iteration asked to continue (read by next iteration)."""
       reason: Literal["ok", "tool_error", "ctx_overflow", "stop_blocked", "next_turn"]
       payload: dict[str, Any] = field(default_factory=dict)
 
   @dataclass(frozen=True)
-  class EngineLoopState:
+  class RunnerLoopState:
       ctx: RunnerContext
-      transition: EngineTransition  # not Optional
+      transition: RunnerTransition  # not Optional
       tool_calls: int = 0
       compacted_segments: int = 0
   ```
@@ -166,8 +168,8 @@
 | Claude Code 模式 | 我们的实现 | 评价 |
 | --- | --- | --- |
 | **Protocol-as-slot** | `IntentRouter` Protocol + `RuleBasedIntentRouter` / `LlmIntentRouter` / `CompositeRouter` | ✅ 完美对齐(本会话 M1-M6 修复后甚至更好) |
-| **AsyncGenerator 循环核心** | `Engine.run(ctx)` AsyncIterator[Event](`Engine` 类主入口,2026-07-13 重构后从自由函数升级为主类) | ✅ 对齐 |
-| **DI 边界** | `RunnerDeps` Protocol + `_DefaultRunnerDeps` + `production_deps()`(被 `Engine` 类持有,通过 `Engine.replace_deps` 整体替换) | ✅ 对齐(M6 后 Protocol-only stub 也工作,见 `test_session_set_project_root_with_protocol_only_deps`) |
+| **AsyncGenerator 循环核心** | `Runner.run(ctx)` AsyncIterator[Event](`Runner` 类主入口,per `chg-rename-engine-runner` 2026-07-16 重命名) | ✅ 对齐 |
+| **DI 边界** | `RunnerDeps` Protocol + `_DefaultRunnerDeps` + `production_deps()`(被 `Runner` 类持有,通过 `Runner.replace_deps` 整体替换) | ✅ 对齐(M6 后 Protocol-only stub 也工作,见 `test_session_set_project_root_with_protocol_only_deps`) |
 | **Done 分支事件流** | 7 个 `DoneReason`(本会话 M4 修复后 ErrorEvent 加 traceback 字段) | ✅ 对齐 |
 | **Tool 命名 kwarg 协议** | builtin Tools 全部 `*, path: str` 模式 | ✅ 对齐(CLAUDE.md 备忘 13 明确要求) |
 | **structured output** | `AgentAction` Pydantic BaseModel + `model_config={"frozen": True}` | ✅ 对齐(甚至比 dataclass 更适合 LLM structured output) |

@@ -412,7 +412,9 @@ def _merge_genre_line(old_content: str, new_content: str) -> str:
 
 | 字段                | 谁读                                          | 谁写                                                      |
 | ------------------- | --------------------------------------------- | --------------------------------------------------------- |
-| `题材:`             | `Engine.refresh_project_genre()`       | `create_workspace` / `safe_write_file` merge              |
+| `题材:`             | `Engine.refresh_project_genre()`(会话层) | `create_workspace` / `safe_write_file` merge              |
+| `架构方法:`         | `/大纲` SKILL.md body(per `8782c36`)| `create_workspace` 初始(雪花法默认);`update_agent_architecture_method_line` 局部更新 |
+| `预计总字数 / 总章数 / 分卷` | `/目录` SKILL.md body(per `34b1c95`)| `create_workspace` 初始(None 时跳过);`update_agent_total_*_line` / `update_agent_volumes_line` 局部更新 |
 | `## 当前状态`       | `detect_state()`                              | `safe_write_file` 强制要求存在                             |
 | `基本要求`          | LLM 读                                        | `create_workspace` 初始                                    |
 | `当前卷/章节/进度`  | LLM 读；`/状态` 显示                          | 当前不主动写；未来由 `/创作` 等命令写入                    |
@@ -492,7 +494,7 @@ def apply_init_brief(
 
 > **2026-07-14 收紧**:REPL `/init` 后只跟故事核心创意;`/init --name X --dir Y` flag 形式已删除(创建项目请用 `writer new <书名>` Typer 子命令)。
 
-REPL `handle_repl_input` 在 brief 形式下**抢先**消费:
+REPL `handle_repl_input` 在 brief 形式下**抢先**消费(per `dfe58d0`,2026-07-15 进入多轮 explore 模式):
 
 ```python
 def _try_handle_repl_init_brief(text: str, session: Engine) -> bool:
@@ -512,7 +514,7 @@ def _try_handle_repl_init_brief(text: str, session: Engine) -> bool:
     return True
 ```
 
-`Engine._maybe_run_init_brief_or_block` 不动（继续服务 `run_runner` 直接驱动 / SDK / e2e pipe），docstring 注明「REPL 抢先消费」。
+`Runner._maybe_run_init_brief_or_block` 不动（继续服务 `runner.run` 直接驱动 / SDK / e2e pipe；2026-07-16 前是 `Engine._maybe_run_init_brief_or_block`），docstring 注明「REPL 抢先消费」。
 
 ### 关键设计
 
@@ -547,13 +549,13 @@ REPL 启动:
         ├─ discover_project_root() → ./长安程序员(有 AGENT.md)
         ├─ production_deps(project_root=./长安程序员)
         │     ├─ built_directive_registry(project_root=./长安程序员)
-        │     │     ├─ discover_shipped_directives() → [大纲, 目录]
+        │     │     ├─ discover_shipped_directives() → [大纲, 目录, 人物]
         │     │     └─ discover_project_directives() → [] (空,项目级未改)
         │     └─ built_agent_registry(project_root=./长安程序员)
         │           ├─ discover_shipped_agents() → [other, 历史, 言情, 玄幻]
         │           └─ discover_project_agents() → [] (空)
         └─ session.project_state = "S1"
-        └─ session.project_genre = "历史"(从 AGENT.md 读)
+        └─ session.project_genre = "other"(writer new 默认,后续 /init 多选调整)
 ```
 
 ## 10.12 进一步阅读

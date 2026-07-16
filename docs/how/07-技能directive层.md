@@ -1,12 +1,13 @@
-# 07 · 技能 directive 层（SKILL.md，无状态矩阵）
+# 07 · 技能 directive 层(SKILL.md,无状态矩阵)
 
-> 对应代码：`src/writer/skills/{protocol,registry,directive_discovery,errors,builtin_sources,loader}.py` + `src/writer/skills/_shipped/`
-> 设计备忘：[`备忘 16-Agent架构模式`](../../技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md)
+> 对应代码:`src/writer/skills/{protocol,registry,directive_discovery,errors,builtin_sources,loader}.py` + `src/writer/skills/_shipped/`
+> 设计备忘:[`备忘 16-Agent架构模式`](../../技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md)
 >
-> **2026-07-14 修订**：本文原版本仍写 `requires_states`、`SkillDirective.name/extra_instructions`、`DirectiveRegistry.state_matrix()`、命令 × 状态矩阵。
-> 截至 `chg-remove-state-machine-enforcement`（2026-07-12）落地，`SkillDirective` 字段精简为 6 个（`command / description / body / references / scripts / root`），**无** `requires_states` / `name` / `extra_instructions`；`DirectiveRegistry.state_matrix()` 与引擎内 `validate_command_available()` 拦截全删；`SKILL.md` frontmatter 只需 `command` / `description` 两个必填字段。
+> **2026-07-16 修订**(覆盖 2026-07-14 修订):本文原版本仍写 `requires_states`、`SkillDirective.name/extra_instructions`、`DirectiveRegistry.state_matrix()`、命令 × 状态矩阵;且 shipped directives 数为 2。
+> 截至 2026-07-16,**shipped directives 已升级到 3 个**(`/大纲` `/目录` `/人物`),且 `chg-rename-engine-runner`(2026-07-16)后 dispatcher 由 `Runner._run_directive`(`src/writer/runner/runner.py`)而非 `Engine._run_directive`。
+> 截至 `chg-remove-state-machine-enforcement`(2026-07-12)落地,`SkillDirective` 字段精简为 6 个(`command / description / body / references / scripts / root`),**无** `requires_states` / `name` / `extra_instructions`;`DirectiveRegistry.state_matrix()` 与 Runner 内 `validate_command_available()` 拦截全删;`SKILL.md` frontmatter 只需 `command` / `description` 两个必填字段。
 >
-> 引擎 dispatch 由 `Engine._engine_loop` 的 `run_command` 分支通过 `deps.directive_registry.get(action.command)` 动态匹配，新增 directive **不需要改 Python 代码**。
+> Runner dispatch 由 `Runner._engine_loop` 的 `run_command` 分支通过 `deps.directive_registry.get(action.command)` 动态匹配,新增 directive **不需要改 Python 代码**。
 
 ---
 
@@ -229,29 +230,29 @@ def built_directive_registry(project_root: Path | None = None) -> DirectiveRegis
 
 ```
 ┌──────────────────────────────┐
-│ _shipped/*/SKILL.md (builtin)│  ← 基础能力（2 个：/大纲 /目录）
+│ _shipped/*/SKILL.md (builtin)│  ← 基础能力(3 个:/大纲 /目录 /人物)
 └──────────────┬───────────────┘
                │ register(last-write-wins)
                ▼
 ┌──────────────────────────────┐
-│ <root>/.writer/skills/*/SKILL│  ← 项目级覆盖（可选）
+│ <root>/.writer/skills/*/SKILL│  ← 项目级覆盖(可选)
 └──────────────┬───────────────┘
                │ register
                ▼
 ┌──────────────────────────────┐
-│ entry_points(group="writer.  │  ← 插件（可选，importlib.metadata）
+│ entry_points(group="writer.  │  ← 插件(可选,importlib.metadata)
 │   skills")                   │
 └──────────────────────────────┘
 ```
 
 后注册覆盖先注册 → 项目级覆盖 builtin。
 
-## 7.8 `_run_directive` —— Engine 怎么消费 SKILL.md
+## 7.8 `_run_directive` —— Runner 怎么消费 SKILL.md
 
-> 对应代码：`src/writer/engine/engine.py::Engine._run_directive`
+> 对应代码:`src/writer/runner/runner.py::Runner._run_directive`(2026-07-16 前是 `src/writer/engine/engine.py::Engine._run_directive`)
 
 ```python
-class Engine:
+class Runner:
     async def _run_directive(self, directive: SkillDirective, ctx: RunnerContext):
         from writer.skills.directive_discovery import resolve_references
         deps = self._deps
@@ -350,16 +351,16 @@ def _initial_messages(self, action, user_input, *, deps):
 ```
 CLI 启动:
     Engine(project_root=auto_discovered)
-        └─ __post_init__ 构造 Engine(deps=production_deps(project_root=...))
+        └─ __post_init__ 构造 Runner(deps=production_deps(project_root=...))
             └─ built_directive_registry(project_root=...)
-                ├─ discover_shipped_directives() → [大纲, 目录]
+                ├─ discover_shipped_directives() → [大纲, 目录, 人物]
                 ├─ discover_project_directives(project_root) → []
                 └─ discover_entry_point_directives() → []
-                └─ DirectiveRegistry: {"/大纲": ..., "/目录": ...}
+                └─ DirectiveRegistry: {"/大纲": ..., "/目录": ..., "/人物": ...}
 
 用户输入 "/大纲 穿越到唐朝":
-    session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.engine.run(ctx)
-    Engine._engine_loop:
+    session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.runner.run(ctx)
+    Runner._engine_loop:
         self._deps.route() → AgentAction(action_type="run_command", command="/大纲")
         match action.action_type:
             case "run_command":
@@ -370,7 +371,7 @@ CLI 启动:
                 else:
                     yield Done(reason="command_pending", payload={"command": action.command})
         → _run_directive(directive, ctx):
-            ├─ resolve_references(body, references) → 4-act-template.md / examples.md 内容
+            ├─ resolve_references(body, references) → 4 个 references 文件内容
             ├─ 构造 agent_action (answer_directly, command="/大纲", answer=body)
             └─ async for event in self._deps.tool_loop.run(agent_action, ctx, self._deps, self._cfg):
                 ReActAgent.run():

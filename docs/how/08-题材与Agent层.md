@@ -242,12 +242,12 @@ def built_agent_registry(project_root: Path | None = None) -> AgentRegistry:
 
 **项目切换时 `Engine.set_project_root()` 重新调它**(与 DirectiveRegistry 对称)。
 
-## 8.7 `_run_agent` — Engine 怎么派发 agent
+## 8.7 `_run_agent` — Runner 怎么派发 agent
 
-> 对应代码:`src/writer/engine/engine.py::Engine._run_agent`
+> 对应代码:`src/writer/runner/runner.py::Runner._run_agent`(2026-07-16 前是 `src/writer/engine/engine.py::Engine._run_agent`)
 
 ```python
-class Engine:
+class Runner:
     async def _run_agent(self, action, ctx):
         from writer.agents import AgentRegistryError
         deps = self._deps
@@ -363,7 +363,7 @@ def apply_init_brief(
     return process_init_brief(project_root, brief, settings=settings, llm=llm)
 ```
 
-Engine 在 `_run_init_brief_command` 里调它:
+Runner 在 `_run_init_brief_command` 里调它(2026-07-16 前是 `Engine._run_init_brief_command`):
 
 ```python
 from writer.config import get_settings
@@ -415,9 +415,9 @@ class StoryAgent:
    ↓
 LLM IntentRouter 产出 AgentAction(action_type="run_command", command="/大纲", kind="agent", target_agent="玄幻题材 Agent")
    ↓
-session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.engine.run(ctx)
+session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.runner.run(ctx)
    ↓
-Engine._engine_loop:
+Runner._engine_loop:
     if action.kind == "agent":
         async for event in self._run_agent(action, ctx):
             yield event
