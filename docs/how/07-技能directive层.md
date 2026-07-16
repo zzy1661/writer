@@ -223,7 +223,7 @@ def built_directive_registry(project_root: Path | None = None) -> DirectiveRegis
     return registry
 ```
 
-**项目切换时 `EngineSession.set_project_root()` 重新调它**，让项目级覆盖在下一轮生效。
+**项目切换时 `Engine.set_project_root()` 重新调它**，让项目级覆盖在下一轮生效。
 
 ## 7.7 加载优先级图
 
@@ -252,7 +252,7 @@ def built_directive_registry(project_root: Path | None = None) -> DirectiveRegis
 
 ```python
 class Engine:
-    async def _run_directive(self, directive: SkillDirective, ctx: EngineContext):
+    async def _run_directive(self, directive: SkillDirective, ctx: RunnerContext):
         from writer.skills.directive_discovery import resolve_references
         deps = self._deps
         cfg = self._cfg
@@ -349,7 +349,7 @@ def _initial_messages(self, action, user_input, *, deps):
 
 ```
 CLI 启动:
-    EngineSession(project_root=auto_discovered)
+    Engine(project_root=auto_discovered)
         └─ __post_init__ 构造 Engine(deps=production_deps(project_root=...))
             └─ built_directive_registry(project_root=...)
                 ├─ discover_shipped_directives() → [大纲, 目录]
@@ -358,7 +358,7 @@ CLI 启动:
                 └─ DirectiveRegistry: {"/大纲": ..., "/目录": ...}
 
 用户输入 "/大纲 穿越到唐朝":
-    session.run_turn(user_input) → 构造 EngineContext + 委派给 session.engine.run(ctx)
+    session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.engine.run(ctx)
     Engine._engine_loop:
         self._deps.route() → AgentAction(action_type="run_command", command="/大纲")
         match action.action_type:

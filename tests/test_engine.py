@@ -7,21 +7,21 @@ from pathlib import Path
 
 import pytest
 
-from writer.engine import (
-    ActionEvent,
-    Done,
-    EngineContext,
-    TextChunk,
-    production_deps,
-    run_engine,
-)
-from writer.engine.deps import EngineDeps
 from writer.project import create_workspace, detect_state
 from writer.routing import (
     AgentAction,
     IntentRouter,
     RuleBasedIntentRouter,
 )
+from writer.runner import (
+    ActionEvent,
+    Done,
+    RunnerContext,
+    TextChunk,
+    production_deps,
+    run_runner,
+)
+from writer.runner.deps import RunnerDeps
 
 # ---------------------------------------------------------------------------
 # Router classification
@@ -120,8 +120,8 @@ def _ctx(
     *,
     project_root: Path | None = None,
     project_state: str = "S0",
-) -> EngineContext:
-    return EngineContext(
+) -> RunnerContext:
+    return RunnerContext(
         user_input=text,
         project_root=project_root,
         project_state=project_state,
@@ -129,7 +129,7 @@ def _ctx(
     )
 
 
-def _workspace_ctx(text: str, root: Path) -> EngineContext:
+def _workspace_ctx(text: str, root: Path) -> RunnerContext:
     return _ctx(
         text,
         project_root=root,
@@ -137,8 +137,8 @@ def _workspace_ctx(text: str, root: Path) -> EngineContext:
     )
 
 
-def _deps_with_real_prose() -> EngineDeps:
-    """构造带真实 LLM 假端的 ``EngineDeps``（用于测试 ``write_chapter``）。
+def _deps_with_real_prose() -> RunnerDeps:
+    """构造带真实 LLM 假端的 ``RunnerDeps``（用于测试 ``write_chapter``）。
 
     自 2026-07-14 起,``plan_chapter`` 节点严格 LLM 驱动。本 helper 让
     不配置真实 API key 的 CI 也能跑通整个 5 节点图 —— 把
@@ -189,7 +189,7 @@ def _deps_with_real_prose() -> EngineDeps:
 def test_engine_yields_done_for_answer() -> None:
     deps = production_deps()
 
-    events = _consume(run_engine(_ctx("帮我润色下这段"), deps))
+    events = _consume(run_runner(_ctx("帮我润色下这段"), deps))
 
     assert any(isinstance(e, TextChunk) and "[engine] 分析输入" in e.text for e in events)
     # 自然语言输入只要被 engine 接住就行 — LLM router 可能路由到
@@ -204,7 +204,7 @@ def test_engine_yields_done_for_workflow(tmp_path: Path) -> None:
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
 
-    events = _consume(run_engine(_workspace_ctx("/创作 1.3", workspace.root), deps))
+    events = _consume(run_runner(_workspace_ctx("/创作 1.3", workspace.root), deps))
 
     assert any(isinstance(e, ActionEvent) and e.action.workflow == "write_chapter" for e in events)
     # PR1: write_chapter now returns ``WorkflowResult(status="completed")``
@@ -216,9 +216,9 @@ def test_engine_yields_done_for_workflow(tmp_path: Path) -> None:
 def test_engine_yields_done_for_tool() -> None:
     deps = production_deps()
 
-    events = _consume(run_engine(_ctx("查一下 F003"), deps))
+    events = _consume(run_runner(_ctx("查一下 F003"), deps))
 
-    from writer.engine import ErrorEvent, ToolCall, ToolResult
+    from writer.runner import ErrorEvent, ToolCall, ToolResult
 
     # LLM router 可能把伏笔查询路由到 foreshadow_search / lookup_foreshadowing /
     # 其它等价的工具名；锁定具体名字会让测试脆弱。改为断言:
@@ -237,7 +237,7 @@ def test_engine_yields_done_for_tool() -> None:
 def test_engine_yields_done_for_command() -> None:
     deps = production_deps()
 
-    events = _consume(run_engine(_ctx("/未知命令"), deps))
+    events = _consume(run_runner(_ctx("/未知命令"), deps))
 
     assert any(isinstance(e, ActionEvent) and e.action.command == "/未知命令" for e in events)
     assert any(isinstance(e, Done) and e.reason == "command_pending" for e in events)
@@ -246,7 +246,7 @@ def test_engine_yields_done_for_command() -> None:
 def test_production_deps_has_router() -> None:
     deps = production_deps()
 
-    assert isinstance(deps, EngineDeps)
+    assert isinstance(deps, RunnerDeps)
     # When the local .env has no API key, router is the bare rule router.
     # When it does (e.g. the user's .env in this repo), router is wrapped
     # in a CompositeRouter. Both satisfy IntentRouter.
@@ -265,7 +265,7 @@ def test_engine_init_defaults_to_current_directory(
     monkeypatch.chdir(tmp_path)
     deps = production_deps()
 
-    events = _consume(run_engine(_ctx("/init 引擎测试"), deps))
+    events = _consume(run_runner(_ctx("/init 引擎测试"), deps))
 
     assert (tmp_path / "引擎测试").is_dir()
     assert not (tmp_path / "novels" / "引擎测试").exists()
@@ -284,7 +284,7 @@ def test_engine_init_brief_at_s1_writes_core_idea(tmp_path: Path) -> None:
         "然而他穿越到的这个世界是一个充满杀戮和罪恶的世界。"
     )
 
-    events = _consume(run_engine(_workspace_ctx(f"/init {brief}", workspace.root), deps))
+    events = _consume(run_runner(_workspace_ctx(f"/init {brief}", workspace.root), deps))
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
     done_events = [e for e in events if isinstance(e, Done)]
@@ -310,7 +310,7 @@ def test_engine_init_brief_blocks_creative_text_at_s0(
         "然而他穿越到的这个世界是一个充满杀戮和罪恶的世界。"
     )
 
-    events = _consume(run_engine(_ctx(f"/init {brief}"), deps))
+    events = _consume(run_runner(_ctx(f"/init {brief}"), deps))
 
     assert not any(path.is_dir() for path in tmp_path.iterdir())
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
@@ -337,7 +337,7 @@ def test_engine_dispatches_outline_directive(tmp_path: Path) -> None:
     workspace = create_workspace("outline-test", tmp_path)
 
     events = _consume(
-        run_engine(_workspace_ctx("/大纲 双主角女将军从冷宫到朝堂", workspace.root), deps)
+        run_runner(_workspace_ctx("/大纲 双主角女将军从冷宫到朝堂", workspace.root), deps)
     )
 
     action_events = [e for e in events if isinstance(e, ActionEvent)]
@@ -380,7 +380,7 @@ def test_engine_dispatches_toc_directive(tmp_path: Path) -> None:
     )
 
     events = _consume(
-        run_engine(_workspace_ctx("/目录", workspace.root), deps)
+        run_runner(_workspace_ctx("/目录", workspace.root), deps)
     )
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
@@ -399,7 +399,7 @@ def test_engine_streams_workflow_stub_chunks(tmp_path: Path) -> None:
     workspace = create_workspace("workflow-test", tmp_path)
     (workspace.root / "大纲" / "章节目录.md").write_text("第一章", encoding="utf-8")
 
-    events = _consume(run_engine(_workspace_ctx("/创作 1.3", workspace.root), deps))
+    events = _consume(run_runner(_workspace_ctx("/创作 1.3", workspace.root), deps))
 
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
 
@@ -424,13 +424,13 @@ def test_engine_workflow_unknown_name_raises_domain_error() -> None:
     import pytest
 
     from writer.agents import builtin_agent_registry
-    from writer.engine.deps import _DefaultEngineDeps
     from writer.routing import RuleBasedIntentRouter
+    from writer.runner.deps import _DefaultRunnerDeps
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
     from writer.tools.errors import WorkflowNotFoundError
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=RuleBasedIntentRouter(),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -486,12 +486,12 @@ class _AskUserRouter:
 
 def test_engine_emits_error_event_on_router_failure() -> None:
     from writer.agents import builtin_agent_registry
-    from writer.engine import ErrorEvent
-    from writer.engine.deps import _DefaultEngineDeps
+    from writer.runner import ErrorEvent
+    from writer.runner.deps import _DefaultRunnerDeps
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=_FailingRouter(),  # type: ignore[arg-type]
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -499,7 +499,7 @@ def test_engine_emits_error_event_on_router_failure() -> None:
         agent_registry=builtin_agent_registry(),
     )
 
-    events = _consume(run_engine(_ctx("anything"), deps))
+    events = _consume(run_runner(_ctx("anything"), deps))
 
     assert any(isinstance(e, ErrorEvent) and "kaboom" in e.message for e in events)
     assert any(isinstance(e, Done) and e.reason == "aborted" for e in events)
@@ -507,12 +507,12 @@ def test_engine_emits_error_event_on_router_failure() -> None:
 
 def test_engine_emits_interrupt_for_ask_user_action() -> None:
     from writer.agents import builtin_agent_registry
-    from writer.engine import Interrupt
-    from writer.engine.deps import _DefaultEngineDeps
+    from writer.runner import Interrupt
+    from writer.runner.deps import _DefaultRunnerDeps
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=_AskUserRouter("你想修改哪一段？"),  # type: ignore[arg-type]
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -520,7 +520,7 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
         agent_registry=builtin_agent_registry(),
     )
 
-    events = _consume(run_engine(_ctx("模糊输入"), deps))
+    events = _consume(run_runner(_ctx("模糊输入"), deps))
 
     interrupts = [e for e in events if isinstance(e, Interrupt)]
     assert interrupts, "expected an Interrupt event"
@@ -531,13 +531,13 @@ def test_engine_emits_interrupt_for_ask_user_action() -> None:
 
 def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
     from writer.agents import builtin_agent_registry
-    from writer.engine import TextChunk
-    from writer.engine.config import EngineConfig
-    from writer.engine.deps import _DefaultEngineDeps
+    from writer.runner import TextChunk
+    from writer.runner.config import RunnerConfig
+    from writer.runner.deps import _DefaultRunnerDeps
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=RuleBasedIntentRouter(),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -545,8 +545,8 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
         agent_registry=builtin_agent_registry(),
     )
 
-    cfg = EngineConfig(session_id="x", fast_mode=True)
-    events = _consume(run_engine(_ctx("帮我润色下这段"), deps, config=cfg))
+    cfg = RunnerConfig(session_id="x", fast_mode=True)
+    events = _consume(run_runner(_ctx("帮我润色下这段"), deps, config=cfg))
 
     # No diagnostic TextChunks starting with [engine]
     engine_logs = [
@@ -564,12 +564,12 @@ def test_engine_fast_mode_suppresses_engine_log_chunks() -> None:
 def test_engine_calls_tool_registry_on_call_tool_action() -> None:
     """Real call_tool path: registry invoked, ToolCall + ToolResult + tool_completed emitted."""
     from writer.agents import builtin_agent_registry
-    from writer.engine import ToolCall, ToolResult
-    from writer.engine.deps import _DefaultEngineDeps
+    from writer.runner import ToolCall, ToolResult
+    from writer.runner.deps import _DefaultRunnerDeps
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=RuleBasedIntentRouter(),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -577,7 +577,7 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
         agent_registry=builtin_agent_registry(),
     )
 
-    events = _consume(run_engine(_ctx("查一下 F003"), deps))
+    events = _consume(run_runner(_ctx("查一下 F003"), deps))
 
     assert any(isinstance(e, ToolCall) and e.name == "foreshadow_search" for e in events)
     tool_results = [e for e in events if isinstance(e, ToolResult)]
@@ -590,9 +590,9 @@ def test_engine_calls_tool_registry_on_call_tool_action() -> None:
 def test_engine_handles_tool_not_found_error() -> None:
     """A tool name that the registry doesn't know must yield ErrorEvent + Done(aborted)."""
     from writer.agents import builtin_agent_registry
-    from writer.engine import ErrorEvent
-    from writer.engine.deps import _DefaultEngineDeps
     from writer.routing import AgentAction
+    from writer.runner import ErrorEvent
+    from writer.runner.deps import _DefaultRunnerDeps
     from writer.skills import built_directive_registry
     from writer.tools import ToolRuntime, built_tool_registry
 
@@ -603,7 +603,7 @@ def test_engine_handles_tool_not_found_error() -> None:
                 tool_name="definitely_not_a_tool",
             )
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=_CallUnknownTool(),  # type: ignore[arg-type]
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -611,7 +611,7 @@ def test_engine_handles_tool_not_found_error() -> None:
         agent_registry=builtin_agent_registry(),
     )
 
-    events = _consume(run_engine(_ctx("anything"), deps))
+    events = _consume(run_runner(_ctx("anything"), deps))
 
     assert any(isinstance(e, ErrorEvent) and "definitely_not_a_tool" in e.message for e in events)
     assert any(isinstance(e, Done) and e.reason == "aborted" for e in events)

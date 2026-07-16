@@ -1,4 +1,4 @@
-"""Unit tests for EngineSession cross-turn state container."""
+"""Unit tests for Engine cross-turn state container."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ from uuid import UUID
 
 from writer.agents import builtin_agent_registry
 from writer.config import get_settings
-from writer.engine import Engine, Interrupt
-from writer.engine.context import EngineContext
-from writer.engine.deps import EngineDeps
 from writer.llm.prose import DeterministicProseClient
 from writer.routing import AgentAction, IntentRouter, RuleBasedIntentRouter
-from writer.session import EngineSession, TurnRecord, compose_pending_input
+from writer.runner import Interrupt, Runner
+from writer.runner.context import RunnerContext
+from writer.runner.deps import RunnerDeps
+from writer.session import Engine, TurnRecord, compose_pending_input
 from writer.skills import DirectiveRegistry, built_directive_registry
 from writer.tools import ToolRuntime, built_tool_registry
 from writer.workflows.types import WorkflowResult
@@ -23,7 +23,7 @@ from writer.workflows.types import WorkflowResult
 
 
 def test_session_fixes_session_id_across_turns() -> None:
-    session = EngineSession()
+    session = Engine()
     initial_id = session.session_id
 
     # Multiple records keep the same session_id
@@ -39,19 +39,19 @@ def test_session_fixes_session_id_across_turns() -> None:
 
 
 def test_session_id_is_uuid() -> None:
-    session = EngineSession()
+    session = Engine()
     assert isinstance(session.session_id, UUID)
 
 
 def test_session_started_at_is_datetime() -> None:
     from datetime import datetime
 
-    session = EngineSession()
+    session = Engine()
     assert isinstance(session.started_at, datetime)
 
 
 def test_session_defaults() -> None:
-    session = EngineSession()
+    session = Engine()
 
     assert session.project_root is None
     assert session.project_state == "S0"
@@ -66,22 +66,22 @@ def test_session_defaults() -> None:
 
 
 def test_session_deps_built_once_at_construction() -> None:
-    s1 = EngineSession()
-    s2 = EngineSession()
-    deps1 = s1.engine.deps
-    deps2 = s2.engine.deps
+    s1 = Engine()
+    s2 = Engine()
+    deps1 = s1.runner.deps
+    deps2 = s2.runner.deps
 
     # Each session owns its own deps
     assert deps1 is not deps2
     assert isinstance(deps1.router, IntentRouter)
 
     # Deps identity is stable across calls within the same session
-    assert s1.engine.deps is deps1
+    assert s1.runner.deps is deps1
 
 
 def test_session_deps_router_is_intent_router() -> None:
-    session = EngineSession()
-    assert isinstance(session.engine.deps.router, IntentRouter)
+    session = Engine()
+    assert isinstance(session.runner.deps.router, IntentRouter)
 
 
 # ---------------------------------------------------------------------------
@@ -92,47 +92,47 @@ def test_session_deps_router_is_intent_router() -> None:
 def test_session_tool_runtime_rebuilt_when_project_root_changes(
     tmp_path: Path,
 ) -> None:
-    session = EngineSession()
-    original_router = session.engine.deps.router
-    original_runtime = session.engine.deps.tool_runtime
+    session = Engine()
+    original_router = session.runner.deps.router
+    original_runtime = session.runner.deps.tool_runtime
 
     session.set_project_root(tmp_path)
 
     assert session.project_root == tmp_path
     # Router preserved
-    assert session.engine.deps.router is original_router
+    assert session.runner.deps.router is original_router
     # ToolRuntime swapped to one pointing at the new root
-    assert session.engine.deps.tool_runtime is not original_runtime
-    assert session.engine.deps.tool_runtime.project_root == tmp_path.resolve()
+    assert session.runner.deps.tool_runtime is not original_runtime
+    assert session.runner.deps.tool_runtime.project_root == tmp_path.resolve()
 
 
 def test_session_persists_project_root_across_turns(tmp_path: Path) -> None:
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(tmp_path)
-    after_id = id(session.engine.deps)
+    after_id = id(session.runner.deps)
 
     session.record_turn("hello", "answered")
 
     assert session.project_root == tmp_path
-    assert id(session.engine.deps) == after_id  # no rebuild on record_turn
+    assert id(session.runner.deps) == after_id  # no rebuild on record_turn
 
 
 def test_session_set_project_root_to_none_uses_sentinel() -> None:
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(Path("/tmp/x"))
     session.set_project_root(None)
 
     assert session.project_root is None
-    assert session.engine.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
+    assert session.runner.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
 
 
 def test_session_set_project_root_same_path_is_noop(tmp_path: Path) -> None:
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(tmp_path)
-    runtime_after_first = session.engine.deps.tool_runtime
+    runtime_after_first = session.runner.deps.tool_runtime
 
     session.set_project_root(tmp_path)  # same path
-    assert session.engine.deps.tool_runtime is runtime_after_first
+    assert session.runner.deps.tool_runtime is runtime_after_first
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +141,7 @@ def test_session_set_project_root_same_path_is_noop(tmp_path: Path) -> None:
 
 
 def test_session_records_each_turn() -> None:
-    session = EngineSession()
+    session = Engine()
 
     r0 = session.record_turn("查 F003", "tool_completed")
     r1 = session.record_turn("帮我润色", "answered")
@@ -156,7 +156,7 @@ def test_session_records_each_turn() -> None:
 
 
 def test_session_turn_index_increments() -> None:
-    session = EngineSession()
+    session = Engine()
     for i in range(5):
         session.record_turn(f"input {i}", "answered")
 
@@ -169,7 +169,7 @@ def test_session_turn_index_increments() -> None:
 
 
 def test_session_pending_interrupt_cleared_after_done() -> None:
-    session = EngineSession()
+    session = Engine()
 
     intr = Interrupt(type="text", prompt="你想修改哪一段？")
     session.set_pending_interrupt(intr)
@@ -180,7 +180,7 @@ def test_session_pending_interrupt_cleared_after_done() -> None:
 
 
 def test_session_pending_interrupt_persists_until_cleared() -> None:
-    session = EngineSession()
+    session = Engine()
     intr = Interrupt(type="text", prompt="Q?")
     session.set_pending_interrupt(intr)
 
@@ -211,25 +211,25 @@ def test_compose_pending_input_without_pending() -> None:
 def test_session_package_public_surface() -> None:
     import writer.session as _mod
 
-    assert _mod.EngineSession is EngineSession
+    assert _mod.Engine is Engine
     assert _mod.TurnRecord is TurnRecord
     assert _mod.compose_pending_input is compose_pending_input
 
 
 # ---------------------------------------------------------------------------
-# Protocol-only EngineDeps (arch-optimizer N9, 2026-07-05)
+# Protocol-only RunnerDeps (arch-optimizer N9, 2026-07-05)
 # ---------------------------------------------------------------------------
 
 
 def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> None:
-    """A non-dataclass ``EngineDeps`` implementation must survive ``set_project_root``.
+    """A non-dataclass ``RunnerDeps`` implementation must survive ``set_project_root``.
 
     Per arch-optimizer N9 (2026-07-05): M6 added ``rebind_tool_runtime``
-    to the ``EngineDeps`` Protocol so we no longer duck-type
+    to the ``RunnerDeps`` Protocol so we no longer duck-type
     ``is_dataclass(self.deps)`` inside ``set_project_root``. This test
     verifies the new contract: a plain class (NOT ``@dataclass``)
-    implementing all 5 fields + 4 methods of ``EngineDeps`` can be
-    injected into ``EngineSession`` and ``set_project_root`` swaps
+    implementing all 5 fields + 4 methods of ``RunnerDeps`` can be
+    injected into ``Engine`` and ``set_project_root`` swaps
     ``tool_runtime`` cleanly.
 
     Updated 2026-07-09 (``chg-remove-roles``): the
@@ -238,7 +238,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
     """
 
     class PlainDeps:
-        """Plain (non-dataclass) ``EngineDeps`` implementation."""
+        """Plain (non-dataclass) ``RunnerDeps`` implementation."""
 
         def __init__(self) -> None:
             self.router = RuleBasedIntentRouter()
@@ -248,7 +248,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
                 project_root=Path("/__no_project__").resolve()
             )
             self.directive_registry = built_directive_registry()
-            # Required by the :class:`EngineDeps` Protocol since the
+            # Required by the :class:`RunnerDeps` Protocol since the
             # 2026-07-08 LLM tool-loop addition (``deps.tool_loop``).
             self.tool_loop = None
             # Required by the Protocol since 2026-07-09
@@ -268,18 +268,18 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)
 
-        def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
+        def run_workflow(self, name: str, ctx: RunnerContext) -> WorkflowResult:
             # PR1: return a real WorkflowResult (no more Iterable[str]).
             # Default to completed so engine emits workflow_completed.
             return WorkflowResult(status="completed", chunks=())
 
-        def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
+        def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> RunnerDeps:
             self.tool_runtime = new_runtime
             return self
 
         def rebind_directive_registry(
             self, new_registry: DirectiveRegistry
-        ) -> EngineDeps:
+        ) -> RunnerDeps:
             # Added 2026-07-08 (chg-project-skills). The session's
             # ``set_project_root`` calls this after rebuilding the
             # registry; the stub mirrors the production wiring by
@@ -289,7 +289,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
         def rebind_skill_registry(
             self, new_registry: DirectiveRegistry
-        ) -> EngineDeps:
+        ) -> RunnerDeps:
             # Back-compat alias kept for the older name; the Protocol
             # declares both methods so existing callers still work.
             self.directive_registry = new_registry
@@ -297,7 +297,7 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
         def rebind_agent_registry(
             self, new_registry: object
-        ) -> EngineDeps:
+        ) -> RunnerDeps:
             # Added 2026-07-09 (fea-agent-mirror). Symmetric to
             # rebind_directive_registry: ``set_project_root`` calls
             # this after rebuilding the registry from the new
@@ -307,21 +307,21 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
         def rebind_tool_loop(
             self, new_loop: object
-        ) -> EngineDeps:
+        ) -> RunnerDeps:
             # Added 2026-07-09 (Bug 01). Symmetric to rebind_tool_runtime.
             # ``set_project_root`` calls this with a newly constructed
             # ``ReActAgent`` (or ``None`` for rule-only deployment).
             self.tool_loop = new_loop
             return self
 
-    # The stub satisfies the ``@runtime_checkable`` EngineDeps Protocol.
+    # The stub satisfies the ``@runtime_checkable`` RunnerDeps Protocol.
     stub = PlainDeps()
-    assert isinstance(stub, EngineDeps)
+    assert isinstance(stub, RunnerDeps)
 
     # Inject into session (skip the default production_deps construction).
-    session = EngineSession()
-    session.engine = Engine(deps=stub)
-    original_router = session.engine.deps.router
+    session = Engine()
+    session.runner = Runner(deps=stub)
+    original_router = session.runner.deps.router
 
     # ``set_project_root`` must NOT raise ``AttributeError`` (regression
     # on M6: the old duck-typed branch needed ``is_dataclass(self.deps)``).
@@ -329,9 +329,9 @@ def test_session_set_project_root_with_protocol_only_deps(tmp_path: Path) -> Non
 
     assert session.project_root == tmp_path
     # Router preserved across the swap (no full production_deps rebuild).
-    assert session.engine.deps.router is original_router
+    assert session.runner.deps.router is original_router
     # Runtime swapped to the new root.
-    assert session.engine.deps.tool_runtime.project_root == tmp_path.resolve()
+    assert session.runner.deps.tool_runtime.project_root == tmp_path.resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +348,7 @@ def test_set_project_root_rebuilds_tool_loop(tmp_path: Path) -> None:
     from pydantic import SecretStr
 
     from writer.config import Settings
-    from writer.engine.deps import production_deps
+    from writer.runner.deps import production_deps
 
     proj_a = tmp_path / "proj_a"
     proj_b = tmp_path / "proj_b"
@@ -366,31 +366,31 @@ def test_set_project_root_rebuilds_tool_loop(tmp_path: Path) -> None:
     assert deps.tool_loop is not None
     assert deps.tool_loop._runtime.project_root == proj_a.resolve()
 
-    session = EngineSession()
-    session.engine = Engine(deps=deps)
+    session = Engine()
+    session.runner = Runner(deps=deps)
     session.project_root = proj_a
 
     # 切到 B:tool_loop 应被重建,新 runtime 指向 B
     session.set_project_root(proj_b)
-    assert session.engine.deps.tool_loop is not None
-    assert session.engine.deps.tool_loop._runtime.project_root == proj_b.resolve()
+    assert session.runner.deps.tool_loop is not None
+    assert session.runner.deps.tool_loop._runtime.project_root == proj_b.resolve()
 
 
 def test_set_project_root_with_protocol_only_deps(tmp_path: Path) -> None:
     """Bug 01: PlainDeps 补 rebind_tool_loop 后,set_project_root 通过。"""
-    # PlainDeps 已有 rebind_tool_loop;这里只验证 isinstance(stub, EngineDeps)
+    # PlainDeps 已有 rebind_tool_loop;这里只验证 isinstance(stub, RunnerDeps)
     # 仍然为真,确保 Protocol 字段扩展未破坏 stub 验证。
     stub_factory = _build_plain_deps_stub()  # type: ignore[func-returns-value]
-    session = EngineSession()
-    session.engine = Engine(deps=stub_factory)
-    assert isinstance(session.engine.deps, EngineDeps)
+    session = Engine()
+    session.runner = Runner(deps=stub_factory)
+    assert isinstance(session.runner.deps, RunnerDeps)
     # 调用 set_project_root 不抛 AttributeError
     session.set_project_root(tmp_path)
-    assert session.engine.deps.tool_runtime.project_root == tmp_path.resolve()
+    assert session.runner.deps.tool_runtime.project_root == tmp_path.resolve()
 
 
-def _build_plain_deps_stub() -> EngineDeps:
-    """返回一个最小 PlainDeps 实例,满足 EngineDeps Protocol。"""
+def _build_plain_deps_stub() -> RunnerDeps:
+    """返回一个最小 PlainDeps 实例,满足 RunnerDeps Protocol。"""
     # 直接复用类内测试的 stub 模式;最小字段集足以过 isinstance 检查。
     class _Stub:
         def __init__(self) -> None:
@@ -409,30 +409,30 @@ def _build_plain_deps_stub() -> EngineDeps:
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)
 
-        def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
+        def run_workflow(self, name: str, ctx: RunnerContext) -> WorkflowResult:
             return WorkflowResult(status="completed", chunks=())
 
-        def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> EngineDeps:
+        def rebind_tool_runtime(self, new_runtime: ToolRuntime) -> RunnerDeps:
             self.tool_runtime = new_runtime
             return self
 
         def rebind_directive_registry(
             self, new_registry: DirectiveRegistry
-        ) -> EngineDeps:
+        ) -> RunnerDeps:
             self.directive_registry = new_registry
             return self
 
         def rebind_skill_registry(
             self, new_registry: DirectiveRegistry
-        ) -> EngineDeps:
+        ) -> RunnerDeps:
             self.directive_registry = new_registry
             return self
 
-        def rebind_agent_registry(self, new_registry: object) -> EngineDeps:
+        def rebind_agent_registry(self, new_registry: object) -> RunnerDeps:
             self.agent_registry = new_registry
             return self
 
-        def rebind_tool_loop(self, new_loop: object) -> EngineDeps:
+        def rebind_tool_loop(self, new_loop: object) -> RunnerDeps:
             self.tool_loop = new_loop
             return self
 
@@ -444,7 +444,7 @@ def test_set_project_root_none_does_not_error(tmp_path: Path) -> None:
     from pydantic import SecretStr
 
     from writer.config import Settings
-    from writer.engine.deps import production_deps
+    from writer.runner.deps import production_deps
 
     proj_a = tmp_path / "proj_a"
     proj_a.mkdir()
@@ -458,15 +458,15 @@ def test_set_project_root_none_does_not_error(tmp_path: Path) -> None:
     deps = production_deps(settings=settings, project_root=proj_a)
     assert deps.tool_loop is not None
 
-    session = EngineSession()
-    session.engine = Engine(deps=deps)
+    session = Engine()
+    session.runner = Runner(deps=deps)
     session.project_root = proj_a
 
     # 切到 None:不应抛错;tool_loop 仍指向 ReActAgent(因为 settings
     # 还有 API key);runtime 已切到 sentinel。
     session.set_project_root(None)
     # 不抛错,tool_runtime 已切到 sentinel
-    assert session.engine.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
+    assert session.runner.deps.tool_runtime.project_root == Path("/__no_project__").resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -486,7 +486,7 @@ def _seed_agent_md(root: Path, *, genre: str | None) -> None:
 
 def test_session_refresh_project_genre_reads_agent_md(tmp_path: Path) -> None:
     _seed_agent_md(tmp_path, genre="言情")
-    session = EngineSession()
+    session = Engine()
     session.project_root = tmp_path
 
     result = session.refresh_project_genre()
@@ -498,7 +498,7 @@ def test_session_refresh_project_genre_falls_back_when_missing_ticaline(
     tmp_path: Path,
 ) -> None:
     _seed_agent_md(tmp_path, genre=None)
-    session = EngineSession()
+    session = Engine()
 
     assert session.refresh_project_genre() == "other"
     assert session.project_genre == "other"
@@ -507,7 +507,7 @@ def test_session_refresh_project_genre_falls_back_when_missing_ticaline(
 def test_session_refresh_project_genre_falls_back_when_agent_md_missing(
     tmp_path: Path,
 ) -> None:
-    session = EngineSession()
+    session = Engine()
 
     assert session.refresh_project_genre() == "other"
     assert session.project_genre == "other"
@@ -515,7 +515,7 @@ def test_session_refresh_project_genre_falls_back_when_agent_md_missing(
 
 def test_session_set_project_root_triggers_genre_refresh(tmp_path: Path) -> None:
     _seed_agent_md(tmp_path, genre="玄幻")
-    session = EngineSession()
+    session = Engine()
 
     session.set_project_root(tmp_path)
 

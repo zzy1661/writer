@@ -4,7 +4,7 @@
 
 ``prep_context -> plan_chapter -> draft_chapter -> proofread -> review_gate -> (rewrite | persist_outputs)``
 
-节点调用激活的 :class:`EngineDeps` 进行散文生成
+节点调用激活的 :class:`RunnerDeps` 进行散文生成
 （``deps.prose_client.generate_text``）和连续性检查
 （``deps.tool_registry.invoke("foreshadow_search", ...)``）。
 ``persist_outputs`` 终结节点写入章节文件并原子地更新
@@ -40,8 +40,8 @@ from writer.workflows.params import extract_write_chapter_args
 from writer.workflows.types import ReviewVerdict, WorkflowResult
 
 if TYPE_CHECKING:
-    from writer.engine.context import EngineContext
-    from writer.engine.deps import EngineDeps
+    from writer.runner.context import RunnerContext
+    from writer.runner.deps import RunnerDeps
 
 
 class WriterState(TypedDict, total=False):
@@ -83,7 +83,7 @@ PR2 固定为 7（per 提案中的设计决策）。未来 PR 可引入题材感
 # ---------------------------------------------------------------------------
 
 
-def run(ctx: EngineContext, deps: EngineDeps) -> WorkflowResult:
+def run(ctx: RunnerContext, deps: RunnerDeps) -> WorkflowResult:
     """构建图，运行它，并返回 :class:`WorkflowResult`。
 
     5 节点图用 checkpointer 编译（``project_root`` 可用时用 SQLite，
@@ -108,7 +108,7 @@ def run(ctx: EngineContext, deps: EngineDeps) -> WorkflowResult:
     graph = build_writer_graph(checkpointer=checkpointer)
     config = {"configurable": {"thread_id": ctx.session_id or f"write-{args.chapter_id}"}}
     # ``deps.prose_client`` 在生产装配中始终被设置（Protocol 字段为
-    # ``Optional`` 仅是为了让手写 ``_DefaultEngineDeps`` 的测试 stub
+    # ``Optional`` 仅是为了让手写 ``_DefaultRunnerDeps`` 的测试 stub
     # 容易构造）。此处 cast 让函数其余部分使用非 Optional 类型。
     prose_client = _require_prose_client(deps)
     initial_state["prose_client_name"] = prose_client.name
@@ -364,10 +364,10 @@ def _route_after_review(state: WriterState) -> Literal["rewrite", "end"]:
 # 直接构建图的测试必须在 ``graph.invoke`` 前调用 ``_set_deps(deps)``。
 
 
-_WORKFLOW_DEPS: EngineDeps | None = None
+_WORKFLOW_DEPS: RunnerDeps | None = None
 
 
-def _set_deps(deps: EngineDeps) -> None:
+def _set_deps(deps: RunnerDeps) -> None:
     """把 ``deps`` 绑定为下一次图调用的激活依赖。
 
     由 :func:`run`（以及直接构建图的测试）调用。绑定刻意是全局的，
@@ -386,7 +386,7 @@ def _reset_deps() -> None:
     _WORKFLOW_DEPS = None
 
 
-def _get_deps() -> EngineDeps:
+def _get_deps() -> RunnerDeps:
     if _WORKFLOW_DEPS is None:
         msg = (
             "write_chapter node called without _set_deps; "
@@ -482,7 +482,7 @@ def _call_prose_client(
         raise RuntimeError(msg) from exc
 
 
-def _require_prose_client(deps: EngineDeps) -> Any:
+def _require_prose_client(deps: RunnerDeps) -> Any:
     """返回 ``deps.prose_client``，若为 ``None`` 则抛出。
 
     Protocol 字段为 ``Optional`` 是为了 stub 友好；生产装配始终
@@ -496,7 +496,7 @@ def _require_prose_client(deps: EngineDeps) -> Any:
     client = deps.prose_client
     if client is None:
         msg = (
-            "EngineDeps.prose_client is None; "
+            "RunnerDeps.prose_client is None; "
             "production_deps always sets it, so this is a wiring bug"
         )
         raise RuntimeError(msg)
@@ -504,7 +504,7 @@ def _require_prose_client(deps: EngineDeps) -> Any:
 
 
 def _call_review_llm(
-    deps: EngineDeps, draft: str, active_foreshadows: list[str]
+    deps: RunnerDeps, draft: str, active_foreshadows: list[str]
 ) -> ReviewVerdict:
     """用 :class:`ReviewVerdict` 结构化 prompt 调用 LLM。
 
@@ -533,7 +533,7 @@ def _call_review_llm(
     return invoke_structured_json(llm, messages, ReviewVerdict)
 
 
-def _resolve_review_llm(deps: EngineDeps) -> Any:
+def _resolve_review_llm(deps: RunnerDeps) -> Any:
     """返回用于 review 判定的 LLM。
 
     优先级：
@@ -551,7 +551,7 @@ def _resolve_review_llm(deps: EngineDeps) -> Any:
     return _get_llm(get_settings())
 
 
-def _load_active_foreshadows(deps: EngineDeps) -> list[str]:
+def _load_active_foreshadows(deps: RunnerDeps) -> list[str]:
     """调用 ``foreshadow_search(status="active")`` 并返回 IDs。
 
     任何错误时返回空列表（LLM 仍可自由产出判定；缺少活跃伏笔只
@@ -665,7 +665,7 @@ def _state_to_result(
 
 
 # 兼容旧 import（例如 ``tests/test_workflows.py``）的别名。
-def stub(ctx: EngineContext) -> WorkflowResult:
+def stub(ctx: RunnerContext) -> WorkflowResult:
     """兼容别名 —— 用空 deps 委托给 :func:`run`。
 
     PR1 别名只接受 ``ctx``；PR2 为调用 ``from writer.workflows.write_chapter import stub``
@@ -673,7 +673,7 @@ def stub(ctx: EngineContext) -> WorkflowResult:
     """
     msg = (
         "write_chapter.stub is a compatibility shim; "
-        "use write_chapter.run with EngineDeps for the real path"
+        "use write_chapter.run with RunnerDeps for the real path"
     )
     raise NotImplementedError(msg)
 

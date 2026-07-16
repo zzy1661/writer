@@ -20,7 +20,7 @@ REPL 用户输入混合三类:
 
 如果做一个万能 Agent 直接写文件、调用 LLM 写整章、推进状态机,系统会难以调试和恢复:
 
-- 长任务应该交给 LangGraph(占位 workflow 现在是 `_DefaultEngineDeps.run_workflow`,真实图待 `EngineDeps` 注入 `WorkflowStarter`)
+- 长任务应该交给 LangGraph(占位 workflow 现在是 `_DefaultRunnerDeps.run_workflow`,真实图待 `RunnerDeps` 注入 `WorkflowStarter`)
 - 文件写入应该交给 Tool(`safe_read_file` / `safe_write_file`)
 - 命令可用性:**不再由状态机拦截**(per `chg-remove-state-machine-enforcement`,`validate_command_available` 已删除);命令在任意状态可调用,"已存在 vs 新建"判断下沉到 SKILL.md body
 
@@ -193,7 +193,7 @@ CompositeRouter.route() → AgentAction
   ├─ 规则命中(以 / 开头 或框架关键词) → RuleBasedIntentRouter 立即返回
   └─ 自由文本 → LlmIntentRouter → structured AgentAction
   ↓
-EngineDeps.route() 把 AgentAction 喂给 engine.loop 分派
+RunnerDeps.route() 把 AgentAction 喂给 engine.loop 分派
   ↓
 match action.action_type:
   - answer_directly → yield Done("answered")

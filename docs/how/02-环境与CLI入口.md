@@ -29,9 +29,9 @@ writer-agent/
 │       ├── cli/
 │       │   ├── main.py        # Typer app + REPL 启动 + 渲染 helper
 │       │   ├── commands.py    # doctor / new 子命令实现
-│       │   ├── repl.py        # handle_repl_input + PromptSession + _run_engine 桥接
+│       │   ├── repl.py        # handle_repl_input + PromptSession + _run_runner 桥接
 │       │   └── _init_backend.py  # REPL 抢先消费的 /init <brief> 后端
-│       ├── session/           # EngineSession 跨 turn 状态
+│       ├── session/           # Engine 跨 turn 状态
 │       ├── engine/            # Engine 主类 + AsyncGenerator 状态机
 │       │                     # (engine.py + loop.py compat shim + events/context/deps/config)
 │       ├── routing/           # IntentRouter Protocol + 3 实现
@@ -128,7 +128,7 @@ def new(name: str, genre: list[str] = typer.Option([], "-g", "--genre"), dir: st
 def _run_repl() -> None:
     settings = load_project_settings()
     project_root = discover_project_root()
-    session = EngineSession(project_root=project_root)  # __post_init__ 装配 EngineDeps 后包装 Engine
+    session = Engine(project_root=project_root)  # __post_init__ 装配 RunnerDeps 后包装 Engine
     print_welcome()
 
     history = FileHistory(str(HISTORY_FILE))
@@ -153,7 +153,7 @@ def _run_repl() -> None:
 > **2026-07-13 历史**:`_try_handle_repl_init_brief` 抢先消费特性早在 2026-07-13 落地;在那之前 REPL `/init <name>` 走 flag 形式 + `_parse_repl_init_argv`,与 Typer 子命令行为对齐。2026-07-14 收紧后只剩 brief 形式。
 
 ```python
-def handle_repl_input(line: str, session: EngineSession) -> bool:
+def handle_repl_input(line: str, session: Engine) -> bool:
     text = line.strip()
     if not text:
         return True
@@ -173,7 +173,7 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         return True
 
     # 3. 委派给 session.run_turn()(构造 ctx 并调 engine.run)
-    asyncio.run(_run_engine(text, session, console))
+    asyncio.run(_run_runner(text, session, console))
     return True
 ```
 
@@ -185,12 +185,12 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
 - **`SLASH_CMD_PATTERN`**：正则 `[/\w\u4e00-\u9fff]+`，保证 `/大纲` 不会被切成 `//大纲`（中文也支持）
 - **REPL 路由原则**：除框架命令（`/退出`、`/帮助`、`/状态`）外全交给 engine，避免 CLI 层重复维护命令路由
 
-## 2.7 `_run_engine`：CLI ↔ Engine 桥接
+## 2.7 `_run_runner`：CLI ↔ Engine 桥接
 
-CLI 在 `cli/repl.py::_run_engine` 里通过 `session.run_turn(user_input)` 拿到 AsyncGenerator，并逐事件消费：
+CLI 在 `cli/repl.py::_run_runner` 里通过 `session.run_turn(user_input)` 拿到 AsyncGenerator，并逐事件消费：
 
 ```python
-async def _run_engine(user_input: str, session: EngineSession, console: Console) -> None:
+async def _run_runner(user_input: str, session: Engine, console: Console) -> None:
     session.refresh_project_state()
     async for event in session.run_turn(user_input):
         match event:
@@ -218,7 +218,7 @@ async def _run_engine(user_input: str, session: EngineSession, console: Console)
 ### 关键陷阱
 
 - **`markup=False, highlight=False`** —— Rich 默认会把 `[xxx]` 当 markup，会把文本里的方括号吞掉。LLM 输出的 Markdown 链接 / 列表 / 强调都包含方括号，必须关掉 markup。
-- **session / engine / EngineSession 三层解耦** —— `session` 持跨 turn 状态；`session.engine: Engine` 持 `EngineDeps` + `EngineConfig`；`engine.run(ctx)` 是纯函数式事件流。CLI 不需要 import `EngineDeps`。
+- **session / engine / Engine 三层解耦** —— `session` 持跨 turn 状态；`session.engine: Engine` 持 `RunnerDeps` + `RunnerConfig`；`engine.run(ctx)` 是纯函数式事件流。CLI 不需要 import `RunnerDeps`。
 - ~~**`project_root` 反向回填** —— 当 `/init` 走 `answered` 路径创建项目时,payload 里会有 `project_root`,CLI 负责调用 `session.set_project_root(path)` 把新项目绑回去~~(per 2026-07-14 收紧:REPL `/init` 不再创建项目,该流程删除;创建项目的 payload 反向回填逻辑仍保留 `Engine._run_init_command`,作为 SDK / e2e pipe 等非 REPL 调用方创建项目的兜底通道)。
 
 ## 2.8 e2e 管道
@@ -254,6 +254,6 @@ uv run pytest --cov=writer                          # 覆盖率
 
 ## 2.10 进一步阅读
 
-- [03-会话与状态机](03-会话与状态机.md) —— `EngineSession` 细节
+- [03-会话与状态机](03-会话与状态机.md) —— `Engine` 细节
 - [05-引擎核心](05-引擎核心.md) —— `Engine.run` 与 Done 分支
 - [13-打包与发布](13-打包与发布.md) —— PyInstaller

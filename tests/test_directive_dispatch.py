@@ -16,18 +16,18 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from writer.engine import (
-    Done,
-    Engine,
-    EngineContext,
-    TextChunk,
-    run_engine,
-)
-from writer.engine.config import build_engine_config
-from writer.engine.deps import EngineDeps
 from writer.llm.prose import DeterministicProseClient
 from writer.project import create_workspace, detect_state
 from writer.routing import AgentAction
+from writer.runner import (
+    Done,
+    Runner,
+    RunnerContext,
+    TextChunk,
+    run_runner,
+)
+from writer.runner.config import build_runner_config
+from writer.runner.deps import RunnerDeps
 from writer.skills import (
     SkillDirective,
     built_directive_registry,
@@ -38,9 +38,9 @@ from writer.workflows.types import WorkflowResult
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from writer.engine.context import EngineContext
-    from writer.engine.deps import EngineDeps
-    from writer.engine.events import Done, TextChunk
+    from writer.runner.context import RunnerContext
+    from writer.runner.deps import RunnerDeps
+    from writer.runner.events import Done, TextChunk
 
 
 def _directive(
@@ -84,13 +84,13 @@ async def test_run_directive_preview_emits_metadata() -> None:
         # the attribute so the engine's isinstance check passes.
         prose_client = DeterministicProseClient()
 
-    engine = Engine(
+    runner = Runner(
         deps=_StubDeps(),  # type: ignore[arg-type]
-        cfg=build_engine_config(EngineContext(user_input="/x")),
+        cfg=build_runner_config(RunnerContext(user_input="/x")),
     )
-    async for event in engine._run_directive(
+    async for event in runner._run_directive(
         directive,
-        EngineContext(user_input="/x", project_root=None),
+        RunnerContext(user_input="/x", project_root=None),
     ):
         events.append(event)
 
@@ -115,13 +115,13 @@ async def test_run_directive_resolves_at_references(tmp_path: Path) -> None:
     )
 
     events: list = []
-    engine = Engine(
+    runner = Runner(
         deps=type("_StubDeps", (), {"tool_loop": None})(),  # type: ignore[arg-type]
-        cfg=build_engine_config(EngineContext(user_input="/x")),
+        cfg=build_runner_config(RunnerContext(user_input="/x")),
     )
-    async for event in engine._run_directive(
+    async for event in runner._run_directive(
         directive,
-        EngineContext(user_input="/x"),
+        RunnerContext(user_input="/x"),
     ):
         events.append(event)
 
@@ -154,8 +154,8 @@ def test_engine_dispatches_via_directive_registry(tmp_path: Path) -> None:
 
     events = asyncio.run(
         _consume(
-            run_engine(
-                EngineContext(
+            run_runner(
+                RunnerContext(
                     user_input="/大纲 双主角女将军从冷宫到朝堂",
                     project_root=workspace.root,
                 ),
@@ -172,7 +172,7 @@ def test_engine_dispatches_via_directive_registry(tmp_path: Path) -> None:
     assert answered[0].payload.get("directive") == "/大纲"
 
 
-def _run_engine_sync(ctx: EngineContext, deps: EngineDeps) -> list:
+def _run_runner_sync(ctx: RunnerContext, deps: RunnerDeps) -> list:
     import asyncio
 
     async def _consume(aiter: AsyncIterator) -> list:
@@ -181,7 +181,7 @@ def _run_engine_sync(ctx: EngineContext, deps: EngineDeps) -> list:
             out.append(ev)
         return out
 
-    return asyncio.run(_consume(run_engine(ctx, deps)))
+    return asyncio.run(_consume(run_runner(ctx, deps)))
 
 
 def test_dispatch_directive_in_s4_does_not_block(tmp_path: Path) -> None:
@@ -203,8 +203,8 @@ def test_dispatch_directive_in_s4_does_not_block(tmp_path: Path) -> None:
     assert detect_state(workspace.root) == ProjectState.WRITING
 
     deps = _stub_deps(workspace.root)
-    events = _run_engine_sync(
-        EngineContext(
+    events = _run_runner_sync(
+        RunnerContext(
             user_input="/大纲 扩写反派动机线",
             project_root=workspace.root,
             project_state="S4",
@@ -232,8 +232,8 @@ def test_dispatch_directive_in_s4_does_not_block_toc(tmp_path: Path) -> None:
     assert detect_state(workspace.root) == ProjectState.WRITING
 
     deps = _stub_deps(workspace.root)
-    events = _run_engine_sync(
-        EngineContext(
+    events = _run_runner_sync(
+        RunnerContext(
             user_input="/目录 把反派觉醒卷加入",
             project_root=workspace.root,
             project_state="S4",
@@ -279,8 +279,8 @@ def test_engine_dispatches_character_skill(tmp_path: Path) -> None:
     # 3. engine dispatches to _run_directive (rule-only preview).
     workspace = create_workspace("character-skill", tmp_path)
     deps = _stub_deps(workspace.root)
-    events = _run_engine_sync(
-        EngineContext(
+    events = _run_runner_sync(
+        RunnerContext(
             user_input="/人物 张三 主角 25 岁 程序员",
             project_root=workspace.root,
         ),
@@ -312,8 +312,8 @@ def test_resolve_references_helper_integration() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _stub_deps(project_root: Path) -> EngineDeps:
-    """Build an ``EngineDeps`` stub suitable for ``run_engine``.
+def _stub_deps(project_root: Path) -> RunnerDeps:
+    """Build an ``RunnerDeps`` stub suitable for ``run_runner``.
 
     Reuses ``built_directive_registry(project_root=...)`` so the
     engine's directive lookup reflects the project's seeded
@@ -343,7 +343,7 @@ def _stub_deps(project_root: Path) -> EngineDeps:
         def route(self, user_input: str, project_state: str) -> AgentAction:
             return self.router.route(user_input, project_state)
 
-        def run_workflow(self, name: str, ctx: EngineContext) -> WorkflowResult:
+        def run_workflow(self, name: str, ctx: RunnerContext) -> WorkflowResult:
             # PR1: return a real WorkflowResult. The dispatcher test
             # only cares that the workflow path is exercised, not the
             # status (the engine emits ``workflow_completed`` after).

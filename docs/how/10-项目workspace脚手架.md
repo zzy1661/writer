@@ -412,7 +412,7 @@ def _merge_genre_line(old_content: str, new_content: str) -> str:
 
 | 字段                | 谁读                                          | 谁写                                                      |
 | ------------------- | --------------------------------------------- | --------------------------------------------------------- |
-| `题材:`             | `EngineSession.refresh_project_genre()`       | `create_workspace` / `safe_write_file` merge              |
+| `题材:`             | `Engine.refresh_project_genre()`       | `create_workspace` / `safe_write_file` merge              |
 | `## 当前状态`       | `detect_state()`                              | `safe_write_file` 强制要求存在                             |
 | `基本要求`          | LLM 读                                        | `create_workspace` 初始                                    |
 | `当前卷/章节/进度`  | LLM 读；`/状态` 显示                          | 当前不主动写；未来由 `/创作` 等命令写入                    |
@@ -495,7 +495,7 @@ def apply_init_brief(
 REPL `handle_repl_input` 在 brief 形式下**抢先**消费:
 
 ```python
-def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
+def _try_handle_repl_init_brief(text: str, session: Engine) -> bool:
     """返回 True 表示已消费（不交给 engine）。"""
     if not (text.startswith("/init ") and looks_like_creative_brief(extract_init_brief_text(text))):
         return False
@@ -512,7 +512,7 @@ def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
     return True
 ```
 
-`Engine._maybe_run_init_brief_or_block` 不动（继续服务 `run_engine` 直接驱动 / SDK / e2e pipe），docstring 注明「REPL 抢先消费」。
+`Engine._maybe_run_init_brief_or_block` 不动（继续服务 `run_runner` 直接驱动 / SDK / e2e pipe），docstring 注明「REPL 抢先消费」。
 
 ### 关键设计
 
@@ -543,7 +543,7 @@ console.print(f"已创建: {workspace.root}")
 用户 cd 长安程序员 && uv run writer
    ↓
 REPL 启动:
-    EngineSession(project_root=./长安程序员)
+    Engine(project_root=./长安程序员)
         ├─ discover_project_root() → ./长安程序员(有 AGENT.md)
         ├─ production_deps(project_root=./长安程序员)
         │     ├─ built_directive_registry(project_root=./长安程序员)

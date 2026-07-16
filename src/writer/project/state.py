@@ -179,13 +179,23 @@ def render_agent_file(
     state: ProjectState,
     *,
     genre: str = "other",
+    architecture_method: str = DEFAULT_ARCHITECTURE_METHOD,
 ) -> str:
     """渲染项目控制文件，供状态检测使用。
 
     当 ``genre`` 是已知题材（不是 ``"other"``）时，在状态行正下方
-    包含一行 ``题材: <genre>``，让下游代码（``EngineSession.refresh_project_genre``
+    包含一行 ``题材: <genre>``，让下游代码（``Engine.refresh_project_genre``
     和 CLI ``new`` / REPL brief 流程）可以通过简单正则拿到。默认 ``"other"``
     跳过这一行，保持遗留 ``AGENT.md`` 内容不变。
+
+    ``architecture_method``（per 2026-07-16 落地）控制 ``/大纲`` directive
+    选用的整体架构方法（雪花法 / 三幕结构 / 英雄之旅 / 三步八段式 /
+    三明治 / 布莱克节拍表 / 起承转合 / 反套路等）。默认为 ``雪花法`` ，
+    与项目「大纲最扎实」的定位匹配。该字段总会被渲染（非题材语义——
+    即便方法退回默认"雪花法"，仍显式写入让下游 /大纲 directive 能稳定
+    读取），与题材的"other 跳过"语义不同。
+
+    reference：``docs/写作方法论/写作架构方法.md`` 列出全部可选方法。
     """
 
     lines = [
@@ -200,6 +210,9 @@ def render_agent_file(
     ]
     if genre and genre != "other":
         lines.append(f"- 题材: {genre}\n")
+    # 架构方法始终渲染（不像题材有"other 跳过"语义）—— 即便与默认相同
+    # 也写一行，下游 ``/大纲`` directive 用 ``safe_read_file`` 能稳定读到。
+    lines.append(f"- 架构方法: {architecture_method}\n")
     lines.extend(
         [
             "\n",
@@ -238,16 +251,26 @@ def append_agent_requirements(agent_md: Path, requirements: str) -> None:
 def refresh_agent_file(project_root: Path) -> None:
     """用当前检测到的状态更新 ``AGENT.md``。
 
-    保留文件中已有的 ``题材:`` 行，让状态切换后（例如 S1 → S2）
-    重新渲染不会清掉 ``create_workspace(genre=...)`` 设置的题材。
+    保留文件中已有的 ``题材:`` 行与 ``架构方法:`` 行，让状态切换后
+    （例如 S1 → S2）重新渲染不会清掉 ``create_workspace(...)`` /
+    ``update_agent_*_line(...)`` 设置的元数据。
+
+    当文件没有 ``架构方法:`` 行（遗留 / 手工改过）时回退到默认雪花法
+    —— 不会写入 ``other`` 这种隐式值。
     """
 
     root = project_root.resolve()
     state = detect_state(root)
     project_name = root.name
     existing_genre = read_genre_from_agent(root / "AGENT.md")
+    existing_method = read_architecture_method_from_agent(root / "AGENT.md")
     (root / "AGENT.md").write_text(
-        render_agent_file(project_name, state, genre=existing_genre),
+        render_agent_file(
+            project_name,
+            state,
+            genre=existing_genre,
+            architecture_method=existing_method,
+        ),
         encoding="utf-8",
     )
 
@@ -276,11 +299,19 @@ def read_genre_from_agent(agent_md: Path) -> str:
 #: 或列表项形式（``- 题材: 历史`` / ``* 题材: 历史`` / ``· 题材: 历史`` /
 #: ``• 题材: 历史``）出现而不破坏解析。:func:`read_genre_from_agent` 与
 #: :func:`update_agent_genre_line` 共用这一常量，避免列表漂移。
+#: 2026-07-16 扩展：架构方法行（``架构方法: ...``）共用同一前缀规则。
 _GENRE_LINE_PREFIXES: tuple[str, ...] = ("- ", "* ", "· ", "• ")
 
 
+#: ``架构方法:`` 行写入 ``AGENT.md`` 的默认值（per 2026-07-16 用户选
+#: 择「雪花法」作为默认），与 ``render_agent_file`` 的默认参数对齐。
+#: ``/大纲`` directive 通过 ``safe_read_file`` 读 AGENT.md，缺失该
+#: 行时回退到此值。
+DEFAULT_ARCHITECTURE_METHOD: str = "雪花法"
+
+
 def _strip_genre_line_prefix(stripped: str) -> str:
-    """去掉 ``题材:`` 行的可选 Markdown 列表前缀。"""
+    """去掉 ``题材:`` / ``架构方法:`` 行的可选 Markdown 列表前缀。"""
 
     for prefix in _GENRE_LINE_PREFIXES:
         if stripped.startswith(prefix):
@@ -375,6 +406,105 @@ def update_agent_genre_line(agent_md: Path, genres: list[str]) -> bool:
     return True
 
 
+def read_architecture_method_from_agent(agent_md: Path) -> str:
+    """从 ``AGENT.md`` 文件中解析 ``架构方法:`` 行。
+
+    文件缺失、不可读或没有 ``架构方法:`` 行时回退到
+    :data:`DEFAULT_ARCHITECTURE_METHOD`（雪花法）—— 与
+    :func:`render_agent_file` 的默认参数对齐，下游 ``/大纲`` directive
+    永远能拿到一个非空值。从不抛异常。
+
+    两端空白会被去掉；可选的 Markdown 列表前缀（``- `` / ``* `` / ``· `` /
+    ``• ``）也会被容忍，与 :func:`read_genre_from_agent` 共用前缀规则。
+    """
+
+    try:
+        text = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return DEFAULT_ARCHITECTURE_METHOD
+    for line in text.splitlines():
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("架构方法:"):
+            value = stripped.split(":", 1)[1].strip()
+            return value or DEFAULT_ARCHITECTURE_METHOD
+    return DEFAULT_ARCHITECTURE_METHOD
+
+
+def update_agent_architecture_method_line(
+    agent_md: Path, method: str
+) -> bool:
+    """原地更新 ``AGENT.md`` 中的 ``架构方法:`` 行，保留其它所有内容。
+
+    与 :func:`update_agent_genre_line` 对称 —— 局部更新不重写整体，但
+    比题材更新简单：架构方法没有"other 跳过"语义，
+    :data:`DEFAULT_ARCHITECTURE_METHOD` 本身就是合法值，所以始终插入
+    或替换、空字符串视为 no-op。
+
+    处理策略：
+
+    1. ``method`` 为空 / 纯空白 → no-op（不写也不删），返回 ``False``。
+    2. 若文件已存在 ``架构方法: ...`` 行（容忍 ``- `` / ``* `` / ``· `` /
+       ``• `` 前缀，与 :func:`read_architecture_method_from_agent` 一致），
+       就地替换。
+    3. 若文件没有该行，则在第一个 ``## ...`` 二级标题前插入
+       ``- 架构方法: <method>\\n`` —— 找不到任何二级标题时追加到末尾。
+
+    返回 ``True`` 表示文件被改动，``False`` 表示 no-op（空输入或
+    新值与旧值相同）。
+
+    文件不存在时静默忽略（视为 no-op），不抛异常 —— 调用方需要
+    提前用 :func:`create_workspace` 等保证 AGENT.md 存在。
+    """
+
+    label = (method or "").strip()
+    if not label:
+        return False
+
+    try:
+        original = agent_md.read_text(encoding="utf-8")
+    except (FileNotFoundError, OSError):
+        return False
+
+    lines = original.splitlines(keepends=True)
+
+    # 第一遍：寻找现有 ``架构方法:`` 行的索引（共用 list-prefix 容忍规则）。
+    target_idx: int | None = None
+    for idx, line in enumerate(lines):
+        stripped = _strip_genre_line_prefix(line.strip())
+        if stripped.startswith("架构方法:"):
+            target_idx = idx
+            break
+
+    new_line = f"- 架构方法: {label}\n"
+
+    if target_idx is not None:
+        if lines[target_idx] == new_line:
+            return False
+        lines[target_idx] = new_line
+        agent_md.write_text("".join(lines), encoding="utf-8")
+        return True
+
+    # 没有 ``架构方法:`` 行：插入到第一个 ``## ...`` 二级标题之前。
+    insert_idx: int | None = None
+    for idx, line in enumerate(lines):
+        if line.startswith("## "):
+            insert_idx = idx
+            break
+    if insert_idx is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] = lines[-1] + "\n"
+        lines.append(new_line)
+    else:
+        prefix = lines[:insert_idx]
+        suffix = lines[insert_idx:]
+        if prefix and prefix[-1].strip():
+            prefix.append("\n")
+        lines = prefix + [new_line, "\n"] + suffix
+
+    agent_md.write_text("".join(lines), encoding="utf-8")
+    return True
+
+
 def _first_existing_nonempty(root: Path, relatives: tuple[Path, ...]) -> Path | None:
     for relative in relatives:
         candidate = root / relative
@@ -409,6 +539,7 @@ __all__ = [
     "find_outline_path",
     "inspect_project",
     "read_genre_from_agent",
+    "read_architecture_method_from_agent",
     "refresh_agent_file",
     "render_agent_file",
     "safe_cwd",

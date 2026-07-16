@@ -18,8 +18,8 @@
 
 | 维度 | Claude Code 做法 | writer-agent 做法 | 数据来源 |
 | --- | --- | --- | --- |
-| 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `Engine.run(ctx)` AsyncIterator[Event] + `Engine._engine_loop` 内 `match action.action_type` 单层 dispatch(`Engine` 类主入口,持 `EngineDeps` + `EngineConfig`) | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
-| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `EngineDeps` 5 字段 + 4 方法(router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop + route / run_workflow / rebind_tool_runtime / rebind_directive_registry);被 `Engine` 类持有,`Engine.replace_deps` 整体替换;`story_agent` 字段于 2026-07-09 `chg-remove-roles` 删除 | [05](#) / `src/writer/engine/deps.py` + `src/writer/engine/engine.py` |
+| 循环核心 | `query()` AsyncGenerator + `while(true) state.transition` 7+ continue 站点 | `Engine.run(ctx)` AsyncIterator[Event] + `Engine._engine_loop` 内 `match action.action_type` 单层 dispatch(`Engine` 类主入口,持 `RunnerDeps` + `RunnerConfig`) | [05-QueryEngine与对话主循环.md](~/Desktop/sources/Claude-Code-Source-Study/docs/05) |
+| DI 边界 | `QueryDeps` 4 个口子(`callModel`/`microcompact`/`autocompact`/`uuid`) | `RunnerDeps` 5 字段 + 4 方法(router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop + route / run_workflow / rebind_tool_runtime / rebind_directive_registry);被 `Engine` 类持有,`Engine.replace_deps` 整体替换;`story_agent` 字段于 2026-07-09 `chg-remove-roles` 删除 | [05](#) / `src/writer/engine/deps.py` + `src/writer/engine/engine.py` |
 | 路由 | `RuleBasedRouter` + `LlmRouter` 同一 Protocol 下;`CompositeRouter` rule-first + LLM fallback | `RuleBasedIntentRouter` + `LlmIntentRouter` + `CompositeRouter`(本会话 M5/M6 已对齐 production_deps 接受 `primary_router` kwarg) | [15](#) / `src/writer/routing/` |
 | 扩展点 | 27 个 Hook 事件 + Markdown frontmatter 协议同构(Skill/Agent/Command/OutputStyle)+ Plugin manifest | 仅 SKILL.md frontmatter;`writer/hooks/` 未实装;`writer/commands/` / `writer/agents/` / `writer/output_styles/` 空缺 | [20-Hooks系统.md](~/Desktop/sources/Claude-Code-Source-Study/docs/20) / [21](#) |
 | 配置 | 5+1 层优先级(user/project/local/policy/managed)+ TRUSTED_SETTING_SOURCES + SAFE_ENV_VARS | 单一 Pydantic BaseSettings | [03-配置体系与企业MDM.md](~/Desktop/sources/Claude-Code-Source-Study/docs/03) |
@@ -40,10 +40,10 @@
 | 4 | **Markdown frontmatter 协议同构** | Skill/Agent/Command/OutputStyle 共用一套加载逻辑 | SKILL.md 对齐了,其他都没对齐 | 🟠 Major | 影响未来 Plugin 系统可发现性 |
 | 5 | **多层配置(5+1 优先级链)** | user/project/policy/managed + TRUSTED_SETTING_SOURCES | 单层 Pydantic Settings | 🟠 Major | 影响未来企业 MDM / Plugin 市场 |
 | 6 | **Tool 注册表运行时过滤** | 三层漏斗 + deny 规则 + isEnabled | 只有名字索引,运行时启用/禁用无 | 🟡 Minor | 影响 Plugin 粒度的工具控制 |
-| 7 | **极简 Store(subscribe/unsubscribe)** | 35 行 getState/setState/subscribe | 没有 reactive Store,EngineSession 是 mutable dataclass | 🟡 Minor | 影响未来 IDE / Web UI 实时渲染 |
+| 7 | **极简 Store(subscribe/unsubscribe)** | 35 行 getState/setState/subscribe | 没有 reactive Store,Engine 是 mutable dataclass | 🟡 Minor | 影响未来 IDE / Web UI 实时渲染 |
 | 8 | **Migration-as-Code** | 11 个独立幂等函数,文件名即语义 | 没有迁移框架 | ⚪ Backlog | 影响模型升级 / schema 演进 |
 | 9 | **CLI 启动快路径(编译期 DCE)** | cli.tsx 13 条 fast-path 在动态 import 之前 | 全部 eager import | ⚪ Backlog | 影响冷启动体感(我们 < 1s,收益低) |
-| 10 | **EngineDeps 端口开始膨胀** | QueryDeps 只 4 个口子 | 我们 5 字段 + 3 方法 | 🟡 Minor | 信号:是时候抽象下一层 |
+| 10 | **RunnerDeps 端口开始膨胀** | QueryDeps 只 4 个口子 | 我们 5 字段 + 3 方法 | 🟡 Minor | 信号:是时候抽象下一层 |
 
 ---
 
@@ -89,7 +89,7 @@
 - Stop hook 阻塞(hook 说"再想想"就把反馈塞成 user message 继续 turn)
 - token_budget_continuation(预算耗尽时降级到低质量模式继续)
 
-——都需要 `state.transition` 机制。当前架构会让这些功能被迫改 `_engine_loop` 主循环,违反"engine 包严格 5 文件布局,新增能力只通过 `EngineDeps` 扩展"原则(见 [备忘 16 §408](技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md))。
+——都需要 `state.transition` 机制。当前架构会让这些功能被迫改 `_engine_loop` 主循环,违反"engine 包严格 5 文件布局,新增能力只通过 `RunnerDeps` 扩展"原则(见 [备忘 16 §408](技术难点与解决方案备忘/16-Agent架构模式与本项目选型.md))。
 
 **建议做法**(优先级 1):
 - 在 `Engine._engine_loop`(`src/writer/engine/engine.py`)引入新一代 `EngineState`(注意:**不是**之前 m4 删除的那个老 EngineState —— 老的是空 mutable dataclass,新的是 frozen transition 标记)
@@ -103,7 +103,7 @@
 
   @dataclass(frozen=True)
   class EngineLoopState:
-      ctx: EngineContext
+      ctx: RunnerContext
       transition: EngineTransition  # not Optional
       tool_calls: int = 0
       compacted_segments: int = 0
@@ -126,7 +126,7 @@
 **为什么是 Major**:长篇小说写作本质就是**多角色协作**(编剧 / 校对 / 历史 / 审核)。当前 `write_chapter` 已验证 LangGraph 形状和 checkpoint 管线,但还不能并发调用真实角色、不能复用 prompt cache、不能记录 sidechain transcript。这是项目从"CLI demo"走向"能写完整小说"的核心能力。
 
 **建议做法**:
-- 把 `_DefaultEngineDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator
+- 把 `_DefaultRunnerDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator
 - 引入 `SubagentContext` dataclass 隔离所有 per-call 状态
 - 第一次实装就用 LangGraph(LangGraph 自带 fork / checkpoint / message persistence),跳过自研
 - 参考 Claude Code 的 `omitClaudeMd` 机制做 Sub-agent prompt 裁剪(节省 token)
@@ -167,7 +167,7 @@
 | --- | --- | --- |
 | **Protocol-as-slot** | `IntentRouter` Protocol + `RuleBasedIntentRouter` / `LlmIntentRouter` / `CompositeRouter` | ✅ 完美对齐(本会话 M1-M6 修复后甚至更好) |
 | **AsyncGenerator 循环核心** | `Engine.run(ctx)` AsyncIterator[Event](`Engine` 类主入口,2026-07-13 重构后从自由函数升级为主类) | ✅ 对齐 |
-| **DI 边界** | `EngineDeps` Protocol + `_DefaultEngineDeps` + `production_deps()`(被 `Engine` 类持有,通过 `Engine.replace_deps` 整体替换) | ✅ 对齐(M6 后 Protocol-only stub 也工作,见 `test_session_set_project_root_with_protocol_only_deps`) |
+| **DI 边界** | `RunnerDeps` Protocol + `_DefaultRunnerDeps` + `production_deps()`(被 `Engine` 类持有,通过 `Engine.replace_deps` 整体替换) | ✅ 对齐(M6 后 Protocol-only stub 也工作,见 `test_session_set_project_root_with_protocol_only_deps`) |
 | **Done 分支事件流** | 7 个 `DoneReason`(本会话 M4 修复后 ErrorEvent 加 traceback 字段) | ✅ 对齐 |
 | **Tool 命名 kwarg 协议** | builtin Tools 全部 `*, path: str` 模式 | ✅ 对齐(CLAUDE.md 备忘 13 明确要求) |
 | **structured output** | `AgentAction` Pydantic BaseModel + `model_config={"frozen": True}` | ✅ 对齐(甚至比 dataclass 更适合 LLM structured output) |
@@ -207,7 +207,7 @@
 
 **理由**:多角色并行(编剧/校对/审核)是项目从"CLI demo"走向"能写完整小说"的核心。LangGraph 自带 fork / checkpoint / message persistence,直接用避免重造轮子。
 
-**第一步**:在现有 `write_chapter` LangGraph MVP 基础上,把 `_DefaultEngineDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator,并把确定性占位节点替换为可隔离的编剧/校对/审核角色节点。**这次实装会自然把 Hooks 串起来**。
+**第一步**:在现有 `write_chapter` LangGraph MVP 基础上,把 `_DefaultRunnerDeps.run_workflow` 升级为 `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator,并把确定性占位节点替换为可隔离的编剧/校对/审核角色节点。**这次实装会自然把 Hooks 串起来**。
 
 ### 不做
 

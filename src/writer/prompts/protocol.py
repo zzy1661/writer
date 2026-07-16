@@ -12,7 +12,7 @@
 但身份不同。
 
 dataclass 是 ``frozen=True``，让调用方在注册后无法修改 bundle —— 唯一
-允许的替换 prompt 方式是构建新 registry。这与 :class:`writer.engine.events.Done`
+允许的替换 prompt 方式是构建新 registry。这与 :class:`writer.runner.events.Done`
 （同样 ``frozen=True``）的既有约定一致。
 """
 

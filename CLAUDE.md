@@ -56,16 +56,16 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 
 **接线流**：`用户输入 → session.run_turn(user_input) → Engine.run(ctx) → self._deps.route() → AgentAction → self._engine_loop 分发 → self._run_command ⇒ SkillDirective / start_workflow ⇒ workflows.run_workflow / call_tool ⇒ tools.*`
 
-> 新代码应直接使用 `Engine.run(ctx)`（持有 `Engine` 实例，典型来源 `EngineSession.engine`）。`engine.loop.run_engine(ctx, deps)` 是 compat shim，内部构造临时 `Engine(deps, cfg)` 委派给 `engine.run(ctx)`。
+> 新代码应直接使用 `Engine.run(ctx)`（持有 `Engine` 实例，典型来源 `Engine.engine`）。`engine.loop.run_runner(ctx, deps)` 是 compat shim，内部构造临时 `Engine(deps, cfg)` 委派给 `engine.run(ctx)`。
 
 ### 各包职责
 
 | 包                 | 职责                                                                                                                            | 关键文件                                                                   |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全；构造一个 `EngineSession` 跨 turn 复用                     | `cli/main.py`                                                              |
-| `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `project_genre` / `pending_interrupt` / `turns` + 一次性构造的 `engine: Engine` | `session/engine_session.py`                                                |
+| `writer.cli`       | L1：REPL 消费者、Typer 子命令、Rich 渲染、`prompt-toolkit` 历史/补全；构造一个 `Engine` 跨 turn 复用                     | `cli/main.py`                                                              |
+| `writer.session`   | 跨 turn 状态容器：frozen `session_id` + 可变 `project_root` / `project_genre` / `pending_interrupt` / `turns` + 一次性构造的 `engine: Engine` | `session/engine.py`                                                |
 | `writer.routing`   | L2 前台意图路由：**`IntentRouter` Protocol** + `RuleBasedIntentRouter`(MVP)/ `LlmIntentRouter`(LangChain structured output)/ `CompositeRouter`(rule-first + LLM fallback) | `routing/{intent_router,llm_router,composite_router}.py`                   |
-| `writer.engine`    | L2 状态机 + AsyncGenerator（events / context / deps / config 四个模块 + `Engine` 主类）                                                  | `engine/{engine,loop,deps,events,context,config}.py`                              |
+| `writer.runner`    | L2 状态机 + AsyncGenerator（events / context / deps / config 四个模块 + `Runner` 主类）                                                  | `runner/{runner,loop,deps,events,context,config}.py`                              |
 | `writer.agents`    | L3 LLM 调度身份 + 题材分支 Markdown 文件（`writer.agents._shipped/*.md`，按 `AGENT.md` 题材行派生）+ 唯一的 Python-side capability (`writer.agents.process_init_brief`) | `agents/{__init__,protocol,registry,agent_discovery,builtin_sources,capability}.py` + `agents/_shipped/{other,历史,言情,玄幻}.md` |
 | `writer.workflows` | L3 长任务 stub（`write_chapter` / `review_chapter` 占位,等真实 LangGraph 图落地）                                              | `workflows/{write,review}_chapter.py`                                      |
 | `writer.tools`     | L3 Tool 基础设施（Protocol + Registry + Runtime + langchain_bridge + 9 个 builtin）                                             | `tools/{protocol,registry,runtime,langchain_bridge,errors}.py` + `tools/builtin/{file,glob,analysis,foreshadow,locate}_tools.py` + `foreshadow_ledger.py` |
@@ -78,8 +78,8 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 ### 关键设计约束
 
 - **`IntentRouter` 是 Protocol，不是具体类**。engine 只依赖 Protocol；`RuleBasedIntentRouter` 是无网络 MVP,`LlmIntentRouter`(LangChain structured output,双 provider:native `bind_tools` / JSON-prompt)与 `CompositeRouter`(rule-first + LLM fallback)已实装并由 `production_deps()` 默认装配。`engine/` 与 `cli/` 不依赖任何具体 router 实现。
-- **`EngineDeps` 是 DI 边界**。`Engine` 类（`src/writer/engine/engine.py`）持有 `EngineDeps`（DI 容器）与 `EngineConfig`（per-loop 配置），通过 `Engine.run(ctx)` 暴露事件流。`engine.loop.run_engine` 是 compat shim（每次构造临时 `Engine`）。engine 不直接 new 协作者，所有外部依赖(`router` / `agent_registry` / `tool_registry` / `tool_runtime` / `directive_registry` / `tool_loop`)都通过 Protocol 注入；`production_deps(...)` 是默认装配（2026-07-09 `chg-remove-roles` 起去掉了 `story_agent` 与 `genre=` 参数）；`EngineDeps.rebind_*` 系列方法(`rebind_tool_runtime` / `rebind_directive_registry` / `rebind_agent_registry`,2026-07-05 起替代旧的 duck-typed mutation)用于 `EngineSession.set_project_root` 时的热替换，最终通过 `Engine.replace_deps(new_deps)` 整体替换 `Engine` 实例的 deps。
-- **Engine 输出是事件流**(`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`),全部 `@dataclass(frozen=True)`。`AgentAction`(路由输出)是 **Pydantic `BaseModel` + `model_config={"frozen": True}`**——不是 `@dataclass`,新人不要用 `dataclasses.replace(...)`;用 `model_copy(update=...)`。CLI 在 `_run_engine` 里 `match` 渲染。
+- **`RunnerDeps` 是 DI 边界**。`Engine` 类（`src/writer/engine/engine.py`）持有 `RunnerDeps`（DI 容器）与 `RunnerConfig`（per-loop 配置），通过 `Engine.run(ctx)` 暴露事件流。`engine.loop.run_runner` 是 compat shim（每次构造临时 `Engine`）。engine 不直接 new 协作者，所有外部依赖(`router` / `agent_registry` / `tool_registry` / `tool_runtime` / `directive_registry` / `tool_loop`)都通过 Protocol 注入；`production_deps(...)` 是默认装配（2026-07-09 `chg-remove-roles` 起去掉了 `story_agent` 与 `genre=` 参数）；`RunnerDeps.rebind_*` 系列方法(`rebind_tool_runtime` / `rebind_directive_registry` / `rebind_agent_registry`,2026-07-05 起替代旧的 duck-typed mutation)用于 `Engine.set_project_root` 时的热替换，最终通过 `Engine.replace_deps(new_deps)` 整体替换 `Engine` 实例的 deps。
+- **Engine 输出是事件流**(`TextChunk` / `ActionEvent` / `ToolCall` / `ToolResult` / `Interrupt` / `Done` / `ErrorEvent`),全部 `@dataclass(frozen=True)`。`AgentAction`(路由输出)是 **Pydantic `BaseModel` + `model_config={"frozen": True}`**——不是 `@dataclass`,新人不要用 `dataclasses.replace(...)`;用 `model_copy(update=...)`。CLI 在 `_run_runner` 里 `match` 渲染。
 - **REPL 路由原则**:除框架命令(`/退出` `/帮助` `/状态`)外,斜杠命令与自然语言**一律交给 engine**,避免 CLI 层重复维护命令路由。
 - **Tool 安全**:所有 builtin Tool 必须经 `runtime.safe_path()` 防越界;写入类(`safe_write_file` / `safe_edit_file`)额外走 `runtime.allowed_write_paths` 白名单 + AGENT.md 3-stage guard;`Tool` 必须用**命名 keyword 参数**(`def run(self, runtime, *, path: str)`),不能用 `**kwargs`,否则 LangChain `args_schema` 无法生成。
 - **业务规则是 directive**:SKILL.md frontmatter(`command` / `description` / `requires_states` / `body` / `references` / `scripts`)驱动多个下游表面(`/帮助` / Tab 补全 / 状态机拦截 / Engine 分发);加新 shipped directive 或项目级 `.md` 覆盖**不需要改 CLI / engine 代码**。
@@ -97,14 +97,14 @@ REPL 模式（默认）：`uv run writer` 后输入 `/帮助` 看命令；退出
 - `ask_user`——保留分支(配 `Interrupt` 事件供 REPL driver 拼多轮;`/init <故事梗概>` 走 `_try_handle_repl_init_brief` REPL 抢先消费路径,内部仍 yield `answered`,不走 `ask_user`)
 - `aborted`——`ErrorEvent` 后兜底分支(`except ToolError` / `except SkillError` / `except Exception` 三层)
 
-**会话层**：以上每轮事件由 `EngineSession`(`writer.session`)驱动 — REPL 启动时构造一个,跨所有 turn 复用;`session_id` frozen、`engine: Engine` 一次性构建(`__post_init__` 装配 `EngineDeps` 后包装 `Engine`)、`tool_runtime` 在 `set_project_root()` 时按需换(经 `Engine.replace_deps(new_deps)` 整体替换);`session.run_turn(user_input)` 是便利方法,构造 `EngineContext` 后委派给 `engine.run(ctx)`;`Interrupt` 事件入 `session.pending_interrupt`,下一轮 `ctx.user_input` 自动拼接 `"[pending] {prompt}\n[answer] {user_input}"` 后再喂给引擎;`Done` 事件触发 `session.record_turn(...)` + `session.clear_pending_interrupt()`。
+**会话层**：以上每轮事件由 `Engine`(`writer.session`)驱动 — REPL 启动时构造一个,跨所有 turn 复用;`session_id` frozen、`engine: Engine` 一次性构建(`__post_init__` 装配 `RunnerDeps` 后包装 `Engine`)、`tool_runtime` 在 `set_project_root()` 时按需换(经 `Engine.replace_deps(new_deps)` 整体替换);`session.run_turn(user_input)` 是便利方法,构造 `RunnerContext` 后委派给 `engine.run(ctx)`;`Interrupt` 事件入 `session.pending_interrupt`,下一轮 `ctx.user_input` 自动拼接 `"[pending] {prompt}\n[answer] {user_input}"` 后再喂给引擎;`Done` 事件触发 `session.record_turn(...)` + `session.clear_pending_interrupt()`。
 
 ## 测试
 
 - 框架：pytest + pytest-asyncio（`asyncio_mode = "auto"`）
 - 当前基线：详见 `MEMORY.md` 中「## 验证基线」一节（最后一次实测 2026-07-07：181 测试 / ruff+mypy clean；不要在此处硬编码数字，详见 N6 / m24）
 - 关键覆盖点：router 分类、engine 五种 Done 分支、Tool 路径越界拒绝
-- `tests/conftest.py`（如有）会注入 `EngineDeps` 替身
+- `tests/conftest.py`（如有）会注入 `RunnerDeps` 替身
 
 ## 设计文档
 

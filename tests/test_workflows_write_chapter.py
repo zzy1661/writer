@@ -19,12 +19,12 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from writer.engine.context import EngineContext
-from writer.engine.deps import EngineDeps, production_deps
 from writer.llm.prose import (
     DeterministicProseClient,
     RealProseClient,
 )
+from writer.runner.context import RunnerContext
+from writer.runner.deps import RunnerDeps, production_deps
 from writer.workflows import WorkflowResult
 from writer.workflows.write_chapter import (
     REVIEW_THRESHOLD,
@@ -131,16 +131,16 @@ def _make_deps_with_prose(
     prose_text: str = "stub draft content",
     *,
     prose_name: str = "deterministic",
-) -> EngineDeps:
-    """Build an EngineDeps with a recording-fake prose client."""
+) -> RunnerDeps:
+    """Build an RunnerDeps with a recording-fake prose client."""
     deps = production_deps()
     deps.prose_client = _stub_prose_client(prose_text)
     deps.prose_client.name = prose_name  # type: ignore[attr-defined]
     return deps
 
 
-def _make_deps_with_real_prose(llm: _RecordingChatModel) -> EngineDeps:
-    """Build an EngineDeps with a real RealProseClient wrapping ``llm``.
+def _make_deps_with_real_prose(llm: _RecordingChatModel) -> RunnerDeps:
+    """Build an RunnerDeps with a real RealProseClient wrapping ``llm``.
 
     Also wires ``deps.review_llm = llm`` so the review path uses
     the same recording fake — production wiring uses
@@ -235,7 +235,7 @@ class TestGraphTopology:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path()
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -258,7 +258,7 @@ class TestGraphTopology:
         draft_text = "deterministic draft text " * 20
         llm = _recording_llm_for_happy_path(draft_text=draft_text)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -276,7 +276,7 @@ class TestGraphTopology:
         draft_text = "摘要测试内容 " * 20
         llm = _recording_llm_for_happy_path(draft_text=draft_text)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -292,7 +292,7 @@ class TestGraphTopology:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="draft " * 30)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -327,7 +327,7 @@ class TestRetryLoop:
 
         llm.response_factory = factory
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -350,7 +350,7 @@ class TestRetryLoop:
             pass_=False, score=3
         )
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -374,7 +374,7 @@ class TestWorkflowResultShape:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -387,7 +387,7 @@ class TestWorkflowResultShape:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -400,7 +400,7 @@ class TestWorkflowResultShape:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -413,7 +413,7 @@ class TestWorkflowResultShape:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1",
             project_root=tmp_path,
             project_state="S2",
@@ -515,7 +515,7 @@ class TestArgsIntegration:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 2.3 突出冲突",
             project_root=tmp_path,
             project_state="S2",
@@ -528,7 +528,7 @@ class TestArgsIntegration:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1 突出冲突 结尾留钩",
             project_root=tmp_path,
             project_state="S2",
@@ -546,7 +546,7 @@ class TestArgsIntegration:
         (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
         llm = _recording_llm_for_happy_path(draft_text="a" * 300)
         deps = _make_deps_with_real_prose(llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/创作 1.1 请回流重写",
             project_root=tmp_path,
             project_state="S2",
@@ -567,4 +567,4 @@ class TestStubAlias:
         # The PR1 ``stub`` compatibility alias is no longer a real
         # workflow; it raises so callers know to use ``run``.
         with pytest.raises(NotImplementedError):
-            stub(MagicMock(spec=EngineContext))
+            stub(MagicMock(spec=RunnerContext))

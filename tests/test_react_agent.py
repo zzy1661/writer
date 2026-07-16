@@ -13,20 +13,20 @@ from pydantic import PrivateAttr
 
 from writer.agents import builtin_agent_registry
 from writer.config import Settings
-from writer.engine import (
-    Done,
-    EngineContext,
-    ErrorEvent,
-    TextChunk,
-    ToolCall,
-    ToolResult,
-    run_engine,
-)
-from writer.engine.config import build_engine_config
-from writer.engine.deps import _DefaultEngineDeps
 from writer.llm.agent import MAX_LOOP_STEPS, ReActAgent
 from writer.llm.prose import DeterministicProseClient
 from writer.routing import AgentAction, IntentRouter
+from writer.runner import (
+    Done,
+    ErrorEvent,
+    RunnerContext,
+    TextChunk,
+    ToolCall,
+    ToolResult,
+    run_runner,
+)
+from writer.runner.config import build_runner_config
+from writer.runner.deps import _DefaultRunnerDeps
 from writer.skills import built_directive_registry
 from writer.tools import ToolRuntime, built_tool_registry
 from writer.tools.errors import ToolError, ToolNotFoundError
@@ -125,8 +125,8 @@ def _settings() -> Settings:
     )
 
 
-def _ctx(user_input: str = "玉佩出现在哪里") -> EngineContext:
-    return EngineContext(
+def _ctx(user_input: str = "玉佩出现在哪里") -> RunnerContext:
+    return RunnerContext(
         user_input=user_input,
         project_root=Path("/__no_project__"),
         project_state="S2",
@@ -180,7 +180,7 @@ async def test_react_agent_two_steps() -> None:
         tool_name="project_search",
         arguments={"query": "玉佩", "path": "."},
     )
-    cfg = build_engine_config(_ctx())
+    cfg = build_runner_config(_ctx())
     events = await _consume(loop.run(action, _ctx(), _noop_deps(), cfg))
 
     # One ToolCall + one ToolResult for the single tool invocation.
@@ -238,7 +238,7 @@ async def test_react_agent_budget_exhausted() -> None:
         tool_name="project_search",
         arguments={"query": "玉佩", "path": "."},
     )
-    cfg = build_engine_config(_ctx())
+    cfg = build_runner_config(_ctx())
     events = await _consume(loop.run(action, _ctx(), _noop_deps(), cfg))
 
     tool_calls = [e for e in events if isinstance(e, ToolCall)]
@@ -281,7 +281,7 @@ class _UnknownToolRouter(IntentRouter):
         )
 
 
-def _noop_deps() -> _DefaultEngineDeps:
+def _noop_deps() -> _DefaultRunnerDeps:
     """Construct a deps instance with ``tool_loop=None``.
 
     Used by the loop's direct tests — they don't need a real deps, the
@@ -289,7 +289,7 @@ def _noop_deps() -> _DefaultEngineDeps:
     for Bug 02 (_initial_messages 拼 SKILL.md body 与 agent body)。
     """
 
-    return _DefaultEngineDeps(
+    return _DefaultRunnerDeps(
         router=_UnknownToolRouter(),
         tool_registry=built_tool_registry(),
         tool_runtime=ToolRuntime(project_root=Path("/__no_project__")),
@@ -297,7 +297,7 @@ def _noop_deps() -> _DefaultEngineDeps:
         agent_registry=builtin_agent_registry(),
         tool_loop=None,
         # PR2: ``prose_client`` is a new required field on
-        # ``_DefaultEngineDeps``. The tool-loop tests don't exercise
+        # ``_DefaultRunnerDeps``. The tool-loop tests don't exercise
         # it, so the Deterministic default is fine.
         prose_client=DeterministicProseClient(),
         # Bug 01: ``settings`` 字段。Bug 02 测试也需要。
@@ -330,7 +330,7 @@ async def test_react_agent_unknown_tool_name_propagates_tool_error() -> None:
         tool_name="not_a_tool",
         arguments={},
     )
-    cfg = build_engine_config(_ctx())
+    cfg = build_runner_config(_ctx())
     events_gen = loop.run(action, _ctx(), _noop_deps(), cfg)
 
     raised: ToolError | None = None
@@ -348,7 +348,7 @@ async def test_react_agent_unknown_tool_name_propagates_tool_error() -> None:
 async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() -> None:
     """End-to-end: engine sees ``ToolNotFoundError`` and yields ErrorEvent + Done(aborted).
 
-    This test stands up a minimal ``_DefaultEngineDeps`` whose
+    This test stands up a minimal ``_DefaultRunnerDeps`` whose
     ``tool_loop`` is wired to a fake LLM that emits an unknown tool
     name. The engine's outer ``except ToolError`` boundary must turn
     the propagation into the same ``ErrorEvent + Done(aborted)`` UX
@@ -380,7 +380,7 @@ async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() ->
     runtime = ToolRuntime(project_root=Path("/__no_project__"))
     tool_loop = ReActAgent(settings, registry=registry, runtime=runtime, llm=chat)
 
-    deps = _DefaultEngineDeps(
+    deps = _DefaultRunnerDeps(
         router=_UnknownToolRouter(),
         tool_registry=registry,
         tool_runtime=runtime,
@@ -389,7 +389,7 @@ async def test_engine_loop_emits_error_event_for_unknown_tool_via_tool_loop() ->
         tool_loop=tool_loop,
     )
     ctx = _ctx()
-    events = await _consume(run_engine(ctx, deps))
+    events = await _consume(run_runner(ctx, deps))
 
     error_events = [e for e in events if isinstance(e, ErrorEvent)]
     aborted = [e for e in events if isinstance(e, Done) and e.reason == "aborted"]

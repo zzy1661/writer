@@ -67,7 +67,7 @@ DEFAULT_WRITE_WHITELIST: frozenset[str] = frozenset({
 
 1. `mode` 必须 `overwrite`(不能 create / append,会破坏元信息结构)
 2. `content` 必须包含 `## 当前状态` 段
-3. 现有 `题材:` 行被新内容漏掉时自动保留(防止 `EngineSession.refresh_project_genre` 失效)
+3. 现有 `题材:` 行被新内容漏掉时自动保留(防止 `Engine.refresh_project_genre` 失效)
 
 `max_file_size` 默认 50_000 字节;超出抛 `ToolOutputTooLargeError`(上抛,engine `except ToolError` 兜底)。
 
@@ -159,7 +159,7 @@ class ToolRuntime:
 
 每个 session 构造一个 `ToolRuntime`,Tools 通过 `run(runtime, **kwargs)` 接收。Module-level 全局会切断多 session、多 project 的能力,而且测试时要 monkey-patch 很麻烦。
 
-`EngineSession.set_project_root()` 触发 `ToolRuntime` 热替换(per 备忘 16 的 M6 修复),旧的 duck-typed mutation 已删除。
+`Engine.set_project_root()` 触发 `ToolRuntime` 热替换(per 备忘 16 的 M6 修复),旧的 duck-typed mutation 已删除。
 
 ### 4. `ToolRegistry` 注册名必须唯一,重复注册立即报错
 

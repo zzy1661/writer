@@ -40,7 +40,7 @@ class Interrupt(Event):
     options: list[str] | None = None
 ```
 
-`EngineSession.compose_pending_input`(实际 `src/writer/session/engine_session.py`):
+`Engine.compose_pending_input`(实际 `src/writer/session/engine.py`):
 
 ```python
 def compose_pending_input(original: str, pending: Interrupt | None) -> str:
@@ -61,12 +61,12 @@ case "ask_user":
 REPL 处理(简化版):
 
 ```python
-async def run_repl(session: EngineSession, deps: EngineDeps):
+async def run_repl(session: Engine, deps: RunnerDeps):
     while True:
         line = await prompt_async("writer> ")
         input_text = compose_pending_input(line, session.pending_interrupt)
         session.clear_pending_interrupt()
-        async for event in run_engine(build_ctx(input_text), deps):
+        async for event in run_runner(build_ctx(input_text), deps):
             if isinstance(event, Interrupt):
                 session.set_pending_interrupt(event)
                 render_interactive_prompt(event)  # choice/text/confirm 分发
@@ -77,7 +77,7 @@ async def run_repl(session: EngineSession, deps: EngineDeps):
                 render_event(event)
 ```
 
-注意:**当前实现没有保留旧文档里 `AgentInterrupt` / `UserReply` 这两个 dataclass**。Interrupt 是 engine 事件,UserReply 直接是下一次 turn 的 `user_input` 字符串(无需独立类型)。多轮 resume 由 `EngineSession.pending_interrupt` 字段串起来,跨 `run_engine()` 调用自动拼接。
+注意:**当前实现没有保留旧文档里 `AgentInterrupt` / `UserReply` 这两个 dataclass**。Interrupt 是 engine 事件,UserReply 直接是下一次 turn 的 `user_input` 字符串(无需独立类型)。多轮 resume 由 `Engine.pending_interrupt` 字段串起来,跨 `run_runner()` 调用自动拼接。
 
 ## LangGraph 节点伪代码
 

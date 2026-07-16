@@ -12,9 +12,9 @@
 | ---- | ---- | ---------- |
 | [01](01-总览与四层架构.md) | 总览 + 四层架构 + 设计哲学 | 整个仓库 |
 | [02](02-环境与CLI入口.md) | 项目结构、依赖、CLI 入口、Typer 子命令 | `pyproject.toml` + `src/writer/cli/` + `src/writer/__main__.py` |
-| [03](03-会话与状态机.md) | `EngineSession` 跨 turn 状态 + 项目状态机 S0–S5 | `src/writer/session/` + `src/writer/project/state.py` |
+| [03](03-会话与状态机.md) | `Engine` 跨 turn 状态 + 项目状态机 S0–S5 | `src/writer/session/` + `src/writer/project/state.py` |
 | [04](04-意图路由层.md) | `IntentRouter` Protocol + 三种实现 | `src/writer/routing/` |
-| [05](05-引擎核心.md) | `Engine.run` 事件流 + `EngineDeps` DI + Done 分支 | `src/writer/engine/` |
+| [05](05-引擎核心.md) | `Engine.run` 事件流 + `RunnerDeps` DI + Done 分支 | `src/writer/engine/` |
 | [06](06-Tool层与Runtime.md) | Tool 协议 + Runtime + 9 个 builtin | `src/writer/tools/` |
 | [07](07-技能directive层.md) | SKILL.md + DirectiveRegistry + 项目级覆盖 | `src/writer/skills/` |
 | [08](08-题材与Agent层.md) | `AgentRegistry` + 4 份题材 Markdown | `src/writer/agents/` |
@@ -29,7 +29,7 @@
 ## 一句话总结整个项目
 
 ```
-用户键入 → CLI → EngineSession → Engine (AsyncGenerator 事件流)
+用户键入 → CLI → Engine → Engine (AsyncGenerator 事件流)
             │           │                │
             │           │                ├─ IntentRouter.route()  → AgentAction
             │           │                ├─ DirectiveRegistry      → LLM 工具循环消费 SKILL.md body
@@ -37,7 +37,7 @@
             │           │                ├─ AgentRegistry          → 4 份题材 Markdown
             │           │                └─ WorkflowRegistry       → 写章节 / 审核
             │           │
-            │           └─ session.run_turn(text) → 构造 EngineContext 委派给 engine.run(ctx)
+            │           └─ session.run_turn(text) → 构造 RunnerContext 委派给 engine.run(ctx)
             │
             └─ 每个 turn yield 一个 Done,8 种 reason,REPL 据此渲染
 ```

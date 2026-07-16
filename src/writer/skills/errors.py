@@ -2,7 +2,7 @@
 
 与 protocol 分开，让 skill 实现、引擎边界与消费者可以在不引入
 较重的引擎事件类型的前提下 import 它们。与 :mod:`writer.tools.errors`
-对称（引擎循环也会捕获 —— 见 :mod:`writer.engine.loop` 中的
+对称（引擎循环也会捕获 —— 见 :mod:`writer.runner.loop` 中的
 ``_engine_loop``）。
 """
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 class SkillError(Exception):
     """``Skill.run()`` 内部可恢复失败的基类。
 
-    :func:`writer.engine.loop._engine_loop` 中的引擎边界会专门捕获
+    :func:`writer.runner.loop._engine_loop` 中的引擎边界会专门捕获
     本异常（在 ``ToolError`` 之后），把失败暴露为 ``ErrorEvent`` 后
     接 ``Done(reason='aborted')``，payload 为
     ``{'error': str(exc), 'command': <slash>}``，让 REPL 能渲染清爽

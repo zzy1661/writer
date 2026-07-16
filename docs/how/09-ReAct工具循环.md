@@ -80,7 +80,7 @@ class ReActAgent:
 
 ```python
 async def run(
-    self, action: AgentAction, ctx: EngineContext, deps: EngineDeps, cfg: EngineConfig
+    self, action: AgentAction, ctx: RunnerContext, deps: RunnerDeps, cfg: RunnerConfig
 ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
     state = ReActState(
         messages=self._initial_messages(action, ctx.user_input, deps=deps),
@@ -459,7 +459,7 @@ def needs_json_prompt_structured_output(settings: Settings) -> bool:
 ```
 LLM IntentRouter 产出 AgentAction(call_tool, tool_name="foreshadow_search", arguments={"id": "F003"})
    ↓
-session.run_turn(user_input) → 构造 EngineContext + 委派给 session.engine.run(ctx)
+session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.engine.run(ctx)
    ↓
 Engine._engine_loop:
     if self._deps.tool_loop is not None:

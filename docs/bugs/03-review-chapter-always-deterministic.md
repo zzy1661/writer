@@ -51,14 +51,14 @@ def _llm_review(deps, chapter_text, active_foreshadows, focus) -> MultiConcernRe
 
 ## 2. 根因(Root Cause)
 
-`_aggregate_reviews_node` 把 `deps.review_llm is None` 当作"是否启用 LLM 审核"的判断条件,但 **production 默认装配时 `deps.review_llm` 永远是 `None`**(`_DefaultEngineDeps.review_llm: Any = None`,见 `src/writer/engine/deps.py:186`)。只有测试代码会显式注入 fake LLM。
+`_aggregate_reviews_node` 把 `deps.review_llm is None` 当作"是否启用 LLM 审核"的判断条件,但 **production 默认装配时 `deps.review_llm` 永远是 `None`**(`_DefaultRunnerDeps.review_llm: Any = None`,见 `src/writer/engine/deps.py:186`)。只有测试代码会显式注入 fake LLM。
 
 也就是说:真实用户即便配了 API key,production 路径也直接走 `_deterministic_review`,完全绕过 `_llm_review` 内部的 fallback 逻辑(`review_llm is None → _get_llm(get_settings())`)。
 
 ### 数据流图
 
 ```
-production_deps() → _DefaultEngineDeps(review_llm=None)
+production_deps() → _DefaultRunnerDeps(review_llm=None)
                                 ↓
                 set_project_root() → deps.review_llm 仍为 None
                                 ↓

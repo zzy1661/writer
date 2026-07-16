@@ -9,9 +9,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from writer.engine.context import EngineContext
-from writer.engine.deps import EngineDeps, production_deps
 from writer.llm.prose import RealProseClient
+from writer.runner.context import RunnerContext
+from writer.runner.deps import RunnerDeps, production_deps
 from writer.workflows import WORKFLOWS, WorkflowResult, run_workflow
 from writer.workflows.write_chapter import run as run_write_chapter
 
@@ -57,7 +57,7 @@ class _MiniRecordingChatModel(BaseChatModel):
         return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
-def _make_real_prose_deps() -> EngineDeps:
+def _make_real_prose_deps() -> RunnerDeps:
     deps = production_deps()
     llm = _MiniRecordingChatModel()
     deps.prose_client = RealProseClient(llm=llm)
@@ -75,7 +75,7 @@ def test_workflow_stubs_are_callable() -> None:
 
 
 def test_run_workflow_returns_chunks_for_known_name() -> None:
-    ctx = EngineContext(user_input="some input")
+    ctx = RunnerContext(user_input="some input")
     deps = _make_real_prose_deps()
 
     result = run_workflow("write_chapter", ctx, deps)
@@ -91,7 +91,7 @@ def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
     (tmp_path / "AGENT.md").write_text("# test\n", encoding="utf-8")
     (tmp_path / "大纲").mkdir()
     (tmp_path / "大纲" / "章节目录.md").write_text("1.3 回流测试章", encoding="utf-8")
-    ctx = EngineContext(
+    ctx = RunnerContext(
         user_input="/创作 1.3 触发回流",
         project_root=tmp_path,
         project_state="S2",
@@ -111,7 +111,7 @@ def test_write_chapter_langgraph_can_rewrite_once(tmp_path: Path) -> None:
 
 
 def test_run_workflow_returns_failed_result_for_unknown_name() -> None:
-    ctx = EngineContext(user_input="x")
+    ctx = RunnerContext(user_input="x")
     deps = production_deps()
 
     result = run_workflow("nonexistent_workflow", ctx, deps)
@@ -130,16 +130,16 @@ def test_run_workflow_returns_failed_result_for_unknown_name() -> None:
 
 
 def test_run_workflow_passes_context_to_stub() -> None:
-    """The stub receives the same EngineContext we pass to run_workflow."""
-    captured: dict[str, EngineContext] = {}
+    """The stub receives the same RunnerContext we pass to run_workflow."""
+    captured: dict[str, RunnerContext] = {}
 
-    def fake_stub(ctx: EngineContext) -> list[str]:
+    def fake_stub(ctx: RunnerContext) -> list[str]:
         captured["ctx"] = ctx
         return ["ok"]
 
     WORKFLOWS["__test_probe__"] = fake_stub
     try:
-        ctx = EngineContext(user_input="probe", session_id="sid-123")
+        ctx = RunnerContext(user_input="probe", session_id="sid-123")
         deps = production_deps()
         result = run_workflow("__test_probe__", ctx, deps)
         # PR1: legacy ``Iterable[str]`` callables are wrapped into

@@ -5,7 +5,7 @@ Added 2026-07-09 (real-writing-pipeline PR1) — covers the
 JSON-serializable via ``dataclasses.asdict``, the three status
 branches, and the engine-side adapter.
 
-These tests are pure-data: no I/O, no LangGraph, no EngineSession.
+These tests are pure-data: no I/O, no LangGraph, no Engine.
 The accompanying engine-dispatch tests in ``test_engine.py`` cover
 the integration with ``engine._run_workflow``.
 """
@@ -153,11 +153,11 @@ class TestWorkflowResultFromIterable:
 
 class TestRunWorkflowDispatch:
     def test_unknown_workflow_name_returns_failed_result(self) -> None:
-        from writer.engine.context import EngineContext
-        from writer.engine.deps import production_deps
+        from writer.runner.context import RunnerContext
+        from writer.runner.deps import production_deps
 
         result = run_workflow(
-            "nonexistent", EngineContext(user_input="x"), production_deps()
+            "nonexistent", RunnerContext(user_input="x"), production_deps()
         )
         assert result.status == "failed"
         assert result.metrics.get("error") == "unknown_workflow"
@@ -171,9 +171,9 @@ class TestRunWorkflowDispatch:
         from langchain_core.messages import AIMessage
         from langchain_core.outputs import ChatGeneration, ChatResult
 
-        from writer.engine.context import EngineContext
-        from writer.engine.deps import production_deps
         from writer.llm.prose import RealProseClient
+        from writer.runner.context import RunnerContext
+        from writer.runner.deps import production_deps
 
         class _RecordingChatModel(BaseChatModel):
             class Config:
@@ -203,7 +203,7 @@ class TestRunWorkflowDispatch:
         deps.review_llm = llm
 
         result = run_workflow(
-            "write_chapter", EngineContext(user_input="/创作 1.1"), deps
+            "write_chapter", RunnerContext(user_input="/创作 1.1"), deps
         )
         assert isinstance(result, WorkflowResult)
         # PR1: write_chapter returns status="completed" so the engine

@@ -76,7 +76,7 @@ class ReActAgent:
 
 - LLM 路由器(`LlmIntentRouter.route`)目前是**一次性**调用,不走流式(命令路由的 latency 容忍度低)
 - `ReActAgent` 当前也是**一次性**调用(等 LangGraph 真实落地后再考虑 stream token 到 `TextChunk` 事件)
-- `EngineConfig.fast_mode` 抑制诊断 `[engine]` log chunks(2026-07-05 起)
+- `RunnerConfig.fast_mode` 抑制诊断 `[engine]` log chunks(2026-07-05 起)
 
 ## 最小 demo / 伪代码
 

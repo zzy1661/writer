@@ -6,8 +6,8 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from writer.engine.context import EngineContext
-    from writer.engine.deps import EngineDeps
+    from writer.runner.context import RunnerContext
+    from writer.runner.deps import RunnerDeps
     from writer.workflows.types import WorkflowResult
 
 from writer.workflows.review_chapter import run as review_chapter_run
@@ -16,10 +16,10 @@ from writer.workflows.write_chapter import run as write_chapter_run
 
 # 工作流 callable 接受 ``(ctx, deps)`` 并返回
 # :class:`WorkflowResult`（PR1+ 契约）。``deps`` 是当前激活的
-# :class:`EngineDeps`，让工作流能调用 ``deps.prose_client``
+# :class:`RunnerDeps`，让工作流能调用 ``deps.prose_client``
 # 和 ``deps.tool_registry``（per real-writing-pipeline PR2）。
 #
-# 旧 2-arg 形态（``Callable[[EngineContext], ...]``）仍被接受以兼容
+# 旧 2-arg 形态（``Callable[[RunnerContext], ...]``）仍被接受以兼容
 # 插件；适配器在注册时检查 callable 的签名。
 WorkflowStub = Callable[..., "WorkflowResult | Iterable[str]"]
 
@@ -30,7 +30,7 @@ WORKFLOWS: dict[str, WorkflowStub] = {
 
 
 def run_workflow(
-    name: str, ctx: EngineContext, deps: EngineDeps
+    name: str, ctx: RunnerContext, deps: RunnerDeps
 ) -> WorkflowResult:
     """按 ``name`` 派发到已注册工作流。
 

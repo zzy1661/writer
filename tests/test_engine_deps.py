@@ -1,8 +1,8 @@
-"""Tests for EngineDeps wiring (router selection, tool registry, runtime).
+"""Tests for RunnerDeps wiring (router selection, tool registry, runtime).
 
 Per ``chg-remove-roles`` (2026-07-09): the ``genre=`` kwarg on
 ``production_deps`` and the ``StoryAgent``-by-genre test cases are gone.
-``EngineDeps.story_agent`` was deleted along with the
+``RunnerDeps.story_agent`` was deleted along with the
 ``writer.roles.StoryAgent`` class — genre-aware LLM dispatch now flows
 through ``writer.agents.AgentRegistry`` (Markdown frontmatter) instead.
 """
@@ -14,8 +14,8 @@ from pathlib import Path
 from pydantic import SecretStr
 
 from writer.config import Settings
-from writer.engine.deps import production_deps
 from writer.routing import CompositeRouter, LlmIntentRouter, RuleBasedIntentRouter
+from writer.runner.deps import production_deps
 from writer.tools import ToolRegistry, ToolRuntime
 
 
@@ -130,11 +130,11 @@ def test_production_deps_respects_explicit_primary_router_with_api_key() -> None
 
 
 def test_production_deps_rebind_tool_loop(tmp_path: Path) -> None:
-    """Bug 01: _DefaultEngineDeps.rebind_tool_loop 返回新实例。"""
-    from writer.engine.deps import _DefaultEngineDeps
+    """Bug 01: _DefaultRunnerDeps.rebind_tool_loop 返回新实例。"""
+    from writer.runner.deps import _DefaultRunnerDeps
 
     deps = production_deps(_settings(with_key=False))
-    assert isinstance(deps, _DefaultEngineDeps)
+    assert isinstance(deps, _DefaultRunnerDeps)
 
     # rebind_tool_loop(None) 返回新 deps,tool_loop 字段被替换
     new_deps = deps.rebind_tool_loop(None)
@@ -146,7 +146,7 @@ def test_production_deps_rebind_tool_loop(tmp_path: Path) -> None:
 
 
 def test_production_deps_settings_field_exposed(tmp_path: Path) -> None:
-    """Bug 01: EngineDeps Protocol 暴露 settings 字段。"""
+    """Bug 01: RunnerDeps Protocol 暴露 settings 字段。"""
     settings = _settings(with_key=True)
     deps = production_deps(settings)
     assert deps.settings is settings

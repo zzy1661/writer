@@ -240,7 +240,7 @@ def built_agent_registry(project_root: Path | None = None) -> AgentRegistry:
     return registry
 ```
 
-**项目切换时 `EngineSession.set_project_root()` 重新调它**(与 DirectiveRegistry 对称)。
+**项目切换时 `Engine.set_project_root()` 重新调它**(与 DirectiveRegistry 对称)。
 
 ## 8.7 `_run_agent` — Engine 怎么派发 agent
 
@@ -403,9 +403,9 @@ class StoryAgent:
 - 三个子类 `HistoryAgent / XuanhuanAgent / RomanceAgent` 全是 dead code
 
 **删除后**:
-- `EngineDeps.story_agent` 字段删除
+- `RunnerDeps.story_agent` 字段删除
 - `production_deps()` 不再需要 `genre=` kwarg
-- `EngineSession.set_project_root()` 不再 rebind story_agent
+- `Engine.set_project_root()` 不再 rebind story_agent
 - 题材差异完全由 `AgentRegistry` Markdown 范式承担
 
 ## 8.11 完整数据流:用户输入"按玄幻题材生成大纲"
@@ -415,7 +415,7 @@ class StoryAgent:
    ↓
 LLM IntentRouter 产出 AgentAction(action_type="run_command", command="/大纲", kind="agent", target_agent="玄幻题材 Agent")
    ↓
-session.run_turn(user_input) → 构造 EngineContext + 委派给 session.engine.run(ctx)
+session.run_turn(user_input) → 构造 RunnerContext + 委派给 session.engine.run(ctx)
    ↓
 Engine._engine_loop:
     if action.kind == "agent":

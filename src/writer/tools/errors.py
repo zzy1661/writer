@@ -9,7 +9,7 @@
 * ``ToolNotADirectoryError`` —— 路径解析到了但不是目录。
 * ``ToolOutputTooLargeError`` —— 工具产生了会把 LLM 上下文撑爆
   的输出（目前罕见；为未来保留）。
-* ``WorkflowNotFoundError`` —— ``EngineDeps.run_workflow`` 收到
+* ``WorkflowNotFoundError`` —— ``RunnerDeps.run_workflow`` 收到
   未知名称。
 
 五者都派生自 ``ToolError``，调用方可以统一捕获；引擎 ``_engine_loop``
@@ -46,7 +46,7 @@ class ToolNotADirectoryError(ToolError):
 
 
 class WorkflowNotFoundError(ToolError):
-    """``EngineDeps.run_workflow`` 收到未知工作流名称。
+    """``RunnerDeps.run_workflow`` 收到未知工作流名称。
 
     2026-07-05 增补，把未知工作流作为领域错误暴露（per arch-optimizer m18），
     而不是返回看起来像合法工作流块的占位字符串。

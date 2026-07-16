@@ -38,7 +38,7 @@
 
 状态图控制流转,角色模板控制 LLM 行为。不同节点只读取自己需要的 `ContextPack` 子集。
 
-> LangGraph 落地路径:`EngineDeps.workflow_starter: WorkflowStarter`(当前未声明,等扩展)→ `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator → 在 `_engine_loop` 的 `start_workflow` 分支接进来,替换现在的 sync `_run_workflow` stub。LangGraph 自带 `MemorySaver` / `SqliteSaver` checkpoint 与 `interrupt` 协议,无需重新发明。
+> LangGraph 落地路径:`RunnerDeps.workflow_starter: WorkflowStarter`(当前未声明,等扩展)→ `WorkflowStarter.start(name, ctx, *, fresh=True)` AsyncGenerator → 在 `_engine_loop` 的 `start_workflow` 分支接进来,替换现在的 sync `_run_workflow` stub。LangGraph 自带 `MemorySaver` / `SqliteSaver` checkpoint 与 `interrupt` 协议,无需重新发明。
 
 ## 最小 demo / 伪代码
 

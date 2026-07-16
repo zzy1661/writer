@@ -25,7 +25,7 @@ from writer.tools.protocol import ToolResult
 if TYPE_CHECKING:
     from writer.tools.runtime import ToolRuntime
 
-#: :func:`writer.engine.deps.production_deps` 在未绑定项目（S0）时
+#: :func:`writer.runner.deps.production_deps` 在未绑定项目（S0）时
 #: 使用的哨兵 project_root。在此处镜像一份，避免把 engine 常量泄漏
 #: 到无路径工具的 import 图中。
 _NO_PROJECT_ROOT = "/__no_project__"

@@ -19,7 +19,7 @@ registry 完成实际工作 —— 没有 Python ``run()`` 方法。
   渲染命令表，无需触及 SKILL.md 解析。
 * REPL 补全 —— :func:`writer.cli.main.build_prompt_session` 使用
   :meth:`DirectiveRegistry.commands` 做 Tab 补全。
-* Engine dispatch —— :func:`writer.engine.loop.run_engine` 识别
+* Engine dispatch —— :func:`writer.runner.loop.run_runner` 识别
   匹配的 ``command``，把 directive 的 body + references 通过既有
   工具循环喂给 LLM。
 """

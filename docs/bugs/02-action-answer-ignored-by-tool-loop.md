@@ -116,7 +116,7 @@ LLM: 不知道有四幕模板,自由发挥生成大纲
 # fix proposal — src/writer/llm/agent.py:_initial_messages
 
 def _initial_messages(
-    self, action: AgentAction, user_input: str, *, deps: EngineDeps
+    self, action: AgentAction, user_input: str, *, deps: RunnerDeps
 ) -> list[BaseMessage]:
     """Seed conversation: base system prompt + directive/agent body + user turn.
 
@@ -198,7 +198,7 @@ ReActAgent(..., system_prompt_extras=[
 ])
 ```
 
-**否决理由**:`system_prompt_extras` 在构造时固定,但 `EngineSession.set_project_root` 后 directive_registry 重建 → extras 变 stale。需额外加 `set_system_prompt_extras()` 方法,复杂度不亚于方案 A 但 API 不优雅。
+**否决理由**:`system_prompt_extras` 在构造时固定,但 `Engine.set_project_root` 后 directive_registry 重建 → extras 变 stale。需额外加 `set_system_prompt_extras()` 方法,复杂度不亚于方案 A 但 API 不优雅。
 
 ## 5. 验证步骤(Manual Reproduction)
 
@@ -252,7 +252,7 @@ async def main():
         runtime=runtime,
         llm=RecordingFakeLLM(),
     )
-    deps = ...  # 构造 stub EngineDeps,带 directive_registry
+    deps = ...  # 构造 stub RunnerDeps,带 directive_registry
     action = AgentAction(action_type="answer_directly", command="/大纲")
     async for _ in loop.run(action, ctx, deps, cfg):
         pass

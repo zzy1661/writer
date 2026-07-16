@@ -23,7 +23,7 @@
 
 | # | 标题 | 严重程度 | 状态 | 修复 commit | 主要根因位置 | 文档 |
 |---|---|---|---|---|---|---|
-| 1 | `tool_loop` 不重建,LLM 工具调用指向旧根目录 | 🔴 Blocker | ✅ 已修 | [`8856e67`](https://github.com/anthropic-...(略)/commit/8856e67) | `src/writer/session/engine_session.py::set_project_root` | [01](./01-tool-loop-not-rebound.md) |
+| 1 | `tool_loop` 不重建,LLM 工具调用指向旧根目录 | 🔴 Blocker | ✅ 已修 | [`8856e67`](https://github.com/anthropic-...(略)/commit/8856e67) | `src/writer/session/engine.py::set_project_root` | [01](./01-tool-loop-not-rebound.md) |
 | 2 | `_initial_messages` 完全忽略 `AgentAction.answer`,directive body 不进 LLM | 🟠 Major | ✅ 已修 | [`e040d6a`](https://github.com/anthropic-...(略)/commit/e040d6a) | `src/writer/llm/agent.py::_initial_messages` | [02](./02-action-answer-ignored-by-tool-loop.md) |
 | 3 | `review_chapter` 几乎永远走 deterministic,API key 配了也无效 | 🟠 Major | ✅ 已修 | [`ad45896`](https://github.com/anthropic-...(略)/commit/ad45896) | `src/writer/workflows/review_chapter.py::_aggregate_reviews_node` | [03](./03-review-chapter-always-deterministic.md) |
 | 4 | 写入白名单字面值(`.writer/cache`)与匹配规则(`rel.parts[0]`)不一致 | 🟠 Major | ✅ 已修 | [`aa89c78`](https://github.com/anthropic-...(略)/commit/aa89c78) | `src/writer/tools/builtin/file_tools.py::_check_whitelist` + `src/writer/tools/runtime.py` | [04](./04-whitelist-vs-first-segment.md) |
@@ -45,7 +45,7 @@
 | 已删 SKILL.md | `/续写` `/改` | 保持已删 | — |
 | shipped SKILL.md | 2 (`/大纲` `/目录`) | 保持 2 | — |
 | builtin Tool 数 | 9 | 9 | — (Bug 4 仅改 `_check_whitelist` 实现,不增减 Tool) |
-| `EngineDeps` Protocol 字段 | 8 (router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop / prose_client / review_llm) | 8 + 1 method (新增 `rebind_tool_loop()`) | Bug 1 增方法不增字段 |
+| `RunnerDeps` Protocol 字段 | 8 (router / agent_registry / tool_registry / tool_runtime / directive_registry / tool_loop / prose_client / review_llm) | 8 + 1 method (新增 `rebind_tool_loop()`) | Bug 1 增方法不增字段 |
 | `_WORKFLOW_DEPS` / `_REVIEW_DEPS` 模块级变量 | 存在(写死的 module global) | 存在 | Bug 5 待修移除 |
 
 ## 与其他文档的关系

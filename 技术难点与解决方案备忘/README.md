@@ -1,6 +1,6 @@
 # 技术难点与解决方案备忘
 
-> **2026-07-14 重大修订**：本文原版本以 LangGraph 状态图 + RAG + 金字塔记忆为业务核心，伪代码走 `writer_graph.invoke`，与代码 `EngineSession.run_turn → Engine.run` 路径不符。
+> **2026-07-14 重大修订**：本文原版本以 LangGraph 状态图 + RAG + 金字塔记忆为业务核心，伪代码走 `writer_graph.invoke`，与代码 `Engine.run_turn → Engine.run` 路径不符。
 >
 > 截至 2026-07-14，本项目实际形态是 **Engine.run 事件流 + IntentRouter Protocol + Markdown SKILL.md directives + 9 个 builtin Tool + ReActAgent 多步循环 + LangGraph `write_chapter` 工作流（PR2 实装）+ 中文项目目录**。本 README 顶部重写为真源，下方 17 篇备忘各自标记其与当前形态的关系；过期但仍有历史价值的部分（01 / 03 / 04 / 16 / 17 等）保留为「演进历史」参考。
 
@@ -24,7 +24,7 @@
 ```python
 # REPL / CLI 调用方
 session.run_turn(user_input)
-    # EngineSession.run_turn() 构造 EngineContext + 委派给 session.engine.run(ctx)
+    # Engine.run_turn() 构造 RunnerContext + 委派给 session.engine.run(ctx)
         ↓
 Engine.run(ctx)  # src/writer/engine/engine.py
     async for event in self._engine_loop(ctx):
@@ -38,7 +38,7 @@ Engine.run(ctx)  # src/writer/engine/engine.py
         # 3. 三层 except：ToolError / SkillError / Exception → ErrorEvent + Done(aborted)
 ```
 
-引擎主入口是 **`Engine.run(ctx)`**（`src/writer/engine/engine.py`），不是旧文档的 `run_engine`。`engine/loop.py::run_engine` 仅为 compat shim：每次构造临时 `Engine(deps, cfg)` 委派给 `engine.run(ctx)`。新代码应直接用 `Engine.run`。
+引擎主入口是 **`Engine.run(ctx)`**（`src/writer/engine/engine.py`），不是旧文档的 `run_runner`。`engine/loop.py::run_runner` 仅为 compat shim：每次构造临时 `Engine(deps, cfg)` 委派给 `engine.run(ctx)`。新代码应直接用 `Engine.run`。
 
 ## 备忘录清单
 
@@ -75,9 +75,9 @@ Engine.run(ctx)  # src/writer/engine/engine.py
 ### 工作流 / 编排
 
 - [10-伏笔生命周期与跨章节一致性](./10-伏笔生命周期与跨章节一致性.md) — **current**。YAML ledger + `foreshadow_search` Tool + 写章节时自动注入活跃伏笔（per `write_chapter._review_gate_node`）机制一致。
-- [11-检查点恢复与可观测性](./11-检查点恢复与可观测性.md) — **historical**。LangGraph checkpointer（`SqliteSaver` / `MemorySaver`）已实装（2026-07-09 PR2），不再只是占位。文档可读作概念背景，但「节点结束写 SQLite checkpoint」表述需替换为「LangGraph 自带 checkpointer + EngineSession 维护 turn 历史」。
+- [11-检查点恢复与可观测性](./11-检查点恢复与可观测性.md) — **historical**。LangGraph checkpointer（`SqliteSaver` / `MemorySaver`）已实装（2026-07-09 PR2），不再只是占位。文档可读作概念背景，但「节点结束写 SQLite checkpoint」表述需替换为「LangGraph 自带 checkpointer + Engine 维护 turn 历史」。
 - [12-RAG与检索实现方案](./12-RAG与检索实现方案.md) — **historical**。RAG / FAISS 已删除（`chg-remove-rag`）；检索由 `foreshadow_search`（ledger 检索）+ `project_search`（行级 grep）承担；4 层文件拼装替代金字塔记忆。
 
 ### 系统编排
 
-- [17-七种系统编排方式与本项目落地映射](./17-七种系统编排方式与本项目落地映射.md) — **historical**。`workflow_pending` 不再是合法 `DoneReason`（替换为 `aborted + decision`）；`run_engine` 改为主类 `Engine.run`；Markdown directive 是 Prompt Chaining 的本项目落地仍生效。
+- [17-七种系统编排方式与本项目落地映射](./17-七种系统编排方式与本项目落地映射.md) — **historical**。`workflow_pending` 不再是合法 `DoneReason`（替换为 `aborted + decision`）；`run_runner` 改为主类 `Engine.run`；Markdown directive 是 Prompt Chaining 的本项目落地仍生效。

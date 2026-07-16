@@ -18,9 +18,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
-from writer.engine.context import EngineContext
-from writer.engine.deps import EngineDeps, production_deps
 from writer.llm.prose import DeterministicProseClient
+from writer.runner.context import RunnerContext
+from writer.runner.deps import RunnerDeps, production_deps
 from writer.workflows.review_chapter import (
     build_reviewer_graph,
     run,
@@ -104,8 +104,8 @@ def _build_fake_multi_concern(
 
 def _make_deps(
     project_root: Path, *, review_llm: BaseChatModel | None = None
-) -> EngineDeps:
-    """Build an EngineDeps with the test project root and recording review LLM."""
+) -> RunnerDeps:
+    """Build an RunnerDeps with the test project root and recording review LLM."""
     deps = production_deps(project_root=project_root)
     deps.prose_client = DeterministicProseClient()
     if review_llm is not None:
@@ -180,7 +180,7 @@ class TestLoadTargetChapter:
         _patch_high_score_llm(monkeypatch)
         _write_chapter(project_root, "1.3", "first chapter content")
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.3", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -197,7 +197,7 @@ class TestLoadTargetChapter:
         _write_chapter(project_root, "1.2", "second")
         _write_chapter(project_root, "1.3", "third")
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -215,7 +215,7 @@ class TestLoadTargetChapter:
         _patch_high_score_llm(monkeypatch)
         (project_root / "草稿").mkdir()
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 99.99", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -225,7 +225,7 @@ class TestLoadTargetChapter:
     def test_load_without_project_root_returns_failed(self, tmp_path: Path) -> None:
         # No project_root on the deps; the workflow must fail cleanly.
         deps = production_deps()  # project_root=sentinel
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=None, project_state="S0"
         )
         result = run(ctx, deps)
@@ -237,7 +237,7 @@ class TestLoadTargetChapter:
     ) -> None:
         _patch_high_score_llm(monkeypatch)
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -266,7 +266,7 @@ class TestDeterministicPath:
 
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -287,7 +287,7 @@ class TestDeterministicPath:
 
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -333,7 +333,7 @@ class TestLLMPath:
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
         # 不注入 review_llm:让 _llm_review 内部 fallback 到 get_llm
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -355,7 +355,7 @@ class TestLLMPath:
 
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -386,7 +386,7 @@ class TestLLMPath:
         )
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root, review_llm=llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -408,7 +408,7 @@ class TestLLMPath:
 
         _write_chapter(project_root, "1.1", "x" * 200)
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -442,7 +442,7 @@ class TestDecisionGate:
             total=9,
         )
         deps = _make_deps(project_root, review_llm=llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -459,7 +459,7 @@ class TestDecisionGate:
             total=7,
         )
         deps = _make_deps(project_root, review_llm=llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -476,7 +476,7 @@ class TestDecisionGate:
             total=4,
         )
         deps = _make_deps(project_root, review_llm=llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -499,7 +499,7 @@ class TestDecisionGate:
             total=7,
         )
         deps = _make_deps(project_root, review_llm=llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -535,7 +535,7 @@ class TestContinuityFindings:
         deps = _make_deps(project_root)
         deps.tool_registry = MagicMock()
         deps.tool_registry.invoke.return_value = result
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         _write_chapter(project_root, "1.1", "x" * 200)
@@ -563,7 +563,7 @@ class TestContinuityFindings:
             output="foreshadows: F001, F003"
         )
         _write_chapter(project_root, "1.1", "x" * 200)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -580,7 +580,7 @@ class TestArgsIntegration:
     def test_target_passed_through(self, project_root: Path) -> None:
         _write_chapter(project_root, "2.4", "x" * 200)
         deps = _make_deps(project_root)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 2.4", project_root=project_root, project_state="S2"
         )
         result = run(ctx, deps)
@@ -595,7 +595,7 @@ class TestArgsIntegration:
         # Use real LLM path so we can inspect the prompt
         llm.response_factory = lambda: _build_fake_multi_concern()
         deps = _make_deps(project_root, review_llm=llm)
-        ctx = EngineContext(
+        ctx = RunnerContext(
             user_input="/审核 1.1 重点看伏笔",
             project_root=project_root,
             project_state="S2",

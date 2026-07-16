@@ -29,15 +29,6 @@ from rich.table import Table
 
 from writer import __version__
 from writer.config import get_settings, load_env_file, load_project_settings, refresh_settings
-from writer.engine import (
-    ActionEvent,
-    Done,
-    ErrorEvent,
-    Interrupt,
-    TextChunk,
-    ToolCall,
-    ToolResult,
-)
 from writer.explore import MAX_EXPLORE_QUESTIONS, run_explore
 from writer.llm.provider import get_llm
 from writer.project import (
@@ -48,7 +39,16 @@ from writer.project import (
     prompt_genres,
     safe_cwd,
 )
-from writer.session import EngineSession
+from writer.runner import (
+    ActionEvent,
+    Done,
+    ErrorEvent,
+    Interrupt,
+    TextChunk,
+    ToolCall,
+    ToolResult,
+)
+from writer.session import Engine
 from writer.skills import DirectiveRegistry, built_directive_registry
 
 console = Console()
@@ -145,7 +145,7 @@ def _confirm_recommended_genre(label: str) -> bool:
         return True
 
 
-def _try_handle_repl_init_explore(text: str, session: EngineSession) -> bool:
+def _try_handle_repl_init_explore(text: str, session: Engine) -> bool:
     """REPL ``/init <brief>`` 的多轮 explore 处理器。
 
     短 token 仍返回 ``False`` 交给 engine；故事梗概则要求真实 LLM，
@@ -219,7 +219,7 @@ def _try_handle_repl_init_explore(text: str, session: EngineSession) -> bool:
 _ACTIVE_PROMPT_SESSION: PromptSession[str] | None = None
 
 
-def handle_repl_input(line: str, session: EngineSession) -> bool:
+def handle_repl_input(line: str, session: Engine) -> bool:
     """处理一行 REPL 输入。
 
     循环应当停止时返回 False。
@@ -275,15 +275,15 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
 
 async def _run_engine(
     user_input: str,
-    session: EngineSession,
+    session: Engine,
     console: Console,
 ) -> None:
-    """为单轮自然语言驱动 agent engine。
+    """为单轮自然语言驱动 agent runner。
 
-    委托给 :meth:`EngineSession.run_turn`，由 session 构造
-    :class:`EngineContext` 并调用 :meth:`Engine.run`。若上一轮产出了
+    委托给 :meth:`Engine.run_turn`，由 session 构造
+    :class:`RunnerContext` 并调用 :meth:`Runner.run`。若上一轮产出了
     ``Interrupt`` 事件，则把待回答的 prompt 与用户输入拼好后喂给
-    引擎。
+    Runner。
     """
     session.refresh_project_state()
 
@@ -370,7 +370,7 @@ async def _run_engine(
 NO_HISTORY: object = object()
 
 
-def _warn_deterministic_prose_client(session: EngineSession) -> None:
+def _warn_deterministic_prose_client(session: Engine) -> None:
     """REPL 启动时检测 prose_client 是否为 deterministic 模式。
 
     Per 2026-07-14：``plan_chapter`` 在 deterministic 模式下严格拒绝
@@ -381,10 +381,10 @@ def _warn_deterministic_prose_client(session: EngineSession) -> None:
     （生产装配始终填充字段,``None`` 通常是手写 stub 的测试 stub,
     不必用户面对噪音）。
     """
-    engine = session.engine
-    if engine is None:
+    runner = session.runner
+    if runner is None:
         return
-    prose_client = engine.deps.prose_client
+    prose_client = runner.deps.prose_client
     if prose_client is None:
         return
     if getattr(prose_client, "name", "") != "deterministic":
@@ -505,17 +505,17 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
         load_project_settings(discovered)
     refresh_settings()
 
-    # 一个 EngineSession 撑起 REPL 整个生命周期 —— 持有 session_id、
+    # 一个 Engine 撑起 REPL 整个生命周期 —— 持有 session_id、
     # deps、轮次历史与待处理 Interrupt 状态。
-    engine_session = EngineSession()
+    engine = Engine()
     # Per 2026-07-14:REPL 启动时检查 prose_client 名,deterministic 模式
     # 软警告用户 ``/创作`` / ``/审核`` 将不可用。不阻断 REPL 启动。
-    _warn_deterministic_prose_client(engine_session)
+    _warn_deterministic_prose_client(engine)
     if discovered is not None:
-        engine_session.set_project_root(discovered)
+        engine.set_project_root(discovered)
         console.print(
             f"[dim]已自动绑定项目: {discovered} "
-            f"({STATE_DESCRIPTIONS[ProjectState(engine_session.project_state)]})[/dim]"
+            f"({STATE_DESCRIPTIONS[ProjectState(engine.project_state)]})[/dim]"
         )
     elif safe_cwd() is None:
         console.print(
@@ -523,12 +523,12 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
             "请先 [bold]cd[/bold] 到一个有效目录，或使用 [bold]/init <项目名>[/bold] 重新初始化。[/yellow]"
         )
 
-    # ``directive_registry`` 位于 ``engine_session.deps``（见
-    # ``EngineDeps.directive_registry``）；把它透传给 prompt session
+    # ``directive_registry`` 位于 ``engine.deps``（见
+    # ``RunnerDeps.directive_registry``）；把它透传给 prompt session
     # 与 ``/帮助`` 渲染器，让帮助表和 Tab 补全与本次 REPL 运行所注册
     # 的 skills（包括 import 时由 entry point 发现的插件）保持同步。
-    assert engine_session.engine is not None  # __post_init__ 保障
-    directive_registry = engine_session.engine.deps.directive_registry
+    assert engine.runner is not None  # __post_init__ 保障
+    directive_registry = engine.runner.deps.directive_registry
 
     if prompt_session is None and sys.stdin.isatty():
         prompt_session = build_prompt_session(directive_registry=directive_registry)
@@ -539,7 +539,7 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
     while True:
         try:
             line = _read_line(prompt_session, REPL_PROMPT)
-            if not handle_repl_input(line, engine_session):
+            if not handle_repl_input(line, engine):
                 break
         except (EOFError, KeyboardInterrupt):
             console.print("\n[green]已退出 writer。[/green]")

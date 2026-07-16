@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from writer.session import EngineSession
+from writer.session import Engine
 
 # REPL ``/init <brief>`` explore mode
 # ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ def test_repl_init_explore_creates_scaffold_and_writes_outcome(
         "# novel\n\n## 当前状态\n\n- state: S1\n",
         encoding="utf-8",
     )
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(project)
 
     class _FakeExploreChat:
@@ -61,7 +61,7 @@ def test_repl_init_explore_rejects_without_api_key(
     project = tmp_path / "novel"
     project.mkdir()
     (project / "AGENT.md").write_text("# novel\n", encoding="utf-8")
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(project)
 
     monkeypatch.setattr(repl, "get_settings", lambda: Settings(api_key=None))
@@ -78,7 +78,7 @@ def test_repl_init_explore_returns_false_for_non_brief(
     project = tmp_path / "novel"
     project.mkdir()
     (project / "AGENT.md").write_text("# novel\n", encoding="utf-8")
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(project)
 
     assert repl._try_handle_repl_init_explore("/init 双生", session) is False

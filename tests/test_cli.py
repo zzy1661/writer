@@ -14,15 +14,20 @@ from writer.cli.main import (
     REPL_COMMANDS,
     REPL_PROMPT,
     _read_line,
-    _run_engine,
     app,
     build_prompt_session,
     handle_repl_input,
 )
-from writer.engine.events import Done, ErrorEvent, Interrupt, ToolCall, ToolResult
-from writer.session import EngineSession
+from writer.runner.events import Done, ErrorEvent, Interrupt, ToolCall, ToolResult
+from writer.session import Engine
 
 runner = CliRunner()
+
+async def _consume(async_gen):
+    """辅助函数：消费异步生成器(asyncio.run 需要 coroutine)。"""
+    async for _ in async_gen:
+        pass
+
 
 
 def test_version() -> None:
@@ -58,26 +63,26 @@ def test_repl_handles_help_and_user_input() -> None:
 
 
 def test_handle_repl_input_returns_false_on_exit() -> None:
-    from writer.session import EngineSession
+    from writer.session import Engine
 
-    session = EngineSession()
+    session = Engine()
     assert handle_repl_input("/退出", session) is False
     assert handle_repl_input("/q", session) is False
     assert handle_repl_input("exit", session) is False
 
 
 def test_handle_repl_input_keeps_loop_on_empty() -> None:
-    from writer.session import EngineSession
+    from writer.session import Engine
 
-    session = EngineSession()
+    session = Engine()
     assert handle_repl_input("", session) is True
     assert handle_repl_input("   ", session) is True
 
 
 def test_handle_repl_input_unknown_slash_command() -> None:
-    from writer.session import EngineSession
+    from writer.session import Engine
 
-    session = EngineSession()
+    session = Engine()
     assert handle_repl_input("/init", session) is True
 
 
@@ -144,7 +149,7 @@ def test_repl_command_aliases_present() -> None:
 
 
 # ---------------------------------------------------------------------------
-# EngineSession integration (per add-engine-session change)
+# Engine integration (per add-engine-session change)
 # ---------------------------------------------------------------------------
 
 
@@ -166,19 +171,19 @@ def test_repl_session_survives_across_lines() -> None:
 
 def test_repl_exit_command_terminates_session() -> None:
     """`/退出` returns False from handle_repl_input → REPL loop ends."""
-    from writer.session import EngineSession
+    from writer.session import Engine
 
-    session = EngineSession()
+    session = Engine()
     assert handle_repl_input("/退出", session) is False
 
 
 def test_repl_pending_interrupt_visible_in_next_turn() -> None:
     """When an Interrupt event is emitted, the next turn's input is composed."""
-    from writer.engine.events import Interrupt
-    from writer.session import EngineSession, compose_pending_input
+    from writer.runner.events import Interrupt
+    from writer.session import Engine, compose_pending_input
 
     # Simulate engine emitting Interrupt then Done across two turns
-    session = EngineSession()
+    session = Engine()
     intr = Interrupt(type="text", prompt="你想修改哪一段？")
     session.set_pending_interrupt(intr)
 
@@ -218,13 +223,13 @@ def test_doctor_command_renders_settings_table() -> None:
 def test_run_engine_renders_tool_call_event(monkeypatch: pytest.MonkeyPatch) -> None:
     """A ``ToolCall`` event is rendered with the yellow ⚙ marker."""
 
-    async def fake_run_engine(ctx: object, deps: object) -> object:  # async iterator
+    async def _events():
         yield ToolCall(name="safe_read_file", arguments={"path": "x"})
         yield Done(reason="tool_completed")
 
-    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.session.Engine.run_turn", lambda self, user_input: _events())
 
-    session = EngineSession()
+    session = Engine()
     buf = Console(record=True, force_terminal=False)
 
     asyncio.run(cli_main._run_engine("anything", session, buf))
@@ -237,13 +242,13 @@ def test_run_engine_renders_tool_call_event(monkeypatch: pytest.MonkeyPatch) -> 
 def test_run_engine_renders_tool_result_event(monkeypatch: pytest.MonkeyPatch) -> None:
     """A ``ToolResult`` event is rendered with the green ✓ marker."""
 
-    async def fake_run_engine(ctx: object, deps: object) -> object:
+    async def _events():
         yield ToolResult(name="safe_read_file", output="file contents")
         yield Done(reason="tool_completed")
 
-    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.session.Engine.run_turn", lambda self, user_input: _events())
 
-    session = EngineSession()
+    session = Engine()
     buf = Console(record=True, force_terminal=False)
 
     asyncio.run(cli_main._run_engine("anything", session, buf))
@@ -264,15 +269,15 @@ def test_run_engine_binds_project_root_from_done_payload(
     project.mkdir()
     (project / "AGENT.md").write_text("state: S1", encoding="utf-8")
 
-    async def fake_run_engine(ctx: object, deps: object) -> object:
+    async def _events():
         yield Done(
             reason="answered",
             payload={"project_root": str(project), "project_state": "S1"},
         )
 
-    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.session.Engine.run_turn", lambda self, user_input: _events())
 
-    session = EngineSession()
+    session = Engine()
     buf = Console(record=True, force_terminal=False)
 
     asyncio.run(cli_main._run_engine("/init novel", session, buf))
@@ -284,13 +289,13 @@ def test_run_engine_binds_project_root_from_done_payload(
 def test_run_engine_renders_interrupt_event(monkeypatch: pytest.MonkeyPatch) -> None:
     """An ``Interrupt`` event stashes a prompt on the session and renders ? + prompt."""
 
-    async def fake_run_engine(ctx: object, deps: object) -> object:
+    async def _events():
         yield Interrupt(type="text", prompt="你想修改哪一段？")
         yield Done(reason="answered")
 
-    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.session.Engine.run_turn", lambda self, user_input: _events())
 
-    session = EngineSession()
+    session = Engine()
     buf = Console(record=True, force_terminal=False)
 
     asyncio.run(cli_main._run_engine("anything", session, buf))
@@ -305,13 +310,13 @@ def test_run_engine_renders_interrupt_event(monkeypatch: pytest.MonkeyPatch) -> 
 def test_run_engine_renders_error_event(monkeypatch: pytest.MonkeyPatch) -> None:
     """An ``ErrorEvent`` is rendered with the red ✗ marker."""
 
-    async def fake_run_engine(ctx: object, deps: object) -> object:
+    async def _events():
         yield ErrorEvent(message="boom")
         yield Done(reason="aborted")
 
-    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.session.Engine.run_turn", lambda self, user_input: _events())
 
-    session = EngineSession()
+    session = Engine()
     buf = Console(record=True, force_terminal=False)
 
     asyncio.run(cli_main._run_engine("anything", session, buf))
@@ -333,7 +338,7 @@ def test_run_engine_renders_project_state_on_aborted(
     ``STATE_DESCRIPTIONS``) on the line below.
     """
 
-    async def fake_run_engine(ctx: object, deps: object) -> object:
+    async def _events():
         yield Done(
             reason="aborted",
             payload={
@@ -343,12 +348,12 @@ def test_run_engine_renders_project_state_on_aborted(
             },
         )
 
-    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.session.Engine.run_turn", lambda self, user_input: _events())
 
-    session = EngineSession()
+    session = Engine()
     buf = Console(record=True, force_terminal=False)
 
-    asyncio.run(_run_engine("/创作 1.3", session, buf))
+    asyncio.run(cli_main._run_engine("/创作 1.3", session, buf))
 
     text = buf.export_text()
     assert "当前状态: S1" in text
@@ -382,7 +387,7 @@ def test_repl_warns_when_deterministic_prose_client(
     提示用户 ``/创作`` / ``/审核`` 将不可用。这是软警告,不阻断 REPL。
     """
     from writer.llm.prose import DeterministicProseClient
-    from writer.session import EngineSession
+    from writer.session import Engine
 
     # ``production_deps`` 在没有 API key 时默认装配 Deterministic
     # 客户端（conftest 已 scrube env vars）—— 直接断言 ``run_repl``
@@ -395,10 +400,10 @@ def test_repl_warns_when_deterministic_prose_client(
     # 软警告文案必须出现（前半句）。
     assert "需要真实 LLM" in result.stdout
     # 烟雾测试:构造 DeterministicProseClient 仍可作为 Protocol 实现被
-    # EngineSession 装配的 deps 接受 —— 保证启动预检的判定契约稳定。
+    # Engine 装配的 deps 接受 —— 保证启动预检的判定契约稳定。
     assert DeterministicProseClient().name == "deterministic"
-    # EngineSession 也在 deps 上承载 prose_client 字段。
-    assert EngineSession().engine.deps.prose_client is not None
+    # Engine 也在 deps 上承载 prose_client 字段。
+    assert Engine().runner.deps.prose_client is not None
 
 
 # ---------------------------------------------------------------------------
@@ -441,7 +446,7 @@ def test_repl_init_explore_creates_scaffold_and_writes_brief(
     """``/init <故事梗概>`` 在已存在项目上：补脚手架 + 写 brief。"""
 
     from writer.cli.main import handle_repl_input
-    from writer.session import EngineSession
+    from writer.session import Engine
 
     # 已有 S1 项目（``writer new`` 路径）
     project = tmp_path / "novel"
@@ -451,7 +456,7 @@ def test_repl_init_explore_creates_scaffold_and_writes_brief(
         encoding="utf-8",
     )
     # 显式把 session 绑定到项目（与 REPL 启动时的 ``set_project_root`` 等价）
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(project)
 
     from langchain_core.messages import AIMessage
@@ -495,11 +500,11 @@ def test_repl_init_explore_aborts_when_no_project_root(
     """没有项目根目录时，REPL 拦截并提示，不进引擎。"""
 
     from writer.cli.main import handle_repl_input
-    from writer.session import EngineSession
+    from writer.session import Engine
 
     # cwd 切到没有任何项目的目录，session 没有 project_root
     monkeypatch.chdir(tmp_path)
-    session = EngineSession()
+    session = Engine()
     assert session.project_root is None
 
     brief = (
@@ -519,7 +524,7 @@ def test_repl_init_explore_helper_returns_false_for_non_brief(
     """短 token（``looks_like_project_name`` 形态）应落给引擎处理。"""
 
     from writer.cli.main import _try_handle_repl_init_explore
-    from writer.session import EngineSession
+    from writer.session import Engine
 
     project = tmp_path / "novel"
     project.mkdir()
@@ -527,7 +532,7 @@ def test_repl_init_explore_helper_returns_false_for_non_brief(
         "# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n",
         encoding="utf-8",
     )
-    session = EngineSession()
+    session = Engine()
     session.set_project_root(project)
 
     # ``双生`` 短 token，不是 creative brief —— 让既有 argv 解析路径处理

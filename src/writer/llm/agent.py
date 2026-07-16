@@ -23,7 +23,7 @@ ReAct 风格的循环里：
 给 —— 规则优先派发和非 LLM 的 ``_run_tool`` 路径保持不变。
 
 分层：本模块位于 ``writer.llm``（而非 ``writer.engine``），让 engine
-包从不直接 import LLM 类型。``EngineDeps`` 持有一个
+包从不直接 import LLM 类型。``RunnerDeps`` 持有一个
 ``Optional[ReActAgent]`` 引用；当引擎想要循环时
 ``await deps.tool_loop.run(...)`` 并原样转发产出事件。
 """
@@ -46,27 +46,27 @@ from langchain_core.messages import (
 from langchain_core.tools import BaseTool
 
 from writer.config import Settings
-from writer.engine.events import (
-    Done,
-    TextChunk,
-    ToolCall,
-    ToolResult,
-)
 from writer.llm.provider import get_llm
 from writer.llm.structured import (
     invoke_structured_json,
     needs_json_prompt_structured_output,
 )
 from writer.routing.intent_router import AgentAction
+from writer.runner.events import (
+    Done,
+    TextChunk,
+    ToolCall,
+    ToolResult,
+)
 from writer.tools.langchain_bridge import to_langchain_tools
 from writer.tools.protocol import ToolResult as ProtocolToolResult
 from writer.tools.registry import ToolDescriptor, ToolRegistry
 from writer.tools.runtime import ToolRuntime
 
 if TYPE_CHECKING:
-    from writer.engine.config import EngineConfig
-    from writer.engine.context import EngineContext
-    from writer.engine.deps import EngineDeps
+    from writer.runner.config import RunnerConfig
+    from writer.runner.context import RunnerContext
+    from writer.runner.deps import RunnerDeps
 
 # 每次轮次工具调用的硬上限。真正 ReAct agent 可以快速积累有用的
 # 上下文；但失控的模型一直调用同一工具几乎总是坏掉或幻觉。5 对
@@ -80,7 +80,7 @@ class ReActState:
     """ReAct agent 的每轮状态。
 
     生命周期为单轮：引擎每次委托给 :meth:`ReActAgent.run` 时构造一份
-    全新状态。跨轮记忆属于 ``EngineSession``（按计划刻意排除在外）。
+    全新状态。跨轮记忆属于 ``Engine``（按计划刻意排除在外）。
 
     Attributes:
         messages: LangChain 消息历史。起始是循环的 system prompt +
@@ -168,15 +168,15 @@ class ReActAgent:
     async def run(
         self,
         action: AgentAction,
-        ctx: EngineContext,
-        deps: EngineDeps,
-        cfg: EngineConfig,
+        ctx: RunnerContext,
+        deps: RunnerDeps,
+        cfg: RunnerConfig,
     ) -> AsyncIterator[TextChunk | ToolCall | ToolResult | Done]:
         """驱动 ReAct 循环直至 ``answer_directly`` 或预算耗尽。
 
         ``action`` 是本轮路由的首个 ``call_tool`` 决策。我们用它为对话
         历史播种（让模型知道用户问的是什么，即便它的首个 action 是
-        工具调用而非文本回答）。``ctx`` 通过 ``EngineContext.user_input``
+        工具调用而非文本回答）。``ctx`` 通过 ``RunnerContext.user_input``
         携带原始用户输入。
 
         工具调用抛出的异常向外传播 —— 引擎外层的 ``except ToolError``
@@ -264,7 +264,7 @@ class ReActAgent:
     # ------------------------------------------------------------------
 
     def _initial_messages(
-        self, action: AgentAction, user_input: str, *, deps: EngineDeps
+        self, action: AgentAction, user_input: str, *, deps: RunnerDeps
     ) -> list[BaseMessage]:
         """用 system prompt + directive / agent body + 用户轮次为对话播种。
 

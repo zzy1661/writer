@@ -24,7 +24,7 @@ WorkflowStatus = Literal["completed", "pending", "failed"]
 
 @dataclass(frozen=True)
 class WorkflowResult:
-    """:meth:`EngineDeps.run_workflow` 的结构化返回值。
+    """:meth:`RunnerDeps.run_workflow` 的结构化返回值。
 
     字段：
 
@@ -51,7 +51,7 @@ class WorkflowResult:
     def to_payload(self) -> dict[str, Any]:
         """渲染为 JSON 友好的 ``Done.payload`` dict。
 
-        引擎在构造终结 :class:`writer.engine.events.Done` 时调用。
+        引擎在构造终结 :class:`writer.runner.events.Done` 时调用。
         ``artifacts`` 中的 ``Path`` 值被转换为 ``str``，让 payload
         不需要调用方做转换即可 JSON 序列化。
         """
@@ -72,9 +72,9 @@ def workflow_result_from_iterable(
 ) -> WorkflowResult:
     """旧 ``Iterable[str]`` 工作流 callable 的适配器。
 
-    :class:`EngineDeps` 默认实现把已注册的
+    :class:`RunnerDeps` 默认实现把已注册的
     :data:`writer.workflows.WORKFLOWS` 条目（PR1 中仍是
-    ``Callable[[EngineContext], Iterable[str]]``）映射到
+    ``Callable[[RunnerContext], Iterable[str]]``）映射到
     :class:`WorkflowResult`，让引擎能基于 ``status`` 派发。默认
     status 为 ``"pending"``，因为旧 callable 没有
     "completed / failed" 概念 —— PR2 / PR3 重写的 ``write_chapter``

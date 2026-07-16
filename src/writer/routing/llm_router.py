@@ -16,7 +16,7 @@ Agent 派发（per ``fea-agent-mirror``）：
 "可用 agent" 列表，来自 :meth:`AgentRegistry.descriptions` 的
 ``{name, description, genre}``。LLM 可以在返回的 :class:`AgentAction`
 上设置 ``target_agent``，此时引擎循环会派发给所选 agent
-（参见 :mod:`writer.engine.loop` 的 ``case "agent"``）。基于规则的
+（参见 :mod:`writer.runner.loop` 的 ``case "agent"``）。基于规则的
 路由器忽略 ``agent_registry`` —— 规则只处理斜杠命令。
 """
 

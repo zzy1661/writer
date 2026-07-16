@@ -50,8 +50,8 @@ from writer.workflows.types import (
 )
 
 if TYPE_CHECKING:
-    from writer.engine.context import EngineContext
-    from writer.engine.deps import EngineDeps
+    from writer.runner.context import RunnerContext
+    from writer.runner.deps import RunnerDeps
 
 
 class ReviewerState(TypedDict, total=False):
@@ -76,10 +76,10 @@ class ReviewerState(TypedDict, total=False):
 # 与 ``write_chapter`` 同样的模式 —— 裸函数节点签名无法把 deps
 # 作为参数，所以使用模块级绑定，由 :func:`run` 设置并在
 # ``graph.invoke`` 之后重置。
-_REVIEW_DEPS: EngineDeps | None = None
+_REVIEW_DEPS: RunnerDeps | None = None
 
 
-def _set_deps(deps: EngineDeps) -> None:
+def _set_deps(deps: RunnerDeps) -> None:
     global _REVIEW_DEPS
     _REVIEW_DEPS = deps
 
@@ -89,7 +89,7 @@ def _reset_deps() -> None:
     _REVIEW_DEPS = None
 
 
-def _get_deps() -> EngineDeps:
+def _get_deps() -> RunnerDeps:
     if _REVIEW_DEPS is None:
         msg = (
             "review_chapter node called without _set_deps; "
@@ -104,7 +104,7 @@ def _get_deps() -> EngineDeps:
 # ---------------------------------------------------------------------------
 
 
-def run(ctx: EngineContext, deps: EngineDeps) -> WorkflowResult:
+def run(ctx: RunnerContext, deps: RunnerDeps) -> WorkflowResult:
     """构建图，运行它，并返回 :class:`WorkflowResult`。"""
     args = extract_review_chapter_args(ctx.user_input)
     initial_state: ReviewerState = {
@@ -382,7 +382,7 @@ def _failed_state(
     return {"metrics": metrics, "trace": trace}
 
 
-def _load_active_foreshadows(deps: EngineDeps) -> list[str]:
+def _load_active_foreshadows(deps: RunnerDeps) -> list[str]:
     """调用 ``foreshadow_search(status="active")`` 并返回 IDs。"""
     try:
         result = deps.tool_registry.invoke(
@@ -427,7 +427,7 @@ def _deterministic_review(
 
 
 def _llm_review(
-    deps: EngineDeps,
+    deps: RunnerDeps,
     chapter_text: str,
     active_foreshadows: list[str],
     focus: list[str],
@@ -536,7 +536,7 @@ def _coerce_metrics(
 # ---------------------------------------------------------------------------
 
 
-def stub(ctx: EngineContext) -> WorkflowResult:
+def stub(ctx: RunnerContext) -> WorkflowResult:
     """PR1 兼容 shim；PR3 实现让 ``run`` 成为真实入口。``stub`` 现在
     委托给 :func:`run` 与占位 deps（它无法从遗留测试表面读取真实 deps）。
     需要真实行为的测试代码应直接调用 :func:`run`。
