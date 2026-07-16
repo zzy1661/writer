@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from writer.config import load_project_settings, refresh_settings
+from writer.explore._apply import ExploreApplyOutcome, apply_explore_outcome
 from writer.project import (
     apply_genre_scaffolding,
     normalize_genres,
@@ -93,6 +94,8 @@ def apply_genre_and_brief(
 
 
 __all__ = [
+    "ExploreApplyOutcome",
     "InitBriefOutcome",
+    "apply_explore_outcome",
     "apply_genre_and_brief",
 ]

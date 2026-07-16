@@ -1,8 +1,8 @@
 """REPL 交互层：交互式 writer 命令循环 + 引擎事件桥接。
 
 与 Typer 子命令层（``commands``）解耦；REPL ``/init <创意>`` 简洁形式
-复用 :func:`writer.cli._init_backend.apply_genre_and_brief` 完成
-"补脚手架 + 更新题材行 + 写 brief"。
+进入 :mod:`writer.explore` 多轮 explore 模式，完成后复用
+:func:`writer.explore._apply.apply_explore_outcome` 落盘。
 
 REPL 不再支持 ``/init --name X --dir Y`` flag 形式 —— 创建项目请用
 CLI 子命令 ``writer new <书名>``（per 2026-07-14 收紧）。``/init``
@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -23,10 +24,11 @@ from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm
 from rich.table import Table
 
 from writer import __version__
-from writer.config import load_env_file, load_project_settings, refresh_settings
+from writer.config import get_settings, load_env_file, load_project_settings, refresh_settings
 from writer.engine import (
     ActionEvent,
     Done,
@@ -36,6 +38,8 @@ from writer.engine import (
     ToolCall,
     ToolResult,
 )
+from writer.explore import MAX_EXPLORE_QUESTIONS, run_explore
+from writer.llm.provider import get_llm
 from writer.project import (
     STATE_DESCRIPTIONS,
     ProjectState,
@@ -127,28 +131,25 @@ def print_repl_help(directive_registry: DirectiveRegistry | None = None) -> None
     console.print(table)
 
 
-def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
-    """REPL 简洁 ``/init <brief>`` 处理器。
+def _confirm_recommended_genre(label: str) -> bool:
+    """确认 explore 推荐的题材；EOF 或管道输入按默认值接受。"""
 
-    返回 ``True`` 表示已处理（消费输入），``False`` 表示不是 brief
-    形式（让既有路径继续走）。短路条件：
+    # 管道场景没有可靠的非阻塞 stdin 试探；和 ``prompt_genres`` 一样
+    # 采用默认值，避免把下一条 ``/退出`` 当成确认输入吞掉。TTY 下
+    # 仍展示 y/N 确认，拒绝后进入完整题材选择。
+    if not sys.stdin.isatty() and _ACTIVE_PROMPT_SESSION is None:
+        return True
+    try:
+        return Confirm.ask(f"采用 LLM 推荐的『{label}』?", default=True)
+    except EOFError:
+        return True
 
-    - 文本不是 brief 形式（``looks_like_creative_brief(rest)`` 为 ``False``）
-    - ``session.project_root`` 与 ``discover_project_root()`` 都找不到项目
-      （此时打印红色错误，仍返回 ``True`` —— 已处理，避免引擎再次询问）
 
-    处理流程：
+def _try_handle_repl_init_explore(text: str, session: EngineSession) -> bool:
+    """REPL ``/init <brief>`` 的多轮 explore 处理器。
 
-    1. 找 ``project_root = session.project_root or discover_project_root()``；
-       找不到则提示「请先在 ``writer new`` 创建的目录内执行」并返回 ``True``。
-    2. 当前题材回退（``session.project_genre`` 或 ``read_genre_from_agent``），
-       打印「当前题材: <label>」+ 多选提示。
-    3. ``prompt_genres(console, default=None)`` —— 每次让用户重选；
-       非 TTY 走 ``["其他"]`` 兜底。
-    4. :func:`writer.cli._init_backend.apply_genre_and_brief` 一步完成
-       「补脚手架 + 更新题材行 + 写 brief」。
-    5. ``session.refresh_project_genre()`` 同步缓存。
-    6. 打印摘要：所选题材、新建文件数（>0 时）、题材行变更、brief 来源。
+    短 token 仍返回 ``False`` 交给 engine；故事梗概则要求真实 LLM，
+    完成最多五轮合作式提问后一次性落盘。
     """
 
     from writer.project.init_brief import extract_init_brief_text, looks_like_creative_brief
@@ -165,45 +166,57 @@ def _try_handle_repl_init_brief(text: str, session: EngineSession) -> bool:
         )
         return True
 
-    # ``session.set_project_root`` 在绑定时已经 ``refresh_project_genre()``，
-    # ``session.project_genre`` 即磁盘题材行的权威缓存。
-    current_genre = session.project_genre
-
-    console.print(f"[dim]当前题材: {current_genre}[/dim]")
-    selected = prompt_genres(console, default=None)
-    if not selected:
-        selected = ["其他"]
-
-    # 跨模块懒加载（与 flag 形式保持一致）。
-    from writer.cli._init_backend import apply_genre_and_brief
-    from writer.config import get_settings
+    settings = get_settings()
+    if not settings.has_api_key:
+        console.print(
+            "[red]`/init <故事梗概>` 的 explore 模式需要 WRITER_API_KEY。"
+            "请配置 API Key 后重试；`writer new <书名>` 仍可离线创建项目。[/red]"
+        )
+        return True
 
     try:
-        outcome = apply_genre_and_brief(
-            project_root,
-            genres=selected,
+        outcome = run_explore(
             brief=rest,
-            settings=get_settings(),
+            llm=get_llm(settings),
+            console=console,
+            prompt_session=_ACTIVE_PROMPT_SESSION,
+            max_questions=MAX_EXPLORE_QUESTIONS,
         )
-    except Exception as exc:  # noqa: BLE001 — 把任何 LLM / 写入错误转成 UI 提示
-        console.print(f"[red]初始化失败：{exc}[/red]")
+        genres = outcome.genres or ["其他"]
+        if not _confirm_recommended_genre(genres[0]):
+            genres = prompt_genres(console, default=genres) or ["其他"]
+            outcome = replace(outcome, genres=genres)
+
+        from writer.cli._init_backend import apply_explore_outcome
+
+        applied = apply_explore_outcome(
+            project_root,
+            outcome,
+            settings=settings,
+        )
+    except Exception as exc:  # noqa: BLE001 — 把 LLM / 写入错误转成 UI 提示
+        console.print(f"[red]explore 初始化失败：{exc}[/red]")
         return True
 
     session.refresh_project_genre()
-
-    console.print(f"[green]已选择题材：[/green]{', '.join(outcome.selected_genres) or '其他'}")
-    if outcome.created_files:
-        console.print(f"[green]新增文件：[/green]{len(outcome.created_files)} 个")
-        for path in outcome.created_files:
-            console.print(f"  - {path}")
-    if outcome.genre_line_changed:
-        console.print("[green]已更新 AGENT.md 题材行[/green]")
     console.print(
-        f"[green]已写入 创意/核心创意.md[/green]"
-        f"（来源: {outcome.brief_source}）"
+        f"[green]explore 初始化完成：题材 {', '.join(applied.selected_genres) or '其他'}；"
+        f"架构 {applied.architecture_name}；来源 {outcome.brief_source}[/green]"
     )
+    if applied.created_files:
+        console.print(f"[green]新建文件：[/green]{len(applied.created_files)} 个")
+        for path in applied.created_files:
+            console.print(f"  - {path}")
+    if applied.genre_line_changed:
+        console.print("[green]已更新 AGENT.md 题材行[/green]")
     console.print("[green]已更新 AGENT.md 基本要求[/green]")
     return True
+
+
+# explore 在一次 ``handle_repl_input`` 调用内连续读取回答。REPL 运行时由
+# ``run_repl`` 暂存当前 PromptSession；直接调用 helper 的测试 / SDK 路径
+# 默认为 ``None``，回退到 ``input()``。
+_ACTIVE_PROMPT_SESSION: PromptSession[str] | None = None
 
 
 def handle_repl_input(line: str, session: EngineSession) -> bool:
@@ -245,13 +258,13 @@ def handle_repl_input(line: str, session: EngineSession) -> bool:
         )
         return True
 
-    # Brief 形式（``/init <故事梗概>``）：先于引擎分发拦截，做多选题材 +
-    # 补脚手架 + 写 brief。判定条件：开头 ``/init`` 且看起来像故事概要
-    # （``looks_like_creative_brief``）。helper 返回 False（短 token /
-    # 项目名形式）时落给引擎。
+    # ``/init <故事梗概>``：先于引擎分发拦截，进入 explore 多轮对话并
+    # 写入核心创意、基本要求与写作架构。判定条件：开头 ``/init`` 且
+    # 看起来像故事概要（``looks_like_creative_brief``）。helper 返回
+    # False（短 token / 项目名形式）时落给引擎。
     # 不再支持 ``/init --name X --dir Y`` flag 形式 —— 创建项目请用 CLI
     # 子命令 ``writer new <书名>``（per 2026-07-14）。
-    if text.startswith("/init ") and _try_handle_repl_init_brief(text, session):
+    if text.startswith("/init ") and _try_handle_repl_init_explore(text, session):
         return True
 
     # 框架命令（退出/帮助/状态）之外的所有输入——斜杠命令与自然语言
@@ -520,12 +533,16 @@ def run_repl(prompt_session: PromptSession[str] | None = None) -> None:
     if prompt_session is None and sys.stdin.isatty():
         prompt_session = build_prompt_session(directive_registry=directive_registry)
 
+    global _ACTIVE_PROMPT_SESSION
+    _ACTIVE_PROMPT_SESSION = prompt_session
+
     while True:
         try:
             line = _read_line(prompt_session, REPL_PROMPT)
+            if not handle_repl_input(line, engine_session):
+                break
         except (EOFError, KeyboardInterrupt):
             console.print("\n[green]已退出 writer。[/green]")
             break
 
-        if not handle_repl_input(line, engine_session):
-            break
+    _ACTIVE_PROMPT_SESSION = None

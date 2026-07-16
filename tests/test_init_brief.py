@@ -224,3 +224,57 @@ def test_apply_genre_and_brief_no_op_when_genre_unchanged(
 
     assert outcome.genre_line_changed is False
     assert outcome.created_files == []  # 所有 scaffold 文件已存在
+
+
+def test_apply_explore_outcome_creates_scaffold_and_arch_doc(tmp_path) -> None:  # noqa: ANN001
+    from writer.cli._init_backend import apply_explore_outcome
+    from writer.explore import ExploreOutcome
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text(
+        "# novel\n\n## 当前状态\n\n- state: S1\n",
+        encoding="utf-8",
+    )
+
+    result = apply_explore_outcome(
+        project,
+        ExploreOutcome(
+            core_idea="# 核心\n\n程序员穿越到唐朝。",
+            requirements="- 篇幅: 30 万字",
+            genres=["历史"],
+            architecture="三幕结构",
+        ),
+        settings=Settings(api_key=None),
+    )
+
+    assert result.selected_genres == ["历史"]
+    assert (project / "史实" / "年表.md").is_file()
+    assert (project / "创意" / "核心创意.md").read_text(encoding="utf-8").startswith(
+        "# 核心"
+    )
+    agent = (project / "AGENT.md").read_text(encoding="utf-8")
+    assert "- 题材: 历史" in agent
+    assert "写作架构: 三幕结构" in agent
+    assert "三幕结构" in (
+        project / "大纲" / "写作架构.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_apply_explore_outcome_skips_unknown_architecture(tmp_path, caplog) -> None:  # noqa: ANN001
+    from writer.cli._init_backend import apply_explore_outcome
+    from writer.explore import ExploreOutcome
+
+    project = tmp_path / "novel"
+    project.mkdir()
+    (project / "AGENT.md").write_text("# novel\n", encoding="utf-8")
+
+    apply_explore_outcome(
+        project,
+        ExploreOutcome("# 核心", "- 风格: 网文", ["其他"], "未知架构"),
+        settings=Settings(api_key=None),
+    )
+
+    assert (project / "创意" / "核心创意.md").is_file()
+    assert not (project / "大纲" / "写作架构.md").exists()
+    assert "未知写作架构" in caplog.text

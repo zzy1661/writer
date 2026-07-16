@@ -51,7 +51,10 @@ packages = ["src/writer"]
 # Ship the SKILL.md directive packages under src/writer/skills/_shipped/
 # so that ``importlib.resources.files("writer.skills._shipped")`` resolves
 # both from source checkouts and from installed wheels.
-artifacts = ["src/writer/skills/_shipped/**/*.md"]
+artifacts = [
+    "src/writer/skills/_shipped/**/*.md",
+    "src/writer/explore/_shipped/**/*.md",
+]
 
 [tool.ruff]
 line-length = 100

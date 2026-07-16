@@ -22,7 +22,7 @@ from writer.cli.repl import (  # noqa: F401
     _read_line,
     _resolve_history_file,
     _run_engine,
-    _try_handle_repl_init_brief,
+    _try_handle_repl_init_explore,
     build_prompt_session,
     build_repl_commands,
     console,

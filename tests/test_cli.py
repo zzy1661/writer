@@ -222,12 +222,12 @@ def test_run_engine_renders_tool_call_event(monkeypatch: pytest.MonkeyPatch) -> 
         yield ToolCall(name="safe_read_file", arguments={"path": "x"})
         yield Done(reason="tool_completed")
 
-    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
 
     session = EngineSession()
     buf = Console(record=True, force_terminal=False)
 
-    asyncio.run(_run_engine("anything", session, buf))
+    asyncio.run(cli_main._run_engine("anything", session, buf))
 
     text = buf.export_text()
     assert "⚙" in text
@@ -241,12 +241,12 @@ def test_run_engine_renders_tool_result_event(monkeypatch: pytest.MonkeyPatch) -
         yield ToolResult(name="safe_read_file", output="file contents")
         yield Done(reason="tool_completed")
 
-    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
 
     session = EngineSession()
     buf = Console(record=True, force_terminal=False)
 
-    asyncio.run(_run_engine("anything", session, buf))
+    asyncio.run(cli_main._run_engine("anything", session, buf))
 
     text = buf.export_text()
     assert "✓" in text
@@ -270,12 +270,12 @@ def test_run_engine_binds_project_root_from_done_payload(
             payload={"project_root": str(project), "project_state": "S1"},
         )
 
-    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
 
     session = EngineSession()
     buf = Console(record=True, force_terminal=False)
 
-    asyncio.run(_run_engine("/init novel", session, buf))
+    asyncio.run(cli_main._run_engine("/init novel", session, buf))
 
     assert session.project_root == project
     assert session.project_state == "S1"
@@ -288,12 +288,12 @@ def test_run_engine_renders_interrupt_event(monkeypatch: pytest.MonkeyPatch) -> 
         yield Interrupt(type="text", prompt="你想修改哪一段？")
         yield Done(reason="answered")
 
-    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
 
     session = EngineSession()
     buf = Console(record=True, force_terminal=False)
 
-    asyncio.run(_run_engine("anything", session, buf))
+    asyncio.run(cli_main._run_engine("anything", session, buf))
 
     text = buf.export_text()
     assert "?" in text
@@ -309,12 +309,12 @@ def test_run_engine_renders_error_event(monkeypatch: pytest.MonkeyPatch) -> None
         yield ErrorEvent(message="boom")
         yield Done(reason="aborted")
 
-    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
 
     session = EngineSession()
     buf = Console(record=True, force_terminal=False)
 
-    asyncio.run(_run_engine("anything", session, buf))
+    asyncio.run(cli_main._run_engine("anything", session, buf))
 
     text = buf.export_text()
     assert "✗" in text
@@ -343,7 +343,7 @@ def test_run_engine_renders_project_state_on_aborted(
             },
         )
 
-    monkeypatch.setattr(cli_main, "run_engine", fake_run_engine)
+    monkeypatch.setattr("writer.cli.repl._run_engine", fake_run_engine)
 
     session = EngineSession()
     buf = Console(record=True, force_terminal=False)
@@ -434,7 +434,7 @@ def test_build_prompt_session_falls_back_when_home_is_unwritable(
 # ---------------------------------------------------------------------------
 
 
-def test_repl_init_brief_creates_scaffold_and_writes_brief(
+def test_repl_init_explore_creates_scaffold_and_writes_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -454,6 +454,26 @@ def test_repl_init_brief_creates_scaffold_and_writes_brief(
     session = EngineSession()
     session.set_project_root(project)
 
+    from langchain_core.messages import AIMessage
+
+    import writer.cli.repl as repl
+    from writer.config import Settings
+
+    class _FakeExploreChat:
+        def invoke(self, messages: object) -> AIMessage:
+            return AIMessage(
+                content=(
+                    '{"status":"completed","outcome":'
+                    '{"core_idea":"# 扩写核心创意",'
+                    '"requirements":"- 篇幅: 30 万字",'
+                    '"genres":["历史"],"architecture":"三幕结构"}}'
+                )
+            )
+
+    monkeypatch.setattr(repl, "get_settings", lambda: Settings(api_key="sk-test"))
+    monkeypatch.setattr(repl, "get_llm", lambda settings: _FakeExploreChat())
+    monkeypatch.setattr(repl, "_confirm_recommended_genre", lambda label: True)
+
     # 必须含 ``looks_like_creative_brief`` 识别的标点（``。`` 等）
     brief = (
         "林远穿越到了他写的游戏中。但他写的游戏是一个充满温馨故事的城市，"
@@ -468,7 +488,7 @@ def test_repl_init_brief_creates_scaffold_and_writes_brief(
     assert "## 基本要求" in agent_text
 
 
-def test_repl_init_brief_aborts_when_no_project_root(
+def test_repl_init_explore_aborts_when_no_project_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -492,13 +512,13 @@ def test_repl_init_brief_aborts_when_no_project_root(
     assert not (tmp_path / "创意").exists()
 
 
-def test_repl_init_brief_helper_returns_false_for_non_brief(
+def test_repl_init_explore_helper_returns_false_for_non_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """短 token（``looks_like_project_name`` 形态）应落给引擎处理。"""
 
-    from writer.cli.main import _try_handle_repl_init_brief
+    from writer.cli.main import _try_handle_repl_init_explore
     from writer.session import EngineSession
 
     project = tmp_path / "novel"
@@ -511,4 +531,4 @@ def test_repl_init_brief_helper_returns_false_for_non_brief(
     session.set_project_root(project)
 
     # ``双生`` 短 token，不是 creative brief —— 让既有 argv 解析路径处理
-    assert _try_handle_repl_init_brief("/init 双生", session) is False
+    assert _try_handle_repl_init_explore("/init 双生", session) is False
