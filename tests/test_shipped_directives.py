@@ -121,7 +121,7 @@ def test_shipped_directives_have_real_descriptions() -> None:
     expected = {
         "/大纲": "根据 AGENT.md 题材与架构方法生成大纲",
         "/目录": "根据 AGENT.md 题材与架构方法及大纲生成章节目录",
-        "/人物": "创建/更新角色卡(写入 人物/<角色名>.md, 包含八项固定字段)",
+        "/人物": "用三重标签生成法创建/更新角色卡(写入 人物/<角色名>.md)",
     }
     for d in directives:
         assert d.description == expected[d.command], (
