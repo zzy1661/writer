@@ -248,6 +248,53 @@ def test_dispatch_directive_in_s4_does_not_block_toc(tmp_path: Path) -> None:
     assert not any(e.reason == "aborted" for e in done_events)
 
 
+def test_engine_dispatches_character_skill(tmp_path: Path) -> None:
+    """`/人物` reaches the directive body via ``built_directive_registry``.
+
+    The shipped ``/人物`` SKILL.md (per 2026-07-16 landing) must be
+    discoverable without any project root and the engine must route the
+    command through ``deps.directive_registry`` (no engine/ code
+    changes — the lookup is dynamic per
+    ``engine/engine.py:213-215``). With rule-only deployment the
+    preview path yields TextChunks + ``Done(reason='answered',
+    payload={'directive': '/人物'})``.
+    """
+    from writer.skills import built_directive_registry
+
+    # 1. directive_registry picks up /人物 shipped even without project root.
+    registry = built_directive_registry(project_root=None)
+    directive = registry.get("/人物")
+    assert directive is not None, "/人物 must be shipped"
+    assert "character-card-template.md" in set(
+        directive.references or {}
+    ), "shipped /人物 must reference character-card-template.md"
+
+    # 2. router captures the slash command.
+    from writer.routing import RuleBasedIntentRouter
+
+    action = RuleBasedIntentRouter().route("/人物 张三", _project_state="S5")
+    assert action.command == "/人物"
+    assert action.action_type == "run_command"
+
+    # 3. engine dispatches to _run_directive (rule-only preview).
+    workspace = create_workspace("character-skill", tmp_path)
+    deps = _stub_deps(workspace.root)
+    events = _run_engine_sync(
+        EngineContext(
+            user_input="/人物 张三 主角 25 岁 程序员",
+            project_root=workspace.root,
+        ),
+        deps,
+    )
+
+    done_events = [e for e in events if isinstance(e, Done)]
+    assert done_events, "expected a terminal Done event"
+    answered = [e for e in done_events if e.reason == "answered"]
+    assert answered, "expected Done(reason='answered') from rule-only preview"
+    assert answered[0].payload.get("directive") == "/人物"
+    assert not any(e.reason == "aborted" for e in done_events)
+
+
 # ---------------------------------------------------------------------------
 # resolve_references is exercised via the engine path
 # ---------------------------------------------------------------------------

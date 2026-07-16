@@ -42,7 +42,7 @@ def _directive(
 def test_built_directive_registry_no_project_root_returns_shipped() -> None:
     registry = built_directive_registry(project_root=None)
     commands = set(registry.commands())
-    assert commands == {"/大纲", "/目录"}
+    assert commands == {"/大纲", "/目录", "/人物"}
 
 
 def test_built_directive_registry_shipped_have_descriptions() -> None:

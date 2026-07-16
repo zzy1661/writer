@@ -16,7 +16,7 @@ from writer.skills.directive_discovery import discover_shipped_directives
 
 _SHIPPED_ROOT = Path(__file__).resolve().parent.parent / "src" / "writer" / "skills" / "_shipped"
 
-_SHIPPED_COMMANDS = ["/大纲", "/目录"]
+_SHIPPED_COMMANDS = ["/大纲", "/目录", "/人物"]
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +121,7 @@ def test_shipped_directives_have_real_descriptions() -> None:
     expected = {
         "/大纲": "生成或查看大纲",
         "/目录": "生成或查看章节目录",
+        "/人物": "创建/更新角色卡(写入 人物/<角色名>.md, 包含八项固定字段)",
     }
     for d in directives:
         assert d.description == expected[d.command], (
