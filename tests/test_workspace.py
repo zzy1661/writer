@@ -26,6 +26,9 @@ EXPECTED_DIRS = [
     "世界观",
     "备忘",
     "正文",
+    # 伏笔目录是所有题材共有（per 2026-07-17）——
+    # 不再藏在 genre-specific 玄幻脚手架里。
+    "伏笔",
 ]
 
 EXPECTED_FILES = [
@@ -36,6 +39,9 @@ EXPECTED_FILES = [
     "人物/主要人物.md",
     "世界观/世界观设定.md",
     "备忘/待办.md",
+    # 伏笔表是所有题材共有基础脚手架（per 2026-07-17）——
+    # Markdown 表示与 ``伏笔.yaml`` 结构化 ledger 并存。
+    "伏笔/伏笔表.md",
 ]
 
 HISTORY_FILES = [
@@ -46,13 +52,14 @@ HISTORY_FILES = [
 ]
 
 XUANHUAN_FILES = [
-    "伏笔/伏笔表.md",
+    # 伏笔/伏笔表.md 已迁出到 base scaffold（per 2026-07-17）——
+    # 所有题材共有,不再是玄幻专属。
     "大纲/境界表.md",
 ]
 
 ROMANCE_FILES = [
-    "人设/男主.md",
-    "人设/女主.md",
+    # 人设/男主.md + 人设/女主.md 已删除（per 2026-07-17）——
+    # 男主 / 女主定位由 ``人物/<角色名>.md`` 三重标签生成法承担。
     "大纲/感情线时间轴.md",
 ]
 
@@ -213,7 +220,10 @@ def test_create_workspace_romance_genre_appends_romance_dirs(tmp_path: Path) -> 
     for relative in ROMANCE_FILES:
         assert (workspace.root / relative).is_file()
     assert not (workspace.root / "史实").exists()
-    assert not (workspace.root / "伏笔").exists()
+    # 伏笔目录已是所有题材共有基础脚手架（per 2026-07-17）——
+    # 不再是 genre-specific 玄幻专属;言情项目同样会创建。
+    assert (workspace.root / "伏笔").is_dir()
+    assert (workspace.root / "伏笔" / "伏笔表.md").is_file()
 
 
 def test_create_workspace_other_genre_is_backward_compatible(tmp_path: Path) -> None:
@@ -222,8 +232,9 @@ def test_create_workspace_other_genre_is_backward_compatible(tmp_path: Path) -> 
     relative = _relative(workspace.created_files, workspace.root)
     assert relative == set(EXPECTED_FILES)
     assert not (workspace.root / "史实").exists()
-    assert not (workspace.root / "伏笔").exists()
     assert not (workspace.root / "人设").exists()
+    # 伏笔表是所有题材共有,其他题材也需要铺设。
+    assert (workspace.root / "伏笔" / "伏笔表.md").is_file()
 
 
 def test_create_workspace_unknown_genre_falls_back_to_other(tmp_path: Path) -> None:
@@ -232,8 +243,9 @@ def test_create_workspace_unknown_genre_falls_back_to_other(tmp_path: Path) -> N
     relative = _relative(workspace.created_files, workspace.root)
     assert relative == set(EXPECTED_FILES)
     assert "史实" not in relative
-    assert "伏笔" not in relative
     assert "人设" not in relative
+    # 伏笔表是所有题材共有,连 unknown 题材都有。
+    assert "伏笔/伏笔表.md" in relative
 
 
 def test_create_workspace_english_genre_aliases_resolve(tmp_path: Path) -> None:
@@ -242,8 +254,11 @@ def test_create_workspace_english_genre_aliases_resolve(tmp_path: Path) -> None:
     workspace_h = create_workspace("c1", tmp_path, genre="history")
 
     assert "大纲/境界表.md" in _relative(workspace_x.created_files, workspace_x.root)
-    assert "人设/男主.md" in _relative(workspace_r.created_files, workspace_r.root)
+    assert "大纲/感情线时间轴.md" in _relative(workspace_r.created_files, workspace_r.root)
     assert "史实/年表.md" in _relative(workspace_h.created_files, workspace_h.root)
+    # 三个英文别名项目均含基础伏笔表（所有题材共有）。
+    for ws in (workspace_x, workspace_r, workspace_h):
+        assert "伏笔/伏笔表.md" in _relative(ws.created_files, ws.root)
 
 
 def test_create_workspace_writes_genre_line_in_agent_md(tmp_path: Path) -> None:
@@ -363,9 +378,10 @@ def test_apply_genre_scaffolding_handles_multiple_genres(tmp_path: Path) -> None
     created = apply_genre_scaffolding(project, ["历史", "玄幻"])
 
     relative = sorted(p.relative_to(project).as_posix() for p in created)
-    assert relative == sorted(
-        HISTORY_FILES + XUANHUAN_FILES
-    ), f"expected history + xuanhuan scaffolds, got {relative}"
+    assert relative == sorted(HISTORY_FILES + ["大纲/境界表.md"]), (
+        f"expected history + xuanhuan scaffolds (without 伏笔/伏笔表.md, "
+        f"which is base scaffold per 2026-07-17), got {relative}"
+    )
 
 
 def test_apply_genre_scaffolding_skips_existing_files(tmp_path: Path) -> None:
@@ -388,7 +404,8 @@ def test_apply_genre_scaffolding_skips_existing_files(tmp_path: Path) -> None:
     second = apply_genre_scaffolding(project, ["历史", "玄幻"])
 
     relative = sorted(p.relative_to(project).as_posix() for p in second)
-    assert relative == sorted(XUANHUAN_FILES)
+    # 玄幻专属只剩境界表;伏笔已迁到 base scaffold,apply_genre 不再创建。
+    assert relative == sorted(["大纲/境界表.md"])
     # 历史文件未被改写
     assert (project / "史实" / "年表.md").read_text(encoding="utf-8") == user_note
 

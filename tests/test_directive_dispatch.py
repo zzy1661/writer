@@ -295,6 +295,49 @@ def test_engine_dispatches_character_skill(tmp_path: Path) -> None:
     assert not any(e.reason == "aborted" for e in done_events)
 
 
+def test_engine_dispatches_foreshadow_skill(tmp_path: Path) -> None:
+    """`/伏笔` reaches the directive body via ``built_directive_registry`` (per 2026-07-17).
+
+    与 :func:`test_engine_dispatches_character_skill` 对称 —— 验证 shipped 层
+    包含 ``/伏笔`` SKILL.md + 路由分派 + ``safe_read_file`` 路径下的 ``Done``。
+    """
+
+    from writer.skills import built_directive_registry
+
+    # 1. directive_registry picks up /伏笔 shipped even without project root.
+    registry = built_directive_registry(project_root=None)
+    directive = registry.get("/伏笔")
+    assert directive is not None, "/伏笔 must be shipped"
+    assert "foreshadow-schema.md" in set(
+        directive.references or {}
+    ), "shipped /伏笔 must reference foreshadow-schema.md"
+
+    # 2. router captures the slash command.
+    from writer.routing import RuleBasedIntentRouter
+
+    action = RuleBasedIntentRouter().route("/伏笔 张三左手伤疤", _project_state="S4")
+    assert action.command == "/伏笔"
+    assert action.action_type == "run_command"
+
+    # 3. runner dispatches to _run_directive (rule-only preview).
+    workspace = create_workspace("foreshadow-skill", tmp_path)
+    deps = _stub_deps(workspace.root)
+    events = _run_runner_sync(
+        RunnerContext(
+            user_input="/伏笔 张三左手伤疤来历",
+            project_root=workspace.root,
+        ),
+        deps,
+    )
+
+    done_events = [e for e in events if isinstance(e, Done)]
+    assert done_events, "expected a terminal Done event"
+    answered = [e for e in done_events if e.reason == "answered"]
+    assert answered, "expected Done(reason='answered') from rule-only preview"
+    assert answered[0].payload.get("directive") == "/伏笔"
+    assert not any(e.reason == "aborted" for e in done_events)
+
+
 # ---------------------------------------------------------------------------
 # resolve_references is exercised via the engine path
 # ---------------------------------------------------------------------------

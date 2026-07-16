@@ -114,6 +114,16 @@ class RuleBasedIntentRouter:
                 workflow="review_chapter",
                 arguments={"raw": text},
             )
+        # per 2026-07-17: ``/伏笔`` 是 shipped directive（所有题材共有）,
+        # 必须先于 ``"伏笔" in text`` 子串匹配,否则 ``/伏笔 <描述>`` 会
+        # 被误派到 ``foreshadow_search`` 工具（读 ``伏笔.yaml``）。本 directive
+        # 是写 ``伏笔/伏笔表.md``,与 ``foreshadow_search`` 工具走的路径不同。
+        if text.startswith("/伏笔"):
+            return AgentAction(
+                action_type="run_command",
+                command="/伏笔",
+                role="story_agent",
+            )
         if "伏笔" in text or "F0" in text:
             return AgentAction(
                 action_type="call_tool",
@@ -130,7 +140,7 @@ class RuleBasedIntentRouter:
         return AgentAction(
             action_type="answer_directly",
             answer=(
-                "我可以处理 /init、/大纲、/目录、/人物、/创作、/审核 等写作命令。"
+                "我可以处理 /init、/大纲、/目录、/人物、/伏笔、/创作、/审核 等写作命令。"
                 f"你刚才说的是：{text}"
             ),
         )

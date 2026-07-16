@@ -227,16 +227,17 @@ def test_discover_directives_skips_missing_command(tmp_path: Path, caplog) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_discover_shipped_directives_returns_three() -> None:
-    """以 2026-07-16 现状：shipped 层 3 个 directive（/大纲 /目录 /人物）。
+def test_discover_shipped_directives_returns_four() -> None:
+    """以 2026-07-17 现状：shipped 层 4 个 directive（/大纲 /目录 /人物 /伏笔）。
 
     ``/续写`` / ``/改`` 已于 2026-07-09 落地删除；``/人物`` 在 2026-07-16 落地
-    成为第三个 directive。本测试仅锁现状命令集合。
+    成为第三个；``/伏笔`` 在 2026-07-17 落地成为第四个（所有题材共有）。本测试仅锁
+    现状命令集合。
     """
 
     directives = discover_shipped_directives()
     commands = sorted(d.command for d in directives)
-    assert commands == sorted(["/大纲", "/目录", "/人物"])
+    assert commands == sorted(["/大纲", "/目录", "/人物", "/伏笔"])
 
 
 def test_discover_shipped_directives_have_references() -> None:

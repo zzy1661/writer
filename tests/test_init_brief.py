@@ -150,6 +150,14 @@ def test_apply_genre_and_brief_creates_scaffold_and_writes_brief(
         "# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n",
         encoding="utf-8",
     )
+    # 伏笔/伏笔表.md 是所有题材共有基础脚手架（per 2026-07-17）——
+    # 正常由 ``create_workspace`` 创建；本测试手工建项目,显式补文件以
+    # 模拟生产路径,再验证 ``apply_genre_and_brief`` 对其是 no-op（additive）。
+    (project / "伏笔").mkdir()
+    (project / "伏笔" / "伏笔表.md").write_text(
+        "# 伏笔表\n\n| ID | 描述 | 埋伏章节 | 回收章节 | 标签 | 状态 |\n|----|------|---------|---------|------|------|\n",
+        encoding="utf-8",
+    )
 
     outcome = apply_genre_and_brief(
         project,
@@ -163,8 +171,10 @@ def test_apply_genre_and_brief_creates_scaffold_and_writes_brief(
     )
     assert "史实/年表.md" in relative
     assert "史实/人物.md" in relative
-    assert "伏笔/伏笔表.md" in relative
+    # 伏笔/伏笔表.md 已在 base scaffold 创建,apply_genre 不再添加。
+    assert "伏笔/伏笔表.md" not in relative
     assert (project / "大纲" / "境界表.md").is_file()
+    assert (project / "伏笔" / "伏笔表.md").is_file()
     assert (project / "创意" / "核心创意.md").is_file()
     assert outcome.brief_source == "fallback"
     assert "历史" in outcome.selected_genres
