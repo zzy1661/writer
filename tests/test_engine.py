@@ -46,6 +46,36 @@ def test_router_classifies_review_command() -> None:
     assert action.command == "/审核"
 
 
+def test_router_classifies_skeleton_command() -> None:
+    """``/骨架`` 派发到 ``skeleton_chapters`` workflow(per chg-skeleton-chapters-pr1)。"""
+
+    action = RuleBasedIntentRouter().route("/骨架 卷二", "S3")
+
+    assert action.action_type == "start_workflow"
+    assert action.workflow == "skeleton_chapters"
+    assert action.role == "story_agent"
+    assert action.command == "/骨架"
+    assert action.arguments == {"raw": "/骨架 卷二"}
+
+
+def test_router_classifies_skeleton_bare() -> None:
+    """``/骨架`` 裸调用(无参数)同样派发到 skeleton_chapters。"""
+
+    action = RuleBasedIntentRouter().route("/骨架", "S3")
+    assert action.action_type == "start_workflow"
+    assert action.workflow == "skeleton_chapters"
+    assert action.arguments == {"raw": "/骨架"}
+
+
+def test_router_fallback_mentions_skeleton() -> None:
+    """fallback answer 文案包含 ``/骨架``(per MEMORY 2026-07-17 节奏)。"""
+
+    action = RuleBasedIntentRouter().route("random prose", "S3")
+    assert action.action_type == "answer_directly"
+    assert action.answer is not None
+    assert "/骨架" in action.answer
+
+
 def test_router_classifies_tool_query() -> None:
     action = RuleBasedIntentRouter().route("查一下 F003 伏笔出现位置", "S2")
 
@@ -451,8 +481,14 @@ def test_production_deps_includes_all_registered_workflows() -> None:
 
     deps = _deps_with_real_prose()
 
+    # 每个 workflow 用能解析的最简 user_input(skeleton_chapters 严格要求 /骨架 前缀)
+    sample_inputs = {
+        "write_chapter": "ignored",
+        "review_chapter": "ignored",
+        "skeleton_chapters": "/骨架",
+    }
     for name in WORKFLOWS:
-        result = deps.run_workflow(name, _ctx("ignored"))
+        result = deps.run_workflow(name, _ctx(sample_inputs.get(name, "ignored")))
         # PR1: ``run_workflow`` returns a ``WorkflowResult``. Each
         # registered workflow must produce at least one chunk so the
         # engine has something to stream to the CLI.

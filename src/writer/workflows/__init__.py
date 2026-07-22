@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from writer.workflows.types import WorkflowResult
 
 from writer.workflows.review_chapter import run as review_chapter_run
+from writer.workflows.skeleton_chapters import run as skeleton_chapters_run
 from writer.workflows.types import WorkflowResult, workflow_result_from_iterable
 from writer.workflows.write_chapter import run as write_chapter_run
 
@@ -26,6 +27,7 @@ WorkflowStub = Callable[..., "WorkflowResult | Iterable[str]"]
 WORKFLOWS: dict[str, WorkflowStub] = {
     "write_chapter": write_chapter_run,
     "review_chapter": review_chapter_run,
+    "skeleton_chapters": skeleton_chapters_run,
 }
 
 
@@ -73,5 +75,6 @@ __all__ = [
     "WorkflowResult",
     "WorkflowStub",
     "run_workflow",
+    "skeleton_chapters_run",
     "workflow_result_from_iterable",
 ]

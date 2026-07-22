@@ -106,6 +106,18 @@ class RuleBasedIntentRouter:
                 workflow="write_chapter",
                 arguments={"raw": text},
             )
+        if text.startswith("/骨架"):
+            # per 2026-07-17 (chg-skeleton-chapters-pr1): ``/骨架`` 是 workflow
+            # 命令,派发到 ``skeleton_chapters`` 工作流(per TODO/骨架命令.md §2).
+            # 必须先于 ``/审核`` 分支(后者 catch-all ``startswith("/审核")``)与
+            # 通用 ``text.startswith("/")`` fallback.
+            return AgentAction(
+                action_type="start_workflow",
+                command="/骨架",
+                role="story_agent",
+                workflow="skeleton_chapters",
+                arguments={"raw": text},
+            )
         if text.startswith("/审核"):
             return AgentAction(
                 action_type="start_workflow",
@@ -140,7 +152,7 @@ class RuleBasedIntentRouter:
         return AgentAction(
             action_type="answer_directly",
             answer=(
-                "我可以处理 /init、/大纲、/目录、/人物、/伏笔、/创作、/审核 等写作命令。"
+                "我可以处理 /init、/大纲、/目录、/人物、/骨架、/伏笔、/创作、/审核 等写作命令。"
                 f"你刚才说的是：{text}"
             ),
         )

@@ -66,7 +66,7 @@ def _make_real_prose_deps() -> RunnerDeps:
 
 
 def test_workflows_registry_contains_expected_keys() -> None:
-    assert set(WORKFLOWS) == {"write_chapter", "review_chapter"}
+    assert set(WORKFLOWS) == {"write_chapter", "review_chapter", "skeleton_chapters"}
 
 
 def test_workflow_stubs_are_callable() -> None:

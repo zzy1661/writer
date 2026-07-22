@@ -13,8 +13,10 @@ import pytest
 
 from writer.workflows.params import (
     ReviewChapterArgs,
+    SkeletonArgs,
     WriteChapterArgs,
     extract_review_chapter_args,
+    extract_skeleton_args,
     extract_write_chapter_args,
 )
 
@@ -134,3 +136,70 @@ class TestDataclassShapes:
         a = ReviewChapterArgs(target="1.1", focus=("y",))
         b = ReviewChapterArgs(target="1.1", focus=("y",))
         assert a == b
+
+
+class TestExtractSkeletonArgs:
+    """``/骨架`` 命令参数解析契约（chg-skeleton-chapters-pr1, 2026-07-17）。"""
+
+    def test_empty_input_defaults_to_full(self) -> None:
+        result = extract_skeleton_args("/骨架")
+        assert result == SkeletonArgs(
+            mode="full", volume="", start="", end="",
+            rewrite=False, continue_=False, view=False,
+        )
+
+    def test_volume_token_parses(self) -> None:
+        result = extract_skeleton_args("/骨架 卷一")
+        assert result.mode == "volume"
+        assert result.volume == "卷一"
+
+    def test_volume_token_juan_er(self) -> None:
+        result = extract_skeleton_args("/骨架 卷二")
+        assert result.mode == "volume"
+        assert result.volume == "卷二"
+
+    def test_range_token_parses(self) -> None:
+        result = extract_skeleton_args("/骨架 1.1-1.20")
+        assert result.mode == "range"
+        assert result.start == "1.1"
+        assert result.end == "1.20"
+
+    def test_single_layer_range_rejected(self) -> None:
+        with pytest.raises(Exception) as exc_info:  # SkillError
+            extract_skeleton_args("/骨架 1-20")
+        assert "X.Y-X.Z" in str(exc_info.value)
+
+    def test_cross_volume_range_accepted(self) -> None:
+        # PR1 接受但解析为「start 卷起点到 end 卷终点」;PR2 细化语义。
+        result = extract_skeleton_args("/骨架 1.1-2.20")
+        assert result.mode == "range"
+        assert result.start == "1.1"
+        assert result.end == "2.20"
+
+    def test_unknown_form_rejected(self) -> None:
+        with pytest.raises(Exception) as exc_info:
+            extract_skeleton_args("/骨架 foo bar")
+        assert "X.Y-X.Z" in str(exc_info.value)
+
+    def test_extra_whitespace_stripped(self) -> None:
+        result = extract_skeleton_args("/骨架   卷一   ")
+        assert result.mode == "volume"
+        assert result.volume == "卷一"
+
+
+class TestSkeletonArgsDataclass:
+    def test_skeleton_args_is_frozen(self) -> None:
+        args = SkeletonArgs(mode="full")
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            args.mode = "volume"  # type: ignore[misc]
+
+    def test_skeleton_args_equality(self) -> None:
+        a = SkeletonArgs(mode="volume", volume="卷一")
+        b = SkeletonArgs(mode="volume", volume="卷一")
+        assert a == b
+
+    def test_continue_field_uses_trailing_underscore(self) -> None:
+        # Python keyword conflict: ``continue`` 是关键字,字段名用
+        # ``continue_``。验证默认 False,赋值是字面 ``continue_``。
+        args = SkeletonArgs(mode="full")
+        assert args.continue_ is False
