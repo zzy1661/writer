@@ -304,8 +304,11 @@ def test_engine_init_defaults_to_current_directory(
     assert done_events[-1].payload["project_root"] == str((tmp_path / "引擎测试").resolve())
 
 
-def test_engine_init_brief_at_s1_writes_core_idea(tmp_path: Path) -> None:
-    """Bound S1 project: ``/init <故事梗概>`` runs the creative brief flow."""
+def test_engine_init_brief_rejects_creative_text_at_s1(tmp_path: Path) -> None:
+    """Bound S1 project: ``/init <故事梗概>`` 形式已于 2026-07-23 废弃。
+
+    现在 ``/init`` 只生成基础目录/文件,启动创作请用 ``/start``。
+    """
 
     deps = production_deps()
     workspace = create_workspace("创意项目", tmp_path)
@@ -319,19 +322,25 @@ def test_engine_init_brief_at_s1_writes_core_idea(tmp_path: Path) -> None:
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
     done_events = [e for e in events if isinstance(e, Done)]
 
-    assert "已写入 创意/核心创意.md" in text_blob
-    assert (workspace.root / "创意" / "核心创意.md").is_file()
-    assert "## 基本要求" in (workspace.root / "AGENT.md").read_text(encoding="utf-8")
-    assert done_events[-1].reason == "answered"
+    # 不再写 ``创意/核心创意.md``
+    assert not (workspace.root / "创意" / "核心创意.md").is_file()
+    # 提示用户改用 /start
+    assert "如需启动创作" in text_blob
+    assert "/start" in text_blob
+    assert done_events[-1].reason == "aborted"
     assert done_events[-1].payload is not None
-    assert done_events[-1].payload.get("init_brief") is True
+    assert done_events[-1].payload.get("command") == "/init"
 
 
 def test_engine_init_brief_blocks_creative_text_at_s0(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """S0 + long creative pitch should steer user instead of creating a folder."""
+    """S0 + long creative pitch should steer user instead of creating a folder.
+
+    per 2026-07-23:错误文案从 "请先执行 writer new <书名>" 改为引导用户
+    编辑 ``创意/简介.md`` 后跑 ``/start``。
+    """
 
     monkeypatch.chdir(tmp_path)
     deps = production_deps()
@@ -346,7 +355,8 @@ def test_engine_init_brief_blocks_creative_text_at_s0(
     text_blob = "".join(e.text for e in events if isinstance(e, TextChunk))
     done_events = [e for e in events if isinstance(e, Done)]
 
-    assert "writer new <书名>" in text_blob
+    assert "/start" in text_blob
+    assert "简介.md" in text_blob
     assert done_events[-1].reason == "aborted"
 
 

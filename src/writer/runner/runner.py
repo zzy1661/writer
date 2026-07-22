@@ -50,13 +50,6 @@ from pathlib import Path
 from writer.project import (
     ProjectState,
     create_workspace,
-    detect_state,
-)
-from writer.project.init_brief import (
-    apply_init_brief,
-    extract_init_brief_text,
-    looks_like_creative_brief,
-    should_run_init_brief,
 )
 from writer.routing import AgentAction
 from writer.runner.config import RunnerConfig
@@ -181,13 +174,10 @@ class Runner:
             action = deps.route(ctx.user_input, ctx.project_state)
             yield ActionEvent(action=action)
 
-            if action.command == "/init" and action.action_type == "run_command":
-                async for event in self._maybe_run_init_brief_or_block(ctx):
-                    yield event
-                if _init_turn_handled(
-                    ctx.user_input, ctx.project_root, ctx.project_state
-                ):
-                    return
+            # per 2026-07-23: ``/init`` 不再走 explore brief 路径;
+            # ``/init <故事梗概>`` 由 ``_run_init_command`` 拒绝并提示
+            # 改用 ``/start``。``/init`` 唯一合法形式是 ``/init <项目名>``
+            # (向后兼容 ``writer new <书名>``)。
 
             # 先按 ``action.kind`` 派发（per ``fea-agent-mirror``）——
             # ``kind="agent"`` 的 action 走 agent 路径，无论底层
@@ -592,137 +582,48 @@ class Runner:
     # /init 派发
     # ------------------------------------------------------------------
 
-    async def _maybe_run_init_brief_or_block(
-        self,
-        ctx: RunnerContext,
-    ) -> AsyncIterator[TextChunk | Done]:
-        """在已绑定 S1 项目上处理 REPL ``/init <故事梗概>``，或引导无项目用户。
-
-        Note: REPL ``handle_repl_input`` 在 brief 形式下抢先消费 —— 调用
-        :func:`writer.cli._init_backend.apply_genre_and_brief` 完成多选题材
-        + 补脚手架 + 写 brief。本函数现在主要服务于非 REPL 调用方
-        （``Runner.run`` 直接驱动、SDK、e2e pipe 测试）以及无项目
-        / S2+ 状态引导提示。
-
-        per 2026-07-14 收紧：``/init`` 后只跟故事核心创意，不再支持
-        ``--brief`` / ``-b`` / ``--name`` / ``--dir`` 等 flag 形式。
-        """
-
-        if not should_run_init_brief(
-            ctx.user_input,
-            project_root=ctx.project_root,
-            project_state=ctx.project_state,
-        ):
-            rest = extract_init_brief_text(ctx.user_input)
-            if ctx.project_root is None and rest and looks_like_creative_brief(rest):
-                msg = (
-                    "看起来你在描述故事创意。请先执行 `writer new <书名>` "
-                    "创建项目并 cd 进入项目目录，再输入 /init <故事梗概> 填写创意。"
-                )
-                yield TextChunk(text=f"{msg}\n")
-                yield Done(
-                    reason="aborted",
-                    payload={"command": "/init", "error": msg},
-                )
-            return
-
-        brief = extract_init_brief_text(ctx.user_input)
-        if not brief:
-            msg = "用法：/init <故事核心创意>"
-            yield TextChunk(text=f"{msg}\n")
-            yield Done(reason="aborted", payload={"command": "/init", "error": msg})
-            return
-
-        if ctx.project_root is None:
-            msg = (
-                "请先执行 `writer new <书名>` 创建并绑定项目，"
-                "再输入 /init <故事梗概>。"
-            )
-            yield TextChunk(text=f"{msg}\n")
-            yield Done(reason="aborted", payload={"command": "/init", "error": msg})
-            return
-
-        state = detect_state(ctx.project_root)
-        if state != ProjectState.INITIALIZED:
-            description = state.value
-            msg = (
-                f"/init 创意访谈仅在 S1（初始化）可用；当前为 {description}。"
-                "可直接编辑 创意/核心创意.md。"
-            )
-            yield TextChunk(text=f"{msg}\n")
-            yield Done(
-                reason="aborted",
-                payload={
-                    "command": "/init",
-                    "project_state": state.value,
-                    "error": msg,
-                },
-            )
-            return
-
-        async for event in self._run_init_brief_command(ctx, brief):
-            yield event
-
-    async def _run_init_brief_command(
-        self,
-        ctx: RunnerContext,
-        brief: str,
-    ) -> AsyncIterator[TextChunk | Done]:
-        """将创意梗概展开写入 ``创意/核心创意.md`` 和 ``AGENT.md``。"""
-
-        cfg = self._cfg
-
-        if ctx.project_root is None:
-            msg = "未绑定项目，无法写入创意。"
-            yield TextChunk(text=f"{msg}\n")
-            yield Done(reason="aborted", payload={"command": "/init", "error": msg})
-            return
-
-        if not cfg.fast_mode:
-            yield TextChunk(text="[engine] /init → apply_init_brief\n")
-
-        # ``writer.agents.process_init_brief`` 是 ``chg-remove-roles``
-        # 清理后唯一幸存的 Python-side 能力；我们通过
-        # :func:`writer.project.init_brief.apply_init_brief` 调用它，
-        # 让 Runner 边界无需了解 Settings。
-        from writer.config import get_settings
-
-        result = apply_init_brief(
-            ctx.project_root, brief, settings=get_settings()
-        )
-        yield TextChunk(
-            text=f"已写入 创意/核心创意.md（来源: {result.source}）\n"
-            "已更新 AGENT.md 基本要求\n"
-        )
-        yield Done(
-            reason="answered",
-            payload={
-                "command": "/init",
-                "init_brief": True,
-                "source": result.source,
-                "project_state": ProjectState.INITIALIZED.value,
-            },
-        )
-
     async def _run_init_command(
         self,
         ctx: RunnerContext,
     ) -> AsyncIterator[TextChunk | Done]:
-        """从 ``/init <name>`` 创建项目 workspace 并返回其根目录。"""
+        """处理 ``/init <项目名>``(向后兼容 ``writer new <书名>``)。
+
+        per 2026-07-23: ``/init`` 只生成基础目录/文件,不再接受故事
+        梗概作为参数(那是 ``/start`` 的职责)。``/init <创意>`` 形式
+        会被拒绝并提示用户改用 ``/start`` —— 用户应该先把核心创意
+        写到 ``创意/简介.md``,然后跑 ``/start``。
+        """
 
         cfg = self._cfg
 
-        if not cfg.fast_mode:
-            yield TextChunk(text="[engine] /init → create_workspace\n")
+        rest = ctx.user_input.removeprefix("/init").strip()
 
-        name = ctx.user_input.removeprefix("/init").strip()
-        if not name:
+        # 拒绝「看起来像 brief」的输入:含中文/西文标点(句号/逗号),
+        # 或长度 > 30 字。短 token 仍按项目名处理(向后兼容)。
+        if rest and (
+            "。" in rest
+            or "，" in rest
+            or "," in rest
+            or len(rest) > 30
+        ):
+            msg = (
+                "/init 现在只生成基础目录/文件。"
+                "如需启动创作,请编辑 创意/简介.md 后运行 /start。"
+            )
+            yield TextChunk(text=f"{msg}\n")
+            yield Done(reason="aborted", payload={"command": "/init", "error": msg})
+            return
+
+        if not rest:
             msg = "用法：/init <项目名>。例如：/init 我的小说"
             yield TextChunk(text=f"{msg}\n")
             yield Done(reason="aborted", payload={"command": "/init", "error": msg})
             return
 
-        workspace = create_workspace(name, Path("."))
+        if not cfg.fast_mode:
+            yield TextChunk(text="[engine] /init → create_workspace\n")
+
+        workspace = create_workspace(rest, Path("."))
         yield TextChunk(text=f"已初始化项目: {workspace.root}\n")
         yield Done(
             reason="answered",
@@ -732,24 +633,6 @@ class Runner:
                 "project_state": ProjectState.INITIALIZED.value,
             },
         )
-
-
-def _init_turn_handled(
-    user_input: str,
-    project_root: Path | None,
-    project_state: str,
-) -> bool:
-    """当 ``/init`` 在状态矩阵校验之前已完整处理时返回 True。"""
-
-    if should_run_init_brief(
-        user_input,
-        project_root=project_root,
-        project_state=project_state,
-    ):
-        return True
-
-    rest = extract_init_brief_text(user_input)
-    return project_root is None and bool(rest) and looks_like_creative_brief(rest)
 
 
 __all__ = ["Runner"]

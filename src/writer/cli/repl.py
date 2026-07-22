@@ -1,12 +1,14 @@
 """REPL 交互层：交互式 writer 命令循环 + 引擎事件桥接。
 
-与 Typer 子命令层（``commands``）解耦；REPL ``/init <创意>`` 简洁形式
-进入 :mod:`writer.explore` 多轮 explore 模式，完成后复用
+与 Typer 子命令层（``commands``）解耦；``/init`` 仅生成基础目录/文件
+（创建项目请用 CLI 子命令 ``writer new <书名>``），``/start`` 通过读取
+``创意/简介.md``（用户主动填写的核心创意）启动 :mod:`writer.explore`
+多轮 explore 模式，完成后复用
 :func:`writer.explore._apply.apply_explore_outcome` 落盘。
 
-REPL 不再支持 ``/init --name X --dir Y`` flag 形式 —— 创建项目请用
-CLI 子命令 ``writer new <书名>``（per 2026-07-14 收紧）。``/init``
-后只允许跟故事核心创意。
+REPL 不再支持 ``/init <故事梗概>`` 形式 —— 启动创作请用 ``/start``
+（per 2026-07-23 产品流变更）。``/init`` 后只允许跟项目名（向后兼容
+``writer new <书名>``）。
 """
 
 from __future__ import annotations
@@ -60,6 +62,7 @@ HELP_COMMANDS = {"/帮助", "/help", "help"}
 # 放在这里 —— 现在由 DirectiveRegistry 提供（见 ``build_repl_commands``）。
 STATIC_REPL_COMMANDS = [
     ("/init", "初始化小说项目"),
+    ("/start", "读取 简介.md 启动 explore 多轮创作"),
     ("/创作", "创作指定章节或下一章"),
     ("/审核", "审核当前正文"),
     ("/骨架", "为每章生成「开头+结尾」骨架，落盘到 骨架/<卷>/第N章.md"),
@@ -146,38 +149,87 @@ def _confirm_recommended_genre(label: str) -> bool:
         return True
 
 
-def _try_handle_repl_init_explore(text: str, session: Engine) -> bool:
-    """REPL ``/init <brief>`` 的多轮 explore 处理器。
+def _handle_repl_start(text: str, session: Engine) -> bool:
+    """REPL ``/start`` 的 pre-hook：读 简介.md → 跑 explore → 落盘 → 提示。
 
-    短 token 仍返回 ``False`` 交给 engine；故事梗概则要求真实 LLM，
-    完成最多五轮合作式提问后一次性落盘。
+    替换旧 ``_try_handle_repl_init_explore``(/init <brief> 路径)的能力。
+    ``/start`` 通过 ``session.runner.deps.tool_runtime.safe_path`` 解析
+    ``创意/简介.md``(项目级 path safety,与 shipped directives 一致),
+    然后 :meth:`Path.read_text` 读取正文传入现有 :func:`run_explore`。
+
+    边界(per 2026-07-23):
+    - 无 project_root → 红色提示:请先 ``writer new <书名>``
+    - ``简介.md`` 不存在或空白 → 红色提示:请先写核心创意
+    - 无 ``WRITER_API_KEY`` → 红色提示:需配置 API Key
+    - ``KeyboardInterrupt``(用户在某轮答 ``/退出``)→ 红色提示
     """
 
-    from writer.project.init_brief import extract_init_brief_text, looks_like_creative_brief
-
-    rest = extract_init_brief_text(text)
-    if not looks_like_creative_brief(rest):
-        return False
+    rest = text.removeprefix("/start").strip()
+    if rest:
+        console.print(
+            "[yellow]/start 不接受参数。请编辑 创意/简介.md "
+            "写上核心创意后运行 /start。[/yellow]"
+        )
+        return True
 
     project_root = session.project_root or discover_project_root()
     if project_root is None:
         console.print(
             "[red]未找到小说项目。请先执行 `writer new <书名>` 创建项目，"
-            "再 cd 进入项目目录后使用 `/init <故事梗概>`。[/red]"
+            "再 cd 进入项目目录后使用 /start。[/red]"
+        )
+        return True
+
+    # 1. 通过 tool_runtime 解析 简介.md(项目级 path safety)。
+    #    不走 ``safe_read_file`` 工具,因为工具调用是 LLM 工具循环的契约;
+    #    这里只需 ``safe_path`` 验证后直接读文本,与 shipped directives
+    #    的路径越界检查一致。
+    from writer.tools.errors import ToolDeniedError
+
+    runner = session.runner
+    if runner is None:
+        console.print(
+            "[red]Engine 未初始化,无法读取简介.md。请重启 REPL 后再试。[/red]"
+        )
+        return True
+    tool_runtime = runner.deps.tool_runtime
+    try:
+        target = tool_runtime.safe_path("创意/简介.md")
+    except ToolDeniedError as exc:
+        console.print(f"[red]读取简介.md 失败：{exc}[/red]")
+        return True
+
+    try:
+        raw = target.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        console.print(
+            "[red]未找到 创意/简介.md。请先在文件中写上核心创意"
+            "（主角 / 题材 / 冲突），然后运行 /start。[/red]"
+        )
+        return True
+    except OSError as exc:
+        console.print(f"[red]读取简介.md 失败：{exc}[/red]")
+        return True
+
+    brief = raw.strip()
+    if not brief:
+        console.print(
+            "[red]简介.md 内容为空，请写上核心创意"
+            "（主角 / 题材 / 冲突）。[/red]"
         )
         return True
 
     settings = get_settings()
     if not settings.has_api_key:
         console.print(
-            "[red]`/init <故事梗概>` 的 explore 模式需要 WRITER_API_KEY。"
-            "请配置 API Key 后重试；`writer new <书名>` 仍可离线创建项目。[/red]"
+            "[red]/start 需要 WRITER_API_KEY。"
+            "请配置 API Key 后重启 REPL；`writer new <书名>` 仍可离线创建项目。[/red]"
         )
         return True
 
     try:
         outcome = run_explore(
-            brief=rest,
+            brief=brief,
             llm=get_llm(settings),
             console=console,
             prompt_session=_ACTIVE_PROMPT_SESSION,
@@ -195,22 +247,38 @@ def _try_handle_repl_init_explore(text: str, session: Engine) -> bool:
             outcome,
             settings=settings,
         )
+    except KeyboardInterrupt:
+        console.print("[red]explore 已取消。[/red]")
+        return True
     except Exception as exc:  # noqa: BLE001 — 把 LLM / 写入错误转成 UI 提示
-        console.print(f"[red]explore 初始化失败：{exc}[/red]")
+        console.print(f"[red]explore 启动失败：{exc}[/red]")
         return True
 
     session.refresh_project_genre()
+
     console.print(
-        f"[green]explore 初始化完成：题材 {', '.join(applied.selected_genres) or '其他'}；"
-        f"架构 {applied.architecture_name}；来源 {outcome.brief_source}[/green]"
+        f"[green]✓ explore 完成：[/green]"
+        f"题材={', '.join(applied.selected_genres) or '其他'}；"
+        f"架构={applied.architecture_name}；来源={outcome.brief_source}"
     )
     if applied.created_files:
-        console.print(f"[green]新建文件：[/green]{len(applied.created_files)} 个")
+        console.print("[green]新建文件：[/green]")
         for path in applied.created_files:
             console.print(f"  - {path}")
     if applied.genre_line_changed:
         console.print("[green]已更新 AGENT.md 题材行[/green]")
     console.print("[green]已更新 AGENT.md 基本要求[/green]")
+
+    console.print(
+        Panel(
+            "[cyan]/大纲[/cyan]    根据 AGENT.md 题材与架构方法生成大纲\n"
+            "[cyan]/目录[/cyan]    根据 AGENT.md 题材与架构方法及大纲生成章节目录\n"
+            "[cyan]/人物[/cyan]    用三重标签生成法创建角色卡\n"
+            "[cyan]/伏笔[/cyan]    在伏笔表中添加一条伏笔",
+            title="接下来可以执行",
+            border_style="cyan",
+        )
+    )
     return True
 
 
@@ -259,13 +327,15 @@ def handle_repl_input(line: str, session: Engine) -> bool:
         )
         return True
 
-    # ``/init <故事梗概>``：先于引擎分发拦截，进入 explore 多轮对话并
-    # 写入核心创意、基本要求与写作架构。判定条件：开头 ``/init`` 且
-    # 看起来像故事概要（``looks_like_creative_brief``）。helper 返回
-    # False（短 token / 项目名形式）时落给引擎。
-    # 不再支持 ``/init --name X --dir Y`` flag 形式 —— 创建项目请用 CLI
-    # 子命令 ``writer new <书名>``（per 2026-07-14）。
-    if text.startswith("/init ") and _try_handle_repl_init_explore(text, session):
+    # ``/init <故事梗概>`` 形式已于 2026-07-23 废弃 —— 启动创作请用
+    # ``/start``（读 ``创意/简介.md``）。``/init`` 现在只接受项目名
+    # （向后兼容 ``writer new <书名>``），由 engine ``_run_init_command``
+    # 处理；带"看起来像 brief"的输入会在 engine 层被拒绝。
+
+    # ``/start``：先于引擎分发拦截，读取 ``创意/简介.md`` 后跑 explore
+    # 多轮对话并落盘。helper 返回 False（参数解析失败）时落给引擎。
+    if text == "/start" or text.startswith("/start "):
+        _handle_repl_start(text, session)
         return True
 
     # 框架命令（退出/帮助/状态）之外的所有输入——斜杠命令与自然语言

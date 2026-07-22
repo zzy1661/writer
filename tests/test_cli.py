@@ -443,7 +443,7 @@ def test_repl_init_explore_creates_scaffold_and_writes_brief(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``/init <故事梗概>`` 在已存在项目上：补脚手架 + 写 brief。"""
+    """``/init <故事梗概>`` 形式已于 2026-07-23 废弃,REPL 会拒绝并提示改用 ``/start``。"""
 
     from writer.cli.main import handle_repl_input
     from writer.session import Engine
@@ -455,49 +455,24 @@ def test_repl_init_explore_creates_scaffold_and_writes_brief(
         "# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n",
         encoding="utf-8",
     )
-    # 显式把 session 绑定到项目（与 REPL 启动时的 ``set_project_root`` 等价）
     session = Engine()
     session.set_project_root(project)
 
-    from langchain_core.messages import AIMessage
-
-    import writer.cli.repl as repl
-    from writer.config import Settings
-
-    class _FakeExploreChat:
-        def invoke(self, messages: object) -> AIMessage:
-            return AIMessage(
-                content=(
-                    '{"status":"completed","outcome":'
-                    '{"core_idea":"# 扩写核心创意",'
-                    '"requirements":"- 篇幅: 30 万字",'
-                    '"genres":["历史"],"architecture":"三幕结构"}}'
-                )
-            )
-
-    monkeypatch.setattr(repl, "get_settings", lambda: Settings(api_key="sk-test"))
-    monkeypatch.setattr(repl, "get_llm", lambda settings: _FakeExploreChat())
-    monkeypatch.setattr(repl, "_confirm_recommended_genre", lambda label: True)
-
-    # 必须含 ``looks_like_creative_brief`` 识别的标点（``。`` 等）
     brief = (
         "林远穿越到了他写的游戏中。但他写的游戏是一个充满温馨故事的城市，"
         "然而他穿越到的这个世界是一个充满杀戮和罪恶的世界。"
     )
     assert handle_repl_input(f"/init {brief}", session) is True
 
-    # 多选提示走 ``["其他"]`` 兜底（非 TTY）—— ``其他`` 是 ``other`` 别名，
-    # :func:`format_genre_line` 过滤掉 → 无 ``题材:`` 行；brief 仍写入。
-    assert (project / "创意" / "核心创意.md").is_file()
-    agent_text = (project / "AGENT.md").read_text(encoding="utf-8")
-    assert "## 基本要求" in agent_text
+    # 不该创建 brief 文件 —— 应拒绝并提示改用 ``/start``
+    assert not (project / "创意" / "核心创意.md").is_file()
 
 
 def test_repl_init_explore_aborts_when_no_project_root(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """没有项目根目录时，REPL 拦截并提示，不进引擎。"""
+    """没有项目根目录时，REPL ``/init <故事梗概>`` 形式会被拒绝并提示，不进引擎。"""
 
     from writer.cli.main import handle_repl_input
     from writer.session import Engine
@@ -517,23 +492,20 @@ def test_repl_init_explore_aborts_when_no_project_root(
     assert not (tmp_path / "创意").exists()
 
 
-def test_repl_init_explore_helper_returns_false_for_non_brief(
+def test_repl_start_extra_args_rejected(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """短 token（``looks_like_project_name`` 形态）应落给引擎处理。"""
+    """``/start <额外参数>`` 在 REPL pre-hook 直接拒绝,提示用户改用编辑器。"""
 
-    from writer.cli.main import _try_handle_repl_init_explore
+    from writer.cli.main import handle_repl_input
     from writer.session import Engine
 
     project = tmp_path / "novel"
     project.mkdir()
-    (project / "AGENT.md").write_text(
-        "# novel\n\n## 当前状态\n\n- state: S1\n- label: 初始化\n",
-        encoding="utf-8",
-    )
+
     session = Engine()
     session.set_project_root(project)
 
-    # ``双生`` 短 token，不是 creative brief —— 让既有 argv 解析路径处理
-    assert _try_handle_repl_init_explore("/init 双生", session) is False
+    # 不该走到 LLM/explore 阶段 —— pre-hook 在解析参数时就拒绝
+    assert handle_repl_input("/start 程序员穿越唐朝", session) is True
+    assert not (project / "创意" / "核心创意.md").exists()

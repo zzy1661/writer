@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+from rich.panel import Panel
 from rich.table import Table
 
 from writer import __version__
@@ -89,6 +90,20 @@ def new_project_cmd(
         console.print(f"  - {path}")
     console.print(
         "[dim]项目 LLM 配置位于 .writer/config（优先级高于 .env）。[/dim]"
+    )
+
+    # per 2026-07-23: 引导用户编辑 ``创意/简介.md`` 并运行 ``/start``。
+    # ``/start`` 是 REPL 启动 explore 多轮创作的入口(取代旧的
+    # ``/init <brief>`` 形式)。
+    console.print(
+        Panel(
+            f"[bold cyan]{workspace.root.name}[/bold cyan] 已创建\n\n"
+            "下一步：\n"
+            "  1. 编辑 [bold]创意/简介.md[/bold] 写上核心创意\n"
+            "  2. 在 REPL 中运行 [bold]/start[/bold] 开始创作",
+            title="[green]✓[/green]",
+            border_style="green",
+        )
     )
 
 
