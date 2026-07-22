@@ -125,7 +125,7 @@ def run_explore(
 
         # ``ExploreQuestion`` 的校验器已保证 asking 分支有 question。
         assert response.question is not None
-        console.print(f"[cyan]? {response.question}[/cyan]")
+        console.print(f"[cyan]writer? {response.question}[/cyan]")
         answer = _read_answer(prompt_session)
         if _is_exit_answer(answer):
             raise KeyboardInterrupt

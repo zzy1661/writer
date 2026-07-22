@@ -302,7 +302,7 @@ async def _run_engine(
                 console.print(f"[green]✓ {name}: {output}[/green]")
             case Interrupt() as interrupt:
                 # 展示 prompt 并暂存到下一轮
-                console.print(f"[cyan]? {interrupt.prompt}[/cyan]")
+                console.print(f"[cyan]writer? {interrupt.prompt}[/cyan]")
                 session.set_pending_interrupt(interrupt)
             case Done(reason=r, payload=payload):
                 if payload is not None and "project_root" in payload:
